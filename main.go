@@ -2,19 +2,22 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
-	"log"
 
-	"k8s.io/client-go/pkg/api/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 
+	"time"
+
 	"github.com/vladimirvivien/ktop/kclient"
+	"github.com/vladimirvivien/ktop/ui"
+	"k8s.io/client-go/pkg/api/v1"
 )
 
 func main() {
+	// create k8s config
 	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	fmt.Println("Using kubeconfig: ", kubeconfig)
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
@@ -29,16 +32,26 @@ func main() {
 	}
 
 	k8s := kclient.New(clientset)
-	pods, err := k8s.GetPodsByNS("default")
-	if err != nil {
-		log.Fatal(err)
+	tui := ui.New()
+	if err := tui.Init(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
-	if len(pods) > 0 {
-		fmt.Printf("There are %d pods in the cluster\n", len(pods))
-		for _, pod := range pods {
-			fmt.Printf("pod %s\n", pod.GetName())
+
+	podsCh := make(chan []v1.Pod)
+	tui.RenderPods(podsCh)
+	go func() {
+		for {
+			pods, err := k8s.GetPodsByNS("")
+			if err != nil {
+				log.Fatal(err)
+			}
+			podsCh <- pods
+			<-time.After(2 * time.Second)
 		}
-	} else {
-		fmt.Println("No pods found!")
-	}
+	}()
+
+	tui.Open() // blocks
+	defer tui.Close()
+
 }
