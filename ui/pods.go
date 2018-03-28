@@ -29,8 +29,6 @@ func (ui *podsUI) layout() {
 	ui.table.PaddingRight = 0
 	ui.table.PaddingBottom = 0
 	ui.table.PaddingTop = 0
-	ui.table.Analysis()
-	ui.table.SetSize()
 	ui.table.Border = true
 	ui.table.BorderLabel = "Pods"
 
@@ -53,17 +51,20 @@ func (ui *podsUI) buffer() termui.Bufferer {
 }
 
 func (ui *podsUI) update(data [][]string) {
+	termui.Clear() // this causes screen flicker; if not called screen won't clean up
+	ui.layout()    // sucks, but must redraw component every time, or get array out-of-range panic
 	ui.table.Rows = data
-	ui.table.Analysis()
 	ui.table.SetSize()
-
+	ui.table.Analysis()
 	ui.grid.Width = termui.TermWidth()
-	ui.grid.Align()
+	ui.table.Width = ui.grid.Width
+	ui.table.Height = 5
 
 	if len(ui.table.Rows) > 1 {
 		ui.table.BgColors[0] = termui.ColorBlue
 		ui.table.FgColors[0] = termui.ColorWhite | termui.AttrBold
 	}
+
 	termui.Render(ui.grid)
 }
 
