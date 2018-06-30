@@ -55,7 +55,6 @@ func (c *NodeController) Run(stopCh <-chan struct{}) error {
 
 	c.factory.Start(stopCh)
 	if ok := cache.WaitForCacheSync(stopCh, c.nodeSynced); !ok {
-		log.Println("failed to wait for cache sync")
 		return fmt.Errorf("failed to wait for caches to sync")
 	}
 
