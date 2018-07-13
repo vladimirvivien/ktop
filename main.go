@@ -5,32 +5,22 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"path/filepath"
 	"time"
 
-	"k8s.io/api/core/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/gdamore/tcell"
-	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/client"
 	"github.com/vladimirvivien/ktop/controllers"
+	"github.com/vladimirvivien/ktop/ui"
 )
 
 type k8s struct {
-	clientset *kubernetes.Clientset
-	config    *restclient.Config
-	factory   informers.SharedInformerFactory
-}
-
-type screen struct {
-	app         *tview.Application
-	root        *tview.Flex
-	header      *tview.TextView
-	nodeInfo    *tview.TextView
-	deployments *tview.Table
+	clientset        kubernetes.Interface
+	config           *restclient.Config
+	factory          informers.SharedInformerFactory
+	metricsAvailable bool
 }
 
 func main() {
@@ -38,100 +28,64 @@ func main() {
 	flag.StringVar(&ns, "namespace", "default", "namespace")
 	flag.Parse()
 
-	// k8s connection setup
-	k8sClient, err := k8sCreate(ns)
+	//k8s connection setup
+	k8sClient, err := client.New(ns, time.Second*5)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	//  ***************** Draw UI *****************
+	appUI := ui.New()
 
-	scrn := drawScreen()
-	scrn.drawHeader(k8sClient.config.Host, ns)
+	overviewPg := ui.NewOverviewPage()
+	overviewCtrl := controllers.NewOverview(
+		k8sClient,
+		overviewPg,
+	)
 
-	// **************** Setup Controllers *********
+	appUI.AddPage("test", overviewPg.Root())
+	appUI.Focus(overviewPg.NodeInfo())
+
 	stopCh := make(chan struct{})
 	defer close(stopCh)
+	k8sClient.InformerFactory.Start(stopCh)
 
-	nodeCtrl := controllers.Nodes(k8sClient.clientset, 3*time.Second)
-	nodeCtrl.SyncFunc = func(nodes []*v1.Node) {
-		scrn.nodeInfo.Clear()
-		fmt.Fprintf(scrn.nodeInfo, "%-6s%-10s%-10s\n", "CPU", "Memory", "Pods")
-		if nodes != nil {
-			for _, node := range nodes {
-				cpu := node.Status.Capacity.Cpu().String()
-				mem := node.Status.Capacity.Memory().String()
-				pods := node.Status.Capacity.Pods().String()
-				fmt.Fprintf(scrn.nodeInfo, "%-6s%-10s%-10s\n", cpu, mem, pods)
-			}
-		}
-	}
-	go nodeCtrl.Run(stopCh)
+	go overviewCtrl.Run(stopCh)
 
-	// run the app
-	scrn.run()
-}
-
-func k8sCreate(namespace string) (*k8s, error) {
-	// create k8s config
-	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-	if err != nil {
-		return nil, err
+	if err := appUI.Start(); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, err
-	}
+	// // k8s connection setup
+	// k8sClient, err := k8sCreate(ns)
+	// if err != nil {
+	// 	log.Fatal(err)
+	// }
 
-	factory := informers.NewFilteredSharedInformerFactory(clientset, time.Second*3, namespace, nil)
+	// //  ***************** Draw UI *****************
 
-	return &k8s{clientset: clientset, config: config, factory: factory}, nil
-}
+	// scrn := drawScreen()
+	// scrn.drawHeader(k8sClient.config.Host, ns)
 
-func drawScreen() *screen {
-	header := tview.NewTextView().
-		SetDynamicColors(true)
-	header.SetBorder(true)
-	fmt.Fprint(header, "loading...")
+	// // **************** Setup Controllers *********
+	// stopCh := make(chan struct{})
+	// defer close(stopCh)
 
-	// nodeInfo := tview.NewTextView()
-	// nodeInfo.SetTitle("Cluster info").SetBorder(true)
+	// nodeCtrl := controllers.Nodes(k8sClient.clientset, 3*time.Second)
+	// nodeCtrl.SyncFunc = func(nodes []*v1.Node) {
+	// 	scrn.nodeInfo.Clear()
+	// 	fmt.Fprintf(scrn.nodeInfo, "%-6s%-10s%-10s\n", "CPU", "Memory", "Pods")
+	// 	if nodes != nil {
+	// 		for _, node := range nodes {
+	// 			cpu := node.Status.Capacity.Cpu().String()
+	// 			mem := node.Status.Capacity.Memory().String()
+	// 			pods := node.Status.Capacity.Pods().String()
+	// 			fmt.Fprintf(scrn.nodeInfo, "%-6s%-10s%-10s\n", cpu, mem, pods)
+	// 		}
+	// 	}
+	// }
+	// go nodeCtrl.Run(stopCh)
 
-	// deps := tview.NewTable()
-	// deps.SetBorder(true)
-	// deps.SetTitle("Workload")
-
-	// flex := tview.NewFlex().SetDirection(tview.FlexRow).
-	// 	AddItem(header, 3, 1, false).
-	// 	AddItem(nodeInfo, 0, 1, false).
-	// 	AddItem(deps, 0, 3, false)
-
-	app := tview.NewApplication()
-	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Rune() == 'q' {
-			app.Stop()
-		}
-		return event
-	})
-
-	return &screen{
-		app:         app,
-		root:        flex,
-		header:      header,
-		nodeInfo:    nodeInfo,
-		deployments: deps,
-	}
-}
-
-func (s *screen) run() {
-	if err := s.app.SetRoot(s.root, true).Run(); err != nil {
-		panic(err)
-	}
-}
-
-func (s *screen) drawHeader(host, ns string) {
-	s.header.Clear()
-	fmt.Fprintf(s.header, "[green]API server: [white]%s (namespace: %s)", host, ns)
+	// // run the app
+	// scrn.run()
 }

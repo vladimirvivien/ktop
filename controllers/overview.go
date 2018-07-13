@@ -4,27 +4,29 @@ import (
 	"fmt"
 
 	coreV1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/labels"
+	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/runtime"
-	informers "k8s.io/client-go/informers"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/client"
+	"github.com/vladimirvivien/ktop/ui"
 )
 
-type OverviewController struct {
+type Overview struct {
+	k8s        *client.K8sClient
 	nodeLister corelisters.NodeLister
 	nodeSynced cache.InformerSynced
-	nodeUI     *tview.TextView
-	rootUI     *tview.Flex
+	ui         *ui.OverviewPage
 }
 
-func Overview(factory informers.SharedInformerFactory) *OverviewController {
-	ctrl := new(OverviewController)
-
+func NewOverview(
+	k8s *client.K8sClient,
+	ui *ui.OverviewPage,
+) *Overview {
+	ctrl := &Overview{k8s: k8s, ui: ui}
 	// setup node callbacks
-	nodeInformer := factory.Core().V1().Nodes()
+	nodeInformer := k8s.InformerFactory.Core().V1().Nodes()
 	nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: ctrl.addNode,
 		UpdateFunc: func(old, new interface{}) {
@@ -44,33 +46,34 @@ func Overview(factory informers.SharedInformerFactory) *OverviewController {
 	return ctrl
 }
 
-func (c *OverviewController) RootUI() *tview.Flex {
-	return c.rootUI
-}
-
-func (c *OverviewController) addNode(obj interface{}) {
+func (c *Overview) addNode(obj interface{}) {
 
 }
 
-func (c *OverviewController) updateNode(obj interface{}) {
+func (c *Overview) updateNode(obj interface{}) {
 
 }
 
-func (c *OverviewController) deleteNode(obj interface{}) {
+func (c *Overview) deleteNode(obj interface{}) {
 
 }
 
-func (c *OverviewController) syncui() error {
-	nodes, err := c.nodeLister.List(labels.Everything())
+func (c *Overview) initList() error {
+	nodes, err := c.k8s.Clientset.CoreV1().Nodes().List(metaV1.ListOptions{})
 	if err != nil {
 		return err
 	}
-	c.syncNodes(nodes)
+
+	c.syncNodes(nodes.Items)
 	return nil
 }
 
-func (c *OverviewController) Run(stopCh <-chan struct{}) error {
+func (c *Overview) Run(stopCh <-chan struct{}) error {
 	defer runtime.HandleCrash()
+	c.ui.DrawHeader(c.k8s.Config.Host, c.k8s.Namespace)
+	if err := c.initList(); err != nil {
+		return err
+	}
 
 	if ok := cache.WaitForCacheSync(stopCh, c.nodeSynced); !ok {
 		return fmt.Errorf("failed to wait for caches to sync")
@@ -80,6 +83,29 @@ func (c *OverviewController) Run(stopCh <-chan struct{}) error {
 	return nil
 }
 
-func (c *OverviewController) syncNodes(nodes []*coreV1.Node) {
+func (c *Overview) syncNodes(nodes []coreV1.Node) {
+	nodeListRows := make([]ui.NodeRow, len(nodes))
+	for i, node := range nodes {
+		conds := node.Status.Conditions
+		row := ui.NodeRow{
+			Name:    node.Name,
+			Role:    nodeRole(node),
+			Status:  string(conds[len(conds)-1].Type),
+			Version: node.Status.NodeInfo.KubeletVersion,
+		}
+		nodeListRows[i] = row
+	}
+	c.ui.DrawNodeList(nodeListRows)
+}
 
+func isNodeMaster(node coreV1.Node) bool {
+	_, ok := node.Labels["node-role.kubernetes.io/master"]
+	return ok
+}
+
+func nodeRole(node coreV1.Node) string {
+	if isNodeMaster(node) {
+		return "Master"
+	}
+	return "Node"
 }
