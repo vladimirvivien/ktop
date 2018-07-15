@@ -11,6 +11,7 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics"
+	metricsclientset "k8s.io/metrics/pkg/client/clientset_generated/clientset"
 )
 
 type K8sClient struct {
@@ -19,6 +20,7 @@ type K8sClient struct {
 	Config              *restclient.Config
 	InformerFactory     informers.SharedInformerFactory
 	MetricsAPIAvailable bool
+	MetricsClient       metricsclientset.Interface
 }
 
 func New(namespace string, resyncPeriod time.Duration) (*K8sClient, error) {
@@ -35,13 +37,22 @@ func New(namespace string, resyncPeriod time.Duration) (*K8sClient, error) {
 
 	factory := informers.NewFilteredSharedInformerFactory(clientset, time.Second*3, namespace, nil)
 
-	return &K8sClient{
+	client := &K8sClient{
 		Namespace:           namespace,
 		Clientset:           clientset,
 		Config:              config,
 		InformerFactory:     factory,
 		MetricsAPIAvailable: isMetricAPIAvail(clientset.Discovery()),
-	}, nil
+	}
+
+	if client.MetricsAPIAvailable {
+		client.MetricsClient, err = metricsclientset.NewForConfig(config)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return client, nil
 }
 
 func isMetricAPIAvail(disco discovery.DiscoveryInterface) bool {
