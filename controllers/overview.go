@@ -48,6 +48,21 @@ func NewOverview(
 	return ctrl
 }
 
+func (c *Overview) Run(stopCh <-chan struct{}) error {
+	defer runtime.HandleCrash()
+	c.ui.DrawHeader(c.k8s.Config.Host, c.k8s.Namespace)
+	if err := c.initList(); err != nil {
+		return err
+	}
+
+	if ok := cache.WaitForCacheSync(stopCh, c.nodeSynced); !ok {
+		return fmt.Errorf("failed to wait for caches to sync")
+	}
+
+	<-stopCh
+	return nil
+}
+
 func (c *Overview) addNode(obj interface{}) {
 
 }
@@ -67,6 +82,7 @@ func (c *Overview) initList() error {
 		return err
 	}
 
+	// get node metrics from /apis/metrics.k8s.io/v1beta1/nodes/
 	var nodeMetrics *metricsV1beta1.NodeMetricsList
 	if c.k8s.MetricsAPIAvailable {
 		nodeMetrics, err = c.k8s.MetricsClient.Metrics().NodeMetricses().List(metaV1.ListOptions{})
@@ -74,12 +90,13 @@ func (c *Overview) initList() error {
 
 	c.syncNodes(nodes.Items, nodeMetrics.Items)
 
-	// initial Pod list
+	// get pod list
 	pods, err := c.k8s.Clientset.CoreV1().Pods(c.k8s.Namespace).List(metaV1.ListOptions{})
 	if err != nil {
 		return err
 	}
 
+	// get pod metrics from /apis/metrics.k8s.io/v1beta1/namespaces/{ns}/pods/
 	var podMetrics *metricsV1beta1.PodMetricsList
 	if c.k8s.MetricsAPIAvailable {
 		podMetrics, err = c.k8s.MetricsClient.Metrics().PodMetricses(c.k8s.Namespace).List(metaV1.ListOptions{})
@@ -87,21 +104,6 @@ func (c *Overview) initList() error {
 
 	c.syncPods(pods.Items, podMetrics.Items)
 
-	return nil
-}
-
-func (c *Overview) Run(stopCh <-chan struct{}) error {
-	defer runtime.HandleCrash()
-	c.ui.DrawHeader(c.k8s.Config.Host, c.k8s.Namespace)
-	if err := c.initList(); err != nil {
-		return err
-	}
-
-	if ok := cache.WaitForCacheSync(stopCh, c.nodeSynced); !ok {
-		return fmt.Errorf("failed to wait for caches to sync")
-	}
-
-	<-stopCh
 	return nil
 }
 

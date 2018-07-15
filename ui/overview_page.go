@@ -86,7 +86,7 @@ func (p *OverviewPage) layout() {
 
 	page := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(p.header, 3, 1, true).
-		AddItem(p.nodeList, 0, 1, true).
+		AddItem(p.nodeList, 7, 1, true).
 		AddItem(p.podList, 0, 1, true)
 
 	p.root = page
@@ -158,7 +158,7 @@ func (p *OverviewPage) drawNodeListHeader() {
 
 func (p *OverviewPage) DrawPodList(rows []PodRow) {
 	p.podList.Clear()
-	p.drawNodeListHeader()
+	p.drawPodListHeader()
 	for i, row := range rows {
 		p.podList.SetCell(
 			i+1, 0,
@@ -167,35 +167,35 @@ func (p *OverviewPage) DrawPodList(rows []PodRow) {
 				SetAlign(tview.AlignLeft),
 		)
 
-		p.nodeList.SetCell(
+		p.podList.SetCell(
 			i+1, 1,
 			tview.NewTableCell(row.Status).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
-		p.nodeList.SetCell(
+		p.podList.SetCell(
 			i+1, 2,
 			tview.NewTableCell(row.Ready).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
-		p.nodeList.SetCell(
+		p.podList.SetCell(
 			i+1, 3,
 			tview.NewTableCell(row.Image).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
-		p.nodeList.SetCell(
+		p.podList.SetCell(
 			i+1, 4,
 			tview.NewTableCell(row.CPUUsage).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
-		p.nodeList.SetCell(
+		p.podList.SetCell(
 			i+1, 5,
 			tview.NewTableCell(row.MemUsage).
 				SetTextColor(tcell.ColorYellow).
@@ -205,8 +205,8 @@ func (p *OverviewPage) DrawPodList(rows []PodRow) {
 }
 
 func (p *OverviewPage) drawPodListHeader() {
-	for i, col := range p.nodeListCols {
-		p.nodeList.SetCell(0, i,
+	for i, col := range p.podListCols {
+		p.podList.SetCell(0, i,
 			tview.NewTableCell(col).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft).
