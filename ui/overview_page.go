@@ -29,22 +29,24 @@ type NodeRow struct {
 type PodRow struct {
 	Name,
 	Status,
-	Ready,
-	Image,
-	CPUUsage,
-	MemUsage string
-	CPUValue,
-	MemValue int64
+	Node,
+	IP string
+	PodCPUValue,
+	PodMemValue,
+	NodeCPUValue,
+	NodeMemValue int64
+	Volumes int
 }
 
 type WorkloadSummary struct {
 	DeploymentsTotal,
 	DeploymentsReady,
-	DeploymentsPending,
-	DaemonSetsRunning,
-	DaemonSetsPending,
-	ReplicaSetsRunning,
-	ReplicaSetsPending int
+	DaemonSetsTotal,
+	DaemonSetsReady,
+	ReplicaSetsTotal,
+	ReplicaSetsReady,
+	PodsTotal,
+	PodsReady int
 }
 
 type OverviewPage struct {
@@ -67,7 +69,7 @@ func NewOverviewPage(app *tview.Application) *OverviewPage {
 	p := &OverviewPage{
 		app:          app,
 		nodeListCols: []string{"NAME", "STATUS", "ROLE", "VERSION", "CPU", "MEMORY"},
-		podListCols:  []string{"NAME", "STATUS", "READY", "IMAGE", "CPU", "MEMORY"},
+		podListCols:  []string{"NAME", "STATUS", "IP", "NODE", "CPU", "MEMORY"},
 	}
 	p.layout()
 	return p
@@ -115,7 +117,7 @@ func (p *OverviewPage) layout() {
 	page := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(p.header, 3, 1, true).
 		AddItem(p.nodeList, 7, 1, true).
-		AddItem(p.workloadGrid, 7, 1, true).
+		AddItem(p.workloadGrid, 4, 1, true).
 		AddItem(p.podList, 0, 1, true)
 
 	p.root = page
@@ -139,10 +141,10 @@ func (p *OverviewPage) DrawNodeList(sortByCol int, rows []NodeRow) {
 	colorKeys := []string{"green", "yellow", "red"}
 
 	for i, row := range rows {
-		cpuRatio := getRatio(float64(row.CPUValue), float64(row.CPUAvailValue))
+		cpuRatio := ratio(float64(row.CPUValue), float64(row.CPUAvailValue))
 		cpuGraph := barGraph(10, cpuRatio, getColorKey(colorKeys, cpuRatio))
 
-		memRatio := getRatio(float64(row.MemValue), float64(row.MemAvailValue))
+		memRatio := ratio(float64(row.MemValue), float64(row.MemAvailValue))
 		memGraph := barGraph(10, memRatio, getColorKey(colorKeys, memRatio))
 
 		p.nodeList.SetCell(
@@ -229,6 +231,7 @@ func (p *OverviewPage) DrawPodList(sortByCol int, rows []PodRow) {
 		return rows[i].Name < rows[j].Name
 	})
 
+	colorKeys := []string{"green", "yellow", "red"}
 	p.drawPodListHeader()
 	for i, row := range rows {
 		p.podList.SetCell(
@@ -247,28 +250,33 @@ func (p *OverviewPage) DrawPodList(sortByCol int, rows []PodRow) {
 
 		p.podList.SetCell(
 			i+1, 2,
-			tview.NewTableCell(row.Ready).
+			tview.NewTableCell(row.IP).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
 		p.podList.SetCell(
 			i+1, 3,
-			tview.NewTableCell(row.Image).
+			tview.NewTableCell(row.Node).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
+		cpuRatio := ratio(float64(row.PodCPUValue), float64(row.NodeCPUValue))
+		cpuGraph := barGraph(10, cpuRatio, getColorKey(colorKeys, cpuRatio))
+		memRatio := ratio(float64(row.PodMemValue), float64(row.NodeMemValue))
+		memGraph := barGraph(10, memRatio, getColorKey(colorKeys, memRatio))
+
 		p.podList.SetCell(
 			i+1, 4,
-			tview.NewTableCell(row.CPUUsage).
+			tview.NewTableCell(fmt.Sprintf("[white][%s[white]] %02.1f%%", cpuGraph, cpuRatio*100)).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
 		p.podList.SetCell(
 			i+1, 5,
-			tview.NewTableCell(row.MemUsage).
+			tview.NewTableCell(fmt.Sprintf("[white][%s[white]] %02.1f%%", memGraph, memRatio*100)).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
@@ -291,7 +299,7 @@ func (p *OverviewPage) drawPodListHeader() {
 func (p *OverviewPage) DrawWorkloadGrid(wl WorkloadSummary) {
 	colorKeys := []string{"red", "yellow", "green"}
 
-	depRatio := getRatio(float64(wl.DeploymentsReady), float64(wl.DeploymentsTotal))
+	depRatio := ratio(float64(wl.DeploymentsReady), float64(wl.DeploymentsTotal))
 	depGraph := barGraph(10, depRatio, getColorKey(colorKeys, depRatio))
 	p.workloadGrid.SetCell(
 		0, 0,
@@ -307,51 +315,55 @@ func (p *OverviewPage) DrawWorkloadGrid(wl WorkloadSummary) {
 			SetExpansion(100),
 	)
 
+	dsRatio := ratio(float64(wl.DaemonSetsReady), float64(wl.DaemonSetsTotal))
+	dsGraph := barGraph(10, dsRatio, getColorKey(colorKeys, dsRatio))
 	p.workloadGrid.SetCell(
 		0, 2,
-		tview.NewTableCell("Pods").
-			SetTextColor(tcell.ColorYellow).
-			SetAlign(tview.AlignRight).
-			SetExpansion(100),
-	).SetCell(
-		0, 3,
-		tview.NewTableCell(fmt.Sprintf("%d", 12)).
-			SetTextColor(tcell.ColorYellow).
-			SetAlign(tview.AlignLeft).
-			SetExpansion(100),
-	)
-
-	p.workloadGrid.SetCell(
-		0, 4,
 		tview.NewTableCell("Daemon sets").
 			SetTextColor(tcell.ColorYellow).
 			SetAlign(tview.AlignRight).
 			SetExpansion(100),
 	).SetCell(
-		0, 5,
-		tview.NewTableCell(fmt.Sprintf("%d", 12)).
+		0, 3,
+		tview.NewTableCell(fmt.Sprintf("[white][%s[white]] %02.1f%%", dsGraph, dsRatio*100)).
 			SetTextColor(tcell.ColorYellow).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(100),
 	)
 
+	rsRatio := ratio(float64(wl.ReplicaSetsTotal), float64(wl.ReplicaSetsTotal))
+	rsGraph := barGraph(10, rsRatio, getColorKey(colorKeys, rsRatio))
 	p.workloadGrid.SetCell(
-		0, 6,
+		0, 4,
 		tview.NewTableCell("Replica sets").
 			SetTextColor(tcell.ColorYellow).
 			SetAlign(tview.AlignRight).
 			SetExpansion(100),
 	).SetCell(
-		0, 7,
-		tview.NewTableCell(fmt.Sprintf("%d", 12)).
+		0, 5,
+		tview.NewTableCell(fmt.Sprintf("[white][%s[white]] %02.1f%%", rsGraph, rsRatio*100)).
 			SetTextColor(tcell.ColorYellow).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(100),
 	)
-}
 
-func getRatio(val0, val1 float64) float64 {
-	return val0 / val1
+	podsRatio := ratio(float64(wl.PodsReady), float64(wl.PodsTotal))
+	podsGraph := barGraph(10, podsRatio, getColorKey(colorKeys, podsRatio))
+	p.workloadGrid.SetCell(
+		0, 6,
+		tview.NewTableCell("Pods").
+			SetTextColor(tcell.ColorYellow).
+			SetAlign(tview.AlignRight).
+			SetExpansion(100),
+	).SetCell(
+		0, 7,
+		tview.NewTableCell(fmt.Sprintf("[white][%s[white]] %02.1f%%", podsGraph, podsRatio*100)).
+			SetTextColor(tcell.ColorYellow).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(100),
+	)
+
+	p.app.Draw()
 }
 
 func barGraph(scale int, ratio float64, color string) string {
@@ -360,6 +372,17 @@ func barGraph(scale int, ratio float64, color string) string {
 	graphVal := int(math.Ceil(normVal))
 
 	var graph strings.Builder
+
+	// nothing to graph
+	if normVal == 0 {
+		graph.WriteString("[")
+		graph.WriteString("silver")
+		graph.WriteString("]")
+		for j := 0; j < (scale - graphVal); j++ {
+			graph.WriteString(".")
+		}
+		return graph.String()
+	}
 
 	graph.WriteString("[")
 	graph.WriteString(color)
@@ -384,4 +407,11 @@ func getColorKey(colors []string, ratio float64) string {
 		}
 	}
 	return ""
+}
+
+func ratio(val0, val1 float64) float64 {
+	if val1 <= 0 {
+		return 0
+	}
+	return val0 / val1
 }

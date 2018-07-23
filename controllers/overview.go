@@ -40,6 +40,10 @@ type Overview struct {
 	dsLister   appslisters.DaemonSetLister
 	dsSynced   cache.InformerSynced
 
+	rsInformer appsinformers.ReplicaSetInformer
+	rsLister   appslisters.ReplicaSetLister
+	rsSynced   cache.InformerSynced
+
 	ui *ui.OverviewPage
 }
 
@@ -102,6 +106,41 @@ func NewOverview(
 		},
 		DeleteFunc: ctrl.updateDeps,
 	})
+
+	ctrl.dsInformer = k8s.InformerFactory.Apps().V1().DaemonSets()
+	ctrl.dsLister = ctrl.dsInformer.Lister()
+	ctrl.dsSynced = ctrl.dsInformer.Informer().HasSynced
+
+	ctrl.dsInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: ctrl.updateDaemonSets,
+		UpdateFunc: func(old, new interface{}) {
+			newPod := new.(*appsV1.DaemonSet)
+			oldPod := old.(*appsV1.DaemonSet)
+			if newPod.ResourceVersion == oldPod.ResourceVersion {
+				return
+			}
+			ctrl.updateDaemonSets(new)
+		},
+		DeleteFunc: ctrl.updateDaemonSets,
+	})
+
+	ctrl.rsInformer = k8s.InformerFactory.Apps().V1().ReplicaSets()
+	ctrl.rsLister = ctrl.rsInformer.Lister()
+	ctrl.rsSynced = ctrl.rsInformer.Informer().HasSynced
+
+	ctrl.rsInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: ctrl.updateReplicaSets,
+		UpdateFunc: func(old, new interface{}) {
+			newPod := new.(*appsV1.ReplicaSet)
+			oldPod := old.(*appsV1.ReplicaSet)
+			if newPod.ResourceVersion == oldPod.ResourceVersion {
+				return
+			}
+			ctrl.updateReplicaSets(new)
+		},
+		DeleteFunc: ctrl.updateReplicaSets,
+	})
+
 	return ctrl
 }
 
@@ -149,6 +188,14 @@ func (c *Overview) updatePodList(obj interface{}) {
 }
 
 func (c *Overview) updateDeps(obj interface{}) {
+	c.syncWorkload()
+}
+
+func (c *Overview) updateDaemonSets(obj interface{}) {
+	c.syncWorkload()
+}
+
+func (c *Overview) updateReplicaSets(obj interface{}) {
 	c.syncWorkload()
 }
 
@@ -224,26 +271,38 @@ func (c *Overview) syncPodList() error {
 	pods := convertPodsPtr(podList)
 
 	// get pod metrics
-	var podMetrics []metricsV1beta1.PodMetrics
+	var podMetricsItems []metricsV1beta1.PodMetrics
+	var nodeMetricsItems []metricsV1beta1.NodeMetrics
 	if c.k8s.MetricsAPIAvailable {
-		metrics, err := c.k8s.MetricsClient.Metrics().PodMetricses(c.k8s.Namespace).List(metaV1.ListOptions{})
+		podMetrics, err := c.k8s.MetricsClient.Metrics().PodMetricses(c.k8s.Namespace).List(metaV1.ListOptions{})
 		if err != nil {
 			return err
 		}
-		podMetrics = metrics.Items
+		podMetricsItems = podMetrics.Items
+
+		nodeMetrics, err := c.k8s.MetricsClient.Metrics().NodeMetricses().List(metaV1.ListOptions{})
+		if err != nil {
+			return err
+		}
+		nodeMetricsItems = nodeMetrics.Items
+
 	}
 
 	podListRows := make([]ui.PodRow, len(pods))
 	for i, pod := range pods {
-		conds := pod.Status.Conditions
-		metrics := getMetricsByPodName(podMetrics, pod.Name)
-		totalCpu, totalMem := getPodMetricsTotal(metrics)
+		podMetrics := getMetricsByPodName(podMetricsItems, pod.Name)
+		totalCpu, totalMem := getPodMetricsTotal(podMetrics)
+		nodeMetrics := getMetricsByNodeName(nodeMetricsItems, pod.Spec.NodeName)
 		row := ui.PodRow{
-			Name:     pod.Name,
-			Status:   string(conds[len(conds)-1].Type),
-			Ready:    "",
-			CPUUsage: totalCpu.String(),
-			MemUsage: totalMem.String(),
+			Name:         pod.Name,
+			Status:       string(pod.Status.Phase),
+			IP:           pod.Status.PodIP,
+			Node:         pod.Spec.NodeName,
+			Volumes:      len(pod.Spec.Volumes),
+			NodeCPUValue: nodeMetrics.Usage.Cpu().MilliValue(),
+			NodeMemValue: nodeMetrics.Usage.Memory().MilliValue(),
+			PodCPUValue:  totalCpu.MilliValue(),
+			PodMemValue:  totalMem.MilliValue(),
 		}
 		podListRows[i] = row
 	}
@@ -253,15 +312,34 @@ func (c *Overview) syncPodList() error {
 }
 
 func (c *Overview) syncWorkload() error {
+	summary := ui.WorkloadSummary{}
+
 	deps, err := c.depLister.List(labels.Everything())
 	if err != nil {
 		return err
 	}
-
-	summary := ui.WorkloadSummary{}
 	summary.DeploymentsTotal, summary.DeploymentsReady = getDeploymentSummary(deps)
 
+	daemonSets, err := c.dsLister.List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	summary.DaemonSetsTotal, summary.DaemonSetsReady = getDaemonSetSummary(daemonSets)
+
+	reps, err := c.rsLister.List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	summary.ReplicaSetsTotal, summary.ReplicaSetsReady = getReplicaSetSummary(reps)
+
+	pods, err := c.podLister.List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	summary.PodsTotal, summary.PodsReady = getPodSummary(pods)
+
 	c.ui.DrawWorkloadGrid(summary)
+
 	return nil
 }
 
@@ -282,6 +360,10 @@ func nodeRole(node coreV1.Node) string {
 		return "Master"
 	}
 	return "Node"
+}
+
+func isPodRunning(pod coreV1.Pod) bool {
+	return pod.Status.Phase == coreV1.PodRunning
 }
 
 func getMetricsByNodeName(metrics []metricsV1beta1.NodeMetrics, nodeName string) metricsV1beta1.NodeMetrics {
@@ -311,10 +393,36 @@ func getPodMetricsTotal(metrics metricsV1beta1.PodMetrics) (totalCpu, totalMem r
 	return
 }
 
-func getDeploymentSummary(deployments []*appsV1.Deployment) (desiredReplicas, readyReplicas int) {
+func getDeploymentSummary(deployments []*appsV1.Deployment) (desired, ready int) {
 	for _, deploy := range deployments {
-		desiredReplicas += int(deploy.Status.Replicas)
-		readyReplicas += int(deploy.Status.ReadyReplicas)
+		desired += int(deploy.Status.Replicas)
+		ready += int(deploy.Status.ReadyReplicas)
+	}
+	return
+}
+
+func getDaemonSetSummary(dmnSets []*appsV1.DaemonSet) (desired, ready int) {
+	for _, ds := range dmnSets {
+		desired += int(ds.Status.DesiredNumberScheduled)
+		ready += int(ds.Status.NumberReady)
+	}
+	return
+}
+
+func getReplicaSetSummary(repSets []*appsV1.ReplicaSet) (desired, ready int) {
+	for _, rs := range repSets {
+		desired += int(rs.Status.Replicas)
+		ready += int(rs.Status.ReadyReplicas)
+	}
+	return
+}
+
+func getPodSummary(pods []*coreV1.Pod) (desired, ready int) {
+	desired = len(pods)
+	for _, pod := range pods {
+		if isPodRunning(*pod) {
+			ready++
+		}
 	}
 	return
 }
