@@ -2,6 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"math"
+	"sort"
+	"strings"
 
 	"github.com/gdamore/tcell"
 
@@ -14,9 +17,13 @@ type NodeRow struct {
 	Role,
 	Version,
 	CPUUsage,
-	MemUsage string
+	CPUAvail string
 	CPUValue,
-	MemValue int64
+	CPUAvailValue int64
+	MemUsage,
+	MemAvail string
+	MemValue,
+	MemAvailValue int64
 }
 
 type PodRow struct {
@@ -30,7 +37,18 @@ type PodRow struct {
 	MemValue int64
 }
 
+type WorkloadSummary struct {
+	DeploymentsTotal,
+	DeploymentsReady,
+	DeploymentsPending,
+	DaemonSetsRunning,
+	DaemonSetsPending,
+	ReplicaSetsRunning,
+	ReplicaSetsPending int
+}
+
 type OverviewPage struct {
+	app    *tview.Application
 	root   *tview.Flex
 	header *tview.TextView
 
@@ -38,13 +56,16 @@ type OverviewPage struct {
 	nodeListCols   []string
 	nodeList       *tview.Table
 
+	workloadGrid *tview.Table
+
 	podListFormat string
 	podListCols   []string
 	podList       *tview.Table
 }
 
-func NewOverviewPage() *OverviewPage {
+func NewOverviewPage(app *tview.Application) *OverviewPage {
 	p := &OverviewPage{
+		app:          app,
 		nodeListCols: []string{"NAME", "STATUS", "ROLE", "VERSION", "CPU", "MEMORY"},
 		podListCols:  []string{"NAME", "STATUS", "READY", "IMAGE", "CPU", "MEMORY"},
 	}
@@ -60,7 +81,7 @@ func (p *OverviewPage) Header() tview.Primitive {
 	return p.header
 }
 
-func (p *OverviewPage) NodeInfo() tview.Primitive {
+func (p *OverviewPage) NodeList() tview.Primitive {
 	return p.nodeList
 }
 
@@ -73,9 +94,16 @@ func (p *OverviewPage) layout() {
 	p.nodeList = tview.NewTable()
 	p.nodeList.SetBorder(true)
 	p.nodeList.SetBorders(false)
-	p.nodeList.SetTitle(" Cluster Nodes ")
+	p.nodeList.SetTitle(" Cluster ")
 	p.nodeList.SetTitleAlign(tview.AlignLeft)
 	p.nodeList.SetBorderColor(tcell.ColorWhite)
+
+	p.workloadGrid = tview.NewTable()
+	p.workloadGrid.SetBorder(true)
+	p.workloadGrid.SetBorders(false)
+	p.workloadGrid.SetTitle(" Running Workload ")
+	p.workloadGrid.SetTitleAlign(tview.AlignLeft)
+	p.workloadGrid.SetBorderColor(tcell.ColorWhite)
 
 	p.podList = tview.NewTable()
 	p.podList.SetBorder(true)
@@ -87,6 +115,7 @@ func (p *OverviewPage) layout() {
 	page := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(p.header, 3, 1, true).
 		AddItem(p.nodeList, 7, 1, true).
+		AddItem(p.workloadGrid, 7, 1, true).
 		AddItem(p.podList, 0, 1, true)
 
 	p.root = page
@@ -95,53 +124,88 @@ func (p *OverviewPage) layout() {
 func (p *OverviewPage) DrawHeader(host, namespace string) {
 	p.header.Clear()
 	fmt.Fprintf(p.header, "[green]API server: [white]%s [green]namespace: [white]%s", host, namespace)
+	p.app.Draw()
 }
 
-func (p *OverviewPage) DrawNodeList(rows []NodeRow) {
-	p.nodeList.Clear()
+func (p *OverviewPage) DrawNodeList(sortByCol int, rows []NodeRow) {
+	if sortByCol > len(rows)-1 {
+		sortByCol = 0
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].Name < rows[j].Name
+	})
+
 	p.drawNodeListHeader()
+	colorKeys := []string{"green", "yellow", "red"}
+
 	for i, row := range rows {
+		cpuRatio := getRatio(float64(row.CPUValue), float64(row.CPUAvailValue))
+		cpuGraph := barGraph(10, cpuRatio, getColorKey(colorKeys, cpuRatio))
+
+		memRatio := getRatio(float64(row.MemValue), float64(row.MemAvailValue))
+		memGraph := barGraph(10, memRatio, getColorKey(colorKeys, memRatio))
+
 		p.nodeList.SetCell(
 			i+1, 0,
-			tview.NewTableCell(row.Name).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignLeft),
-		)
-
-		p.nodeList.SetCell(
+			&tview.TableCell{
+				Text:  row.Name,
+				Color: tcell.ColorYellow,
+				Align: tview.AlignLeft,
+			},
+		).SetCell(
 			i+1, 1,
-			tview.NewTableCell(row.Status).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignLeft),
-		)
-
-		p.nodeList.SetCell(
+			&tview.TableCell{
+				Text:  row.Status,
+				Color: tcell.ColorYellow,
+				Align: tview.AlignLeft,
+			},
+		).SetCell(
 			i+1, 2,
-			tview.NewTableCell(row.Role).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignLeft),
-		)
-
-		p.nodeList.SetCell(
+			&tview.TableCell{
+				Text:  row.Role,
+				Color: tcell.ColorYellow,
+				Align: tview.AlignLeft,
+			},
+		).SetCell(
 			i+1, 3,
-			tview.NewTableCell(row.Version).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignLeft),
-		)
-
-		p.nodeList.SetCell(
+			&tview.TableCell{
+				Text:  row.Version,
+				Color: tcell.ColorYellow,
+				Align: tview.AlignLeft,
+			},
+		).SetCell(
 			i+1, 4,
-			tview.NewTableCell(row.CPUUsage).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignLeft),
-		)
-
-		p.nodeList.SetCell(
+			&tview.TableCell{
+				Text:  fmt.Sprintf("[white][%s[white]] %-2.1f%%", cpuGraph, cpuRatio*100),
+				Color: tcell.ColorYellow,
+				Align: tview.AlignLeft,
+			},
+		).SetCell(
 			i+1, 5,
-			tview.NewTableCell(row.MemUsage).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignLeft),
+			&tview.TableCell{
+				Text:  fmt.Sprintf("[white][%s[white]] %02.1f%%", memGraph, memRatio*100),
+				Color: tcell.ColorYellow,
+				Align: tview.AlignLeft,
+			},
 		)
+	}
+	p.app.Draw()
+}
+
+func (p *OverviewPage) UpdateNodeMetricsRow(row NodeRow) {
+	for i := 0; i < p.nodeList.GetRowCount(); i++ {
+		cell := p.nodeList.GetCell(i, 0)
+		if cell.Text == row.Name {
+			cpuCell := p.nodeList.GetCell(i, 4)
+			if cpuCell != nil {
+				cpuCell.Text = row.CPUUsage
+			}
+
+			memCell := p.nodeList.GetCell(i, 5)
+			if memCell != nil {
+				memCell.Text = row.MemUsage
+			}
+		}
 	}
 }
 
@@ -149,15 +213,22 @@ func (p *OverviewPage) drawNodeListHeader() {
 	for i, col := range p.nodeListCols {
 		p.nodeList.SetCell(0, i,
 			tview.NewTableCell(col).
-				SetTextColor(tcell.ColorYellow).
+				SetTextColor(tcell.ColorWhite).
 				SetAlign(tview.AlignLeft).
+				SetBackgroundColor(tcell.ColorDarkGreen).
 				SetExpansion(100),
 		)
 	}
 }
 
-func (p *OverviewPage) DrawPodList(rows []PodRow) {
-	p.podList.Clear()
+func (p *OverviewPage) DrawPodList(sortByCol int, rows []PodRow) {
+	if sortByCol > len(rows)-1 {
+		sortByCol = 0
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].Name < rows[j].Name
+	})
+
 	p.drawPodListHeader()
 	for i, row := range rows {
 		p.podList.SetCell(
@@ -202,15 +273,115 @@ func (p *OverviewPage) DrawPodList(rows []PodRow) {
 				SetAlign(tview.AlignLeft),
 		)
 	}
+	p.app.Draw()
 }
 
 func (p *OverviewPage) drawPodListHeader() {
 	for i, col := range p.podListCols {
 		p.podList.SetCell(0, i,
 			tview.NewTableCell(col).
-				SetTextColor(tcell.ColorYellow).
+				SetTextColor(tcell.ColorWhite).
+				SetBackgroundColor(tcell.ColorDarkGreen).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(100),
 		)
 	}
+}
+
+func (p *OverviewPage) DrawWorkloadGrid(wl WorkloadSummary) {
+	colorKeys := []string{"red", "yellow", "green"}
+
+	depRatio := getRatio(float64(wl.DeploymentsReady), float64(wl.DeploymentsTotal))
+	depGraph := barGraph(10, depRatio, getColorKey(colorKeys, depRatio))
+	p.workloadGrid.SetCell(
+		0, 0,
+		tview.NewTableCell("Deployments").
+			SetTextColor(tcell.ColorYellow).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(100),
+	).SetCell(
+		0, 1,
+		tview.NewTableCell(fmt.Sprintf("[white][%s[white]] %02.1f%%", depGraph, depRatio*100)).
+			SetTextColor(tcell.ColorYellow).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(100),
+	)
+
+	p.workloadGrid.SetCell(
+		0, 2,
+		tview.NewTableCell("Pods").
+			SetTextColor(tcell.ColorYellow).
+			SetAlign(tview.AlignRight).
+			SetExpansion(100),
+	).SetCell(
+		0, 3,
+		tview.NewTableCell(fmt.Sprintf("%d", 12)).
+			SetTextColor(tcell.ColorYellow).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(100),
+	)
+
+	p.workloadGrid.SetCell(
+		0, 4,
+		tview.NewTableCell("Daemon sets").
+			SetTextColor(tcell.ColorYellow).
+			SetAlign(tview.AlignRight).
+			SetExpansion(100),
+	).SetCell(
+		0, 5,
+		tview.NewTableCell(fmt.Sprintf("%d", 12)).
+			SetTextColor(tcell.ColorYellow).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(100),
+	)
+
+	p.workloadGrid.SetCell(
+		0, 6,
+		tview.NewTableCell("Replica sets").
+			SetTextColor(tcell.ColorYellow).
+			SetAlign(tview.AlignRight).
+			SetExpansion(100),
+	).SetCell(
+		0, 7,
+		tview.NewTableCell(fmt.Sprintf("%d", 12)).
+			SetTextColor(tcell.ColorYellow).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(100),
+	)
+}
+
+func getRatio(val0, val1 float64) float64 {
+	return val0 / val1
+}
+
+func barGraph(scale int, ratio float64, color string) string {
+
+	normVal := ratio * float64(scale)
+	graphVal := int(math.Ceil(normVal))
+
+	var graph strings.Builder
+
+	graph.WriteString("[")
+	graph.WriteString(color)
+	graph.WriteString("]")
+
+	for i := 0; i < int(math.Min(float64(scale), float64(graphVal))); i++ {
+		graph.WriteString("|")
+	}
+
+	for j := 0; j < (scale - graphVal); j++ {
+		graph.WriteString(" ")
+	}
+	return graph.String()
+}
+
+func getColorKey(colors []string, ratio float64) string {
+	count := len(colors)
+	for i, color := range colors {
+		window := float64(i+1) / float64(count)
+		if ratio <= window {
+			return color
+		}
+	}
+	return ""
 }

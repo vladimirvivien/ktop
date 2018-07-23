@@ -15,17 +15,24 @@ type UI struct {
 func New() *UI {
 	app := tview.NewApplication()
 	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		if event.Rune() == 'q' {
+
+		if event.Key() == tcell.KeyEscape {
 			app.Stop()
 		}
+
 		return event
 	})
+
 	root := tview.NewPages()
 	app.SetRoot(root, true)
 	return &UI{
 		app:  app,
 		root: root,
 	}
+}
+
+func (ui *UI) Application() *tview.Application {
+	return ui.app
 }
 
 func (ui *UI) AddPage(title string, page tview.Primitive) {

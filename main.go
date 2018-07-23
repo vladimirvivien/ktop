@@ -35,15 +35,14 @@ func main() {
 	}
 
 	appUI := ui.New()
+	overviewPg := ui.NewOverviewPage(appUI.Application())
+	appUI.AddPage("test", overviewPg.Root())
+	appUI.Focus(overviewPg.NodeList())
 
-	overviewPg := ui.NewOverviewPage()
 	overviewCtrl := controllers.NewOverview(
 		k8sClient,
 		overviewPg,
 	)
-
-	appUI.AddPage("test", overviewPg.Root())
-	appUI.Focus(overviewPg.NodeInfo())
 
 	stopCh := make(chan struct{})
 	defer close(stopCh)
