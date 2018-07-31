@@ -7,6 +7,8 @@ import (
 
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/informers"
+	appsinformers "k8s.io/client-go/informers/apps/v1"
+	coreinformers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -15,10 +17,17 @@ import (
 )
 
 type K8sClient struct {
-	Namespace           string
-	Clientset           kubernetes.Interface
-	Config              *restclient.Config
-	InformerFactory     informers.SharedInformerFactory
+	Namespace string
+	Clientset kubernetes.Interface
+	Config    *restclient.Config
+
+	InformerFactory    informers.SharedInformerFactory
+	NodeInformer       coreinformers.NodeInformer
+	PodInformer        coreinformers.PodInformer
+	DeploymentInformer appsinformers.DeploymentInformer
+	DaemonSetInformer  appsinformers.DaemonSetInformer
+	ReplicaSetInformer appsinformers.ReplicaSetInformer
+
 	MetricsAPIAvailable bool
 	MetricsClient       metricsclientset.Interface
 }
@@ -42,6 +51,11 @@ func New(namespace string, resyncPeriod time.Duration) (*K8sClient, error) {
 		Clientset:           clientset,
 		Config:              config,
 		InformerFactory:     factory,
+		NodeInformer:        factory.Core().V1().Nodes(),
+		PodInformer:         factory.Core().V1().Pods(),
+		DeploymentInformer:  factory.Apps().V1().Deployments(),
+		DaemonSetInformer:   factory.Apps().V1().DaemonSets(),
+		ReplicaSetInformer:  factory.Apps().V1().ReplicaSets(),
 		MetricsAPIAvailable: isMetricAPIAvail(clientset.Discovery()),
 	}
 

@@ -2,126 +2,151 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
 )
 
-type UI struct {
-	app     *tview.Application
-	buttons *tview.Table
-	root    *tview.Pages
+var (
+	PageNames = []string{
+		"Overview",
+		"Deployments",
+	}
+
+	buttonUnselectedBgColor = tcell.ColorPaleGreen
+	buttonUnselectedFgColor = tcell.ColorDarkBlue
+	buttonSelectedBgColor   = tcell.ColorBlue
+	buttonSelectedFgColor   = tcell.ColorWhite
+)
+
+type Application struct {
+	app            *tview.Application
+	buttons        *tview.Table
+	buttonsBgColor *tcell.Color
+	root           *tview.Pages
+
+	refreshQ chan struct{}
 }
 
-func New() *UI {
+func New() *Application {
 	app := tview.NewApplication()
-	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-
-		if event.Key() == tcell.KeyEscape {
-			app.Stop()
-		}
-
-		return event
-	})
-
 	pages := tview.NewPages()
-
-	buttons := tview.NewTable()
-	buttons.SetBorder(true)
-	buttons.SetCell(0, 1,
-		&tview.TableCell{
-			Text:            "Overview (F1)",
-			Color:           tcell.ColorDarkBlue,
-			Align:           tview.AlignLeft,
-			BackgroundColor: tcell.ColorYellow,
-			Expansion:       100,
-		},
-	).SetCell(0, 2,
-		&tview.TableCell{
-			Text:            "Deployments (F2)",
-			Color:           tcell.ColorDimGray,
-			Align:           tview.AlignLeft,
-			BackgroundColor: tcell.ColorPaleGreen,
-			Expansion:       100,
-		},
-	).SetCell(0, 3,
-		&tview.TableCell{
-			Text:            "Replicas (F3)",
-			Color:           tcell.ColorDimGray,
-			Align:           tview.AlignLeft,
-			BackgroundColor: tcell.ColorPaleGreen,
-			Expansion:       100,
-		},
-	).SetCell(0, 4,
-		&tview.TableCell{
-			Text:            "Pods (F4)",
-			Color:           tcell.ColorDimGray,
-			Align:           tview.AlignLeft,
-			BackgroundColor: tcell.ColorPaleGreen,
-			Expansion:       100,
-		},
-	).SetCell(0, 5,
-		&tview.TableCell{
-			Text:            "Storage (F5)",
-			Color:           tcell.ColorDimGray,
-			Align:           tview.AlignLeft,
-			BackgroundColor: tcell.ColorPaleGreen,
-			Expansion:       100,
-		},
-	).SetCell(0, 6,
-		&tview.TableCell{
-			Text:            "Services (F6)",
-			Color:           tcell.ColorDimGray,
-			Align:           tview.AlignLeft,
-			BackgroundColor: tcell.ColorPaleGreen,
-			Expansion:       100,
-		},
-	).SetCell(0, 7,
-		&tview.TableCell{
-			Text:            "Configs (F7)",
-			Color:           tcell.ColorDimGray,
-			Align:           tview.AlignLeft,
-			BackgroundColor: tcell.ColorPaleGreen,
-			Expansion:       100,
-		},
-	)
+	buttons := makeButtons()
 
 	content := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(pages, 0, 1, true).
 		AddItem(buttons, 3, 1, true)
 
 	app.SetRoot(content, true)
-	return &UI{
-		app:  app,
-		root: pages,
+
+	ui := &Application{
+		app:      app,
+		root:     pages,
+		buttons:  buttons,
+		refreshQ: make(chan struct{}),
 	}
+
+	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+
+		switch event.Key() {
+		case tcell.KeyEsc:
+			app.Stop()
+		case tcell.KeyF1:
+			ui.switchPage(0)
+		case tcell.KeyF2:
+			ui.switchPage(1)
+		}
+
+		return event
+	})
+
+	// setup refresh queue
+	go func() {
+		for range ui.refreshQ {
+			ui.app.Draw()
+		}
+	}()
+
+	return ui
 }
 
-func (ui *UI) Application() *tview.Application {
+func (ui *Application) TviewApplication() *tview.Application {
 	return ui.app
 }
 
-func (ui *UI) AddPage(title string, page tview.Primitive) {
+func (ui *Application) AddPage(title string, page tview.Primitive) {
 	if ui.root == nil {
 		return
 	}
-	ui.root.AddPage(title, page, true, true)
+
+	// add new page invisible.
+	ui.root.AddPage(title, page, true, false)
 }
 
-func (ui *UI) Focus(t tview.Primitive) {
+func (ui *Application) Focus(t tview.Primitive) {
 	if ui.app == nil {
 		return
 	}
 	ui.app.SetFocus(t)
 }
 
-func (ui *UI) Start() error {
+func (ui *Application) Reresh() {
+	ui.refreshQ <- struct{}{}
+}
+
+func (ui *Application) ViewPage(index int) {
+	ui.switchPage(index)
+}
+
+func (ui *Application) Start() error {
 	if ui.app == nil {
 		return errors.New("tview.Application nil")
 	}
+
 	if err := ui.app.Run(); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func (ui *Application) switchPage(index int) {
+	row := 1
+	cols := ui.buttons.GetColumnCount()
+
+	for i := 0; i < cols-1; i++ {
+		cell := ui.buttons.GetCell(row, i)
+		if i == index {
+			cell.SetTextColor(buttonSelectedFgColor)
+			cell.SetBackgroundColor(buttonSelectedBgColor)
+		} else {
+			cell.SetTextColor(buttonUnselectedFgColor)
+			cell.SetBackgroundColor(buttonUnselectedBgColor)
+		}
+
+		ui.buttons.SetCell(row, i, cell)
+	}
+
+	ui.root.SwitchToPage(PageNames[index])
+	ui.Reresh()
+}
+
+func makeButtons() *tview.Table {
+	buttons := tview.NewTable()
+	buttons.SetBorder(true)
+
+	for i := 0; i < len(PageNames); i++ {
+		buttons.SetCell(0, i,
+			&tview.TableCell{
+				Text:            fmt.Sprintf("%s (F%d)", PageNames[i], i+1),
+				Color:           buttonUnselectedFgColor,
+				Align:           tview.AlignCenter,
+				BackgroundColor: buttonUnselectedBgColor,
+				Expansion:       100,
+			},
+		)
+	}
+
+	return buttons
 }

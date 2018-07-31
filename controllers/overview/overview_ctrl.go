@@ -1,4 +1,4 @@
-package controllers
+package overview
 
 import (
 	"fmt"
@@ -10,8 +10,6 @@ import (
 	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-	appsinformers "k8s.io/client-go/informers/apps/v1"
-	coreinformers "k8s.io/client-go/informers/core/v1"
 	appslisters "k8s.io/client-go/listers/apps/v1"
 	corelisters "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
@@ -21,44 +19,41 @@ import (
 	"github.com/vladimirvivien/ktop/ui"
 )
 
-type Overview struct {
+type overviewController struct {
 	k8s *client.K8sClient
+	app *ui.Application
 
-	nodeInformer coreinformers.NodeInformer
-	nodeLister   corelisters.NodeLister
-	nodeSynced   cache.InformerSynced
+	nodeLister corelisters.NodeLister
+	nodeSynced cache.InformerSynced
 
-	podInformer coreinformers.PodInformer
-	podLister   corelisters.PodLister
-	podSynced   cache.InformerSynced
+	podLister corelisters.PodLister
+	podSynced cache.InformerSynced
 
-	depInformer appsinformers.DeploymentInformer
-	depLister   appslisters.DeploymentLister
-	depSynced   cache.InformerSynced
+	depLister appslisters.DeploymentLister
+	depSynced cache.InformerSynced
 
-	dsInformer appsinformers.DaemonSetInformer
-	dsLister   appslisters.DaemonSetLister
-	dsSynced   cache.InformerSynced
+	dsLister appslisters.DaemonSetLister
+	dsSynced cache.InformerSynced
 
-	rsInformer appsinformers.ReplicaSetInformer
-	rsLister   appslisters.ReplicaSetLister
-	rsSynced   cache.InformerSynced
+	rsLister appslisters.ReplicaSetLister
+	rsSynced cache.InformerSynced
 
-	ui *ui.OverviewPage
+	page *overviewPage
 }
 
-func NewOverview(
+func New(
 	k8s *client.K8sClient,
-	ui *ui.OverviewPage,
-) *Overview {
-	ctrl := &Overview{k8s: k8s, ui: ui}
+	app *ui.Application,
+	pgTitle string,
+) *overviewController {
+	ctrl := &overviewController{k8s: k8s, app: app}
+	ctrl.page = newPage()
+	ctrl.app.AddPage(pgTitle, ctrl.page.root)
 
 	// setup node informer
-	ctrl.nodeInformer = k8s.InformerFactory.Core().V1().Nodes()
-	ctrl.nodeLister = ctrl.nodeInformer.Lister()
-	ctrl.nodeSynced = ctrl.nodeInformer.Informer().HasSynced
-
-	ctrl.nodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	ctrl.nodeLister = k8s.NodeInformer.Lister()
+	ctrl.nodeSynced = k8s.NodeInformer.Informer().HasSynced
+	k8s.NodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: ctrl.updateNodeList,
 		UpdateFunc: func(old, new interface{}) {
 			newNode := new.(*coreV1.Node)
@@ -72,11 +67,9 @@ func NewOverview(
 	})
 
 	// setup pod informer
-	ctrl.podInformer = k8s.InformerFactory.Core().V1().Pods()
-	ctrl.podLister = ctrl.podInformer.Lister()
-	ctrl.podSynced = ctrl.podInformer.Informer().HasSynced
-
-	ctrl.podInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	ctrl.podLister = k8s.PodInformer.Lister()
+	ctrl.podSynced = k8s.PodInformer.Informer().HasSynced
+	k8s.PodInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: ctrl.updatePodList,
 		UpdateFunc: func(old, new interface{}) {
 			newPod := new.(*coreV1.Pod)
@@ -90,11 +83,9 @@ func NewOverview(
 	})
 
 	// setup deployment informer
-	ctrl.depInformer = k8s.InformerFactory.Apps().V1().Deployments()
-	ctrl.depLister = ctrl.depInformer.Lister()
-	ctrl.depSynced = ctrl.depInformer.Informer().HasSynced
-
-	ctrl.depInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	ctrl.depLister = k8s.DeploymentInformer.Lister()
+	ctrl.depSynced = k8s.DeploymentInformer.Informer().HasSynced
+	k8s.DeploymentInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: ctrl.updateDeps,
 		UpdateFunc: func(old, new interface{}) {
 			newPod := new.(*appsV1.Deployment)
@@ -107,11 +98,9 @@ func NewOverview(
 		DeleteFunc: ctrl.updateDeps,
 	})
 
-	ctrl.dsInformer = k8s.InformerFactory.Apps().V1().DaemonSets()
-	ctrl.dsLister = ctrl.dsInformer.Lister()
-	ctrl.dsSynced = ctrl.dsInformer.Informer().HasSynced
-
-	ctrl.dsInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	ctrl.dsLister = k8s.DaemonSetInformer.Lister()
+	ctrl.dsSynced = k8s.DaemonSetInformer.Informer().HasSynced
+	k8s.DaemonSetInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: ctrl.updateDaemonSets,
 		UpdateFunc: func(old, new interface{}) {
 			newPod := new.(*appsV1.DaemonSet)
@@ -124,11 +113,9 @@ func NewOverview(
 		DeleteFunc: ctrl.updateDaemonSets,
 	})
 
-	ctrl.rsInformer = k8s.InformerFactory.Apps().V1().ReplicaSets()
-	ctrl.rsLister = ctrl.rsInformer.Lister()
-	ctrl.rsSynced = ctrl.rsInformer.Informer().HasSynced
-
-	ctrl.rsInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	ctrl.rsLister = k8s.ReplicaSetInformer.Lister()
+	ctrl.rsSynced = k8s.ReplicaSetInformer.Informer().HasSynced
+	k8s.ReplicaSetInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc: ctrl.updateReplicaSets,
 		UpdateFunc: func(old, new interface{}) {
 			newPod := new.(*appsV1.ReplicaSet)
@@ -144,7 +131,7 @@ func NewOverview(
 	return ctrl
 }
 
-func (c *Overview) Run(stopCh <-chan struct{}) error {
+func (c *overviewController) Run(stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
 
 	if err := c.initScreen(); err != nil {
@@ -161,7 +148,7 @@ func (c *Overview) Run(stopCh <-chan struct{}) error {
 	return nil
 }
 
-func (c *Overview) runMetricsUpdates(done <-chan struct{}) error {
+func (c *overviewController) runMetricsUpdates(done <-chan struct{}) error {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -179,28 +166,28 @@ func (c *Overview) runMetricsUpdates(done <-chan struct{}) error {
 	}
 }
 
-func (c *Overview) updateNodeList(obj interface{}) {
+func (c *overviewController) updateNodeList(obj interface{}) {
 	c.syncNodeList()
 }
 
-func (c *Overview) updatePodList(obj interface{}) {
+func (c *overviewController) updatePodList(obj interface{}) {
 	c.syncPodList()
 }
 
-func (c *Overview) updateDeps(obj interface{}) {
+func (c *overviewController) updateDeps(obj interface{}) {
 	c.syncWorkload()
 }
 
-func (c *Overview) updateDaemonSets(obj interface{}) {
+func (c *overviewController) updateDaemonSets(obj interface{}) {
 	c.syncWorkload()
 }
 
-func (c *Overview) updateReplicaSets(obj interface{}) {
+func (c *overviewController) updateReplicaSets(obj interface{}) {
 	c.syncWorkload()
 }
 
-func (c *Overview) initScreen() error {
-	c.ui.DrawHeader(c.k8s.Config.Host, c.k8s.Namespace)
+func (c *overviewController) initScreen() error {
+	c.page.drawHeader(c.k8s.Config.Host, c.k8s.Namespace)
 
 	if err := c.syncNodeList(); err != nil {
 		return err
@@ -220,8 +207,8 @@ func convertNodesPtr(nodes []*coreV1.Node) (out []coreV1.Node) {
 	return
 }
 
-func (c *Overview) syncNodeList() error {
-	nodeList, err := c.nodeInformer.Lister().List(labels.Everything())
+func (c *overviewController) syncNodeList() error {
+	nodeList, err := c.nodeLister.List(labels.Everything())
 	if err != nil {
 		return err
 	}
@@ -236,35 +223,36 @@ func (c *Overview) syncNodeList() error {
 		nodeMetrics = nodeMetricsList.Items
 	}
 
-	nodeListRows := make([]ui.NodeRow, len(nodes))
+	nodeListRows := make([]nodeRow, len(nodes))
 	for i, node := range nodes {
 		conds := node.Status.Conditions
 		availRes := node.Status.Allocatable
 		metrics := getMetricsByNodeName(nodeMetrics, node.Name)
-		row := ui.NodeRow{
-			Name:          node.Name,
-			Role:          nodeRole(node),
-			Status:        string(conds[len(conds)-1].Type),
-			Version:       node.Status.NodeInfo.KubeletVersion,
-			CPUAvail:      availRes.Cpu().String(),
-			CPUAvailValue: availRes.Cpu().MilliValue(),
-			CPUUsage:      metrics.Usage.Cpu().String(),
-			CPUValue:      metrics.Usage.Cpu().MilliValue(),
-			MemAvail:      availRes.Memory().String(),
-			MemAvailValue: availRes.Memory().MilliValue(),
-			MemUsage:      metrics.Usage.Memory().String(),
-			MemValue:      metrics.Usage.Memory().MilliValue(),
+		row := nodeRow{
+			name:          node.Name,
+			role:          nodeRole(node),
+			status:        string(conds[len(conds)-1].Type),
+			version:       node.Status.NodeInfo.KubeletVersion,
+			cpuAvail:      availRes.Cpu().String(),
+			cpuAvailValue: availRes.Cpu().MilliValue(),
+			cpuUsage:      metrics.Usage.Cpu().String(),
+			cpuValue:      metrics.Usage.Cpu().MilliValue(),
+			memAvail:      availRes.Memory().String(),
+			memAvailValue: availRes.Memory().MilliValue(),
+			memUsage:      metrics.Usage.Memory().String(),
+			memValue:      metrics.Usage.Memory().MilliValue(),
 		}
 		nodeListRows[i] = row
 	}
-	c.ui.DrawNodeList(0, nodeListRows)
+	c.page.drawNodeList(0, nodeListRows)
+	c.app.Reresh()
 
 	return nil
 }
 
-func (c *Overview) syncPodList() error {
+func (c *overviewController) syncPodList() error {
 	// get pod list
-	podList, err := c.podInformer.Lister().List(labels.Everything())
+	podList, err := c.podLister.List(labels.Everything())
 	if err != nil {
 		return err
 	}
@@ -288,57 +276,59 @@ func (c *Overview) syncPodList() error {
 
 	}
 
-	podListRows := make([]ui.PodRow, len(pods))
+	podListRows := make([]podRow, len(pods))
 	for i, pod := range pods {
 		podMetrics := getMetricsByPodName(podMetricsItems, pod.Name)
 		totalCpu, totalMem := getPodMetricsTotal(podMetrics)
 		nodeMetrics := getMetricsByNodeName(nodeMetricsItems, pod.Spec.NodeName)
-		row := ui.PodRow{
-			Name:         pod.Name,
-			Status:       string(pod.Status.Phase),
-			IP:           pod.Status.PodIP,
-			Node:         pod.Spec.NodeName,
-			Volumes:      len(pod.Spec.Volumes),
-			NodeCPUValue: nodeMetrics.Usage.Cpu().MilliValue(),
-			NodeMemValue: nodeMetrics.Usage.Memory().MilliValue(),
-			PodCPUValue:  totalCpu.MilliValue(),
-			PodMemValue:  totalMem.MilliValue(),
+		row := podRow{
+			name:         pod.Name,
+			status:       string(pod.Status.Phase),
+			ip:           pod.Status.PodIP,
+			node:         pod.Spec.NodeName,
+			volumes:      len(pod.Spec.Volumes),
+			nodeCPUValue: nodeMetrics.Usage.Cpu().MilliValue(),
+			nodeMemValue: nodeMetrics.Usage.Memory().MilliValue(),
+			podCPUValue:  totalCpu.MilliValue(),
+			podMemValue:  totalMem.MilliValue(),
 		}
 		podListRows[i] = row
 	}
-	c.ui.DrawPodList(0, podListRows)
+	c.page.drawPodList(0, podListRows)
+	c.app.Reresh()
 
 	return nil
 }
 
-func (c *Overview) syncWorkload() error {
-	summary := ui.WorkloadSummary{}
+func (c *overviewController) syncWorkload() error {
+	summary := workloadSummary{}
 
 	deps, err := c.depLister.List(labels.Everything())
 	if err != nil {
 		return err
 	}
-	summary.DeploymentsTotal, summary.DeploymentsReady = getDeploymentSummary(deps)
+	summary.deploymentsTotal, summary.deploymentsReady = getDeploymentSummary(deps)
 
 	daemonSets, err := c.dsLister.List(labels.Everything())
 	if err != nil {
 		return err
 	}
-	summary.DaemonSetsTotal, summary.DaemonSetsReady = getDaemonSetSummary(daemonSets)
+	summary.daemonSetsTotal, summary.daemonSetsReady = getDaemonSetSummary(daemonSets)
 
 	reps, err := c.rsLister.List(labels.Everything())
 	if err != nil {
 		return err
 	}
-	summary.ReplicaSetsTotal, summary.ReplicaSetsReady = getReplicaSetSummary(reps)
+	summary.replicaSetsTotal, summary.replicaSetsReady = getReplicaSetSummary(reps)
 
 	pods, err := c.podLister.List(labels.Everything())
 	if err != nil {
 		return err
 	}
-	summary.PodsTotal, summary.PodsReady = getPodSummary(pods)
+	summary.podsTotal, summary.podsReady = getPodSummary(pods)
 
-	c.ui.DrawWorkloadGrid(summary)
+	c.page.drawWorkloadGrid(summary)
+	c.app.Reresh()
 
 	return nil
 }

@@ -1,4 +1,4 @@
-package ui
+package overview
 
 import (
 	"fmt"
@@ -11,46 +11,46 @@ import (
 	"github.com/rivo/tview"
 )
 
-type NodeRow struct {
-	Name,
-	Status,
-	Role,
-	Version,
-	CPUUsage,
-	CPUAvail string
-	CPUValue,
-	CPUAvailValue int64
-	MemUsage,
-	MemAvail string
-	MemValue,
-	MemAvailValue int64
+type nodeRow struct {
+	name,
+	status,
+	role,
+	version,
+	cpuUsage,
+	cpuAvail string
+	cpuValue,
+	cpuAvailValue int64
+	memUsage,
+	memAvail string
+	memValue,
+	memAvailValue int64
 }
 
-type PodRow struct {
-	Name,
-	Status,
-	Node,
-	IP string
-	PodCPUValue,
-	PodMemValue,
-	NodeCPUValue,
-	NodeMemValue int64
-	Volumes int
+type podRow struct {
+	name,
+	status,
+	node,
+	ip string
+	podCPUValue,
+	podMemValue,
+	nodeCPUValue,
+	nodeMemValue int64
+	volumes int
 }
 
-type WorkloadSummary struct {
-	DeploymentsTotal,
-	DeploymentsReady,
-	DaemonSetsTotal,
-	DaemonSetsReady,
-	ReplicaSetsTotal,
-	ReplicaSetsReady,
-	PodsTotal,
-	PodsReady int
+type workloadSummary struct {
+	deploymentsTotal,
+	deploymentsReady,
+	daemonSetsTotal,
+	daemonSetsReady,
+	replicaSetsTotal,
+	replicaSetsReady,
+	podsTotal,
+	podsReady int
 }
 
-type OverviewPage struct {
-	app    *tview.Application
+type overviewPage struct {
+	//app    *tview.Application
 	root   *tview.Flex
 	header *tview.TextView
 
@@ -65,9 +65,8 @@ type OverviewPage struct {
 	podList       *tview.Table
 }
 
-func NewOverviewPage(app *tview.Application) *OverviewPage {
-	p := &OverviewPage{
-		app:          app,
+func newPage() *overviewPage {
+	p := &overviewPage{
 		nodeListCols: []string{"NAME", "STATUS", "ROLE", "VERSION", "CPU", "MEMORY"},
 		podListCols:  []string{"NAME", "STATUS", "IP", "NODE", "CPU", "MEMORY"},
 	}
@@ -75,19 +74,7 @@ func NewOverviewPage(app *tview.Application) *OverviewPage {
 	return p
 }
 
-func (p *OverviewPage) Root() tview.Primitive {
-	return p.root
-}
-
-func (p *OverviewPage) Header() tview.Primitive {
-	return p.header
-}
-
-func (p *OverviewPage) NodeList() tview.Primitive {
-	return p.nodeList
-}
-
-func (p *OverviewPage) layout() {
+func (p *overviewPage) layout() {
 	p.header = tview.NewTextView().
 		SetDynamicColors(true)
 	p.header.SetBorder(true)
@@ -123,55 +110,54 @@ func (p *OverviewPage) layout() {
 	p.root = page
 }
 
-func (p *OverviewPage) DrawHeader(host, namespace string) {
+func (p *overviewPage) drawHeader(host, namespace string) {
 	p.header.Clear()
 	fmt.Fprintf(p.header, "[green]API server: [white]%s [green]namespace: [white]%s", host, namespace)
-	p.app.Draw()
 }
 
-func (p *OverviewPage) DrawNodeList(sortByCol int, rows []NodeRow) {
+func (p *overviewPage) drawNodeList(sortByCol int, rows []nodeRow) {
 	if sortByCol > len(rows)-1 {
 		sortByCol = 0
 	}
 	sort.Slice(rows, func(i, j int) bool {
-		return rows[i].Name < rows[j].Name
+		return rows[i].name < rows[j].name
 	})
 
 	p.drawNodeListHeader()
 	colorKeys := []string{"green", "yellow", "red"}
 
 	for i, row := range rows {
-		cpuRatio := ratio(float64(row.CPUValue), float64(row.CPUAvailValue))
+		cpuRatio := ratio(float64(row.cpuValue), float64(row.cpuAvailValue))
 		cpuGraph := barGraph(10, cpuRatio, getColorKey(colorKeys, cpuRatio))
 
-		memRatio := ratio(float64(row.MemValue), float64(row.MemAvailValue))
+		memRatio := ratio(float64(row.memValue), float64(row.memAvailValue))
 		memGraph := barGraph(10, memRatio, getColorKey(colorKeys, memRatio))
 
 		p.nodeList.SetCell(
 			i+1, 0,
 			&tview.TableCell{
-				Text:  row.Name,
+				Text:  row.name,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
 		).SetCell(
 			i+1, 1,
 			&tview.TableCell{
-				Text:  row.Status,
+				Text:  row.status,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
 		).SetCell(
 			i+1, 2,
 			&tview.TableCell{
-				Text:  row.Role,
+				Text:  row.role,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
 		).SetCell(
 			i+1, 3,
 			&tview.TableCell{
-				Text:  row.Version,
+				Text:  row.version,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
@@ -191,27 +177,9 @@ func (p *OverviewPage) DrawNodeList(sortByCol int, rows []NodeRow) {
 			},
 		)
 	}
-	p.app.Draw()
 }
 
-func (p *OverviewPage) UpdateNodeMetricsRow(row NodeRow) {
-	for i := 0; i < p.nodeList.GetRowCount(); i++ {
-		cell := p.nodeList.GetCell(i, 0)
-		if cell.Text == row.Name {
-			cpuCell := p.nodeList.GetCell(i, 4)
-			if cpuCell != nil {
-				cpuCell.Text = row.CPUUsage
-			}
-
-			memCell := p.nodeList.GetCell(i, 5)
-			if memCell != nil {
-				memCell.Text = row.MemUsage
-			}
-		}
-	}
-}
-
-func (p *OverviewPage) drawNodeListHeader() {
+func (p *overviewPage) drawNodeListHeader() {
 	for i, col := range p.nodeListCols {
 		p.nodeList.SetCell(0, i,
 			tview.NewTableCell(col).
@@ -223,12 +191,12 @@ func (p *OverviewPage) drawNodeListHeader() {
 	}
 }
 
-func (p *OverviewPage) DrawPodList(sortByCol int, rows []PodRow) {
+func (p *overviewPage) drawPodList(sortByCol int, rows []podRow) {
 	if sortByCol > len(rows)-1 {
 		sortByCol = 0
 	}
 	sort.Slice(rows, func(i, j int) bool {
-		return rows[i].Name < rows[j].Name
+		return rows[i].name < rows[j].name
 	})
 
 	colorKeys := []string{"green", "yellow", "red"}
@@ -236,35 +204,35 @@ func (p *OverviewPage) DrawPodList(sortByCol int, rows []PodRow) {
 	for i, row := range rows {
 		p.podList.SetCell(
 			i+1, 0,
-			tview.NewTableCell(row.Name).
+			tview.NewTableCell(row.name).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
 		p.podList.SetCell(
 			i+1, 1,
-			tview.NewTableCell(row.Status).
+			tview.NewTableCell(row.status).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
 		p.podList.SetCell(
 			i+1, 2,
-			tview.NewTableCell(row.IP).
+			tview.NewTableCell(row.ip).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
 		p.podList.SetCell(
 			i+1, 3,
-			tview.NewTableCell(row.Node).
+			tview.NewTableCell(row.node).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
-		cpuRatio := ratio(float64(row.PodCPUValue), float64(row.NodeCPUValue))
+		cpuRatio := ratio(float64(row.podCPUValue), float64(row.nodeCPUValue))
 		cpuGraph := barGraph(10, cpuRatio, getColorKey(colorKeys, cpuRatio))
-		memRatio := ratio(float64(row.PodMemValue), float64(row.NodeMemValue))
+		memRatio := ratio(float64(row.podMemValue), float64(row.nodeMemValue))
 		memGraph := barGraph(10, memRatio, getColorKey(colorKeys, memRatio))
 
 		p.podList.SetCell(
@@ -281,10 +249,9 @@ func (p *OverviewPage) DrawPodList(sortByCol int, rows []PodRow) {
 				SetAlign(tview.AlignLeft),
 		)
 	}
-	p.app.Draw()
 }
 
-func (p *OverviewPage) drawPodListHeader() {
+func (p *overviewPage) drawPodListHeader() {
 	for i, col := range p.podListCols {
 		p.podList.SetCell(0, i,
 			tview.NewTableCell(col).
@@ -296,10 +263,10 @@ func (p *OverviewPage) drawPodListHeader() {
 	}
 }
 
-func (p *OverviewPage) DrawWorkloadGrid(wl WorkloadSummary) {
+func (p *overviewPage) drawWorkloadGrid(wl workloadSummary) {
 	colorKeys := []string{"red", "yellow", "green"}
 
-	depRatio := ratio(float64(wl.DeploymentsReady), float64(wl.DeploymentsTotal))
+	depRatio := ratio(float64(wl.deploymentsReady), float64(wl.deploymentsTotal))
 	depGraph := barGraph(10, depRatio, getColorKey(colorKeys, depRatio))
 	p.workloadGrid.SetCell(
 		0, 0,
@@ -315,7 +282,7 @@ func (p *OverviewPage) DrawWorkloadGrid(wl WorkloadSummary) {
 			SetExpansion(100),
 	)
 
-	dsRatio := ratio(float64(wl.DaemonSetsReady), float64(wl.DaemonSetsTotal))
+	dsRatio := ratio(float64(wl.daemonSetsReady), float64(wl.daemonSetsTotal))
 	dsGraph := barGraph(10, dsRatio, getColorKey(colorKeys, dsRatio))
 	p.workloadGrid.SetCell(
 		0, 2,
@@ -331,7 +298,7 @@ func (p *OverviewPage) DrawWorkloadGrid(wl WorkloadSummary) {
 			SetExpansion(100),
 	)
 
-	rsRatio := ratio(float64(wl.ReplicaSetsTotal), float64(wl.ReplicaSetsTotal))
+	rsRatio := ratio(float64(wl.replicaSetsTotal), float64(wl.replicaSetsTotal))
 	rsGraph := barGraph(10, rsRatio, getColorKey(colorKeys, rsRatio))
 	p.workloadGrid.SetCell(
 		0, 4,
@@ -347,7 +314,7 @@ func (p *OverviewPage) DrawWorkloadGrid(wl WorkloadSummary) {
 			SetExpansion(100),
 	)
 
-	podsRatio := ratio(float64(wl.PodsReady), float64(wl.PodsTotal))
+	podsRatio := ratio(float64(wl.podsReady), float64(wl.podsTotal))
 	podsGraph := barGraph(10, podsRatio, getColorKey(colorKeys, podsRatio))
 	p.workloadGrid.SetCell(
 		0, 6,
@@ -362,8 +329,6 @@ func (p *OverviewPage) DrawWorkloadGrid(wl WorkloadSummary) {
 			SetAlign(tview.AlignLeft).
 			SetExpansion(100),
 	)
-
-	p.app.Draw()
 }
 
 func barGraph(scale int, ratio float64, color string) string {
