@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/informers"
 	appsinformers "k8s.io/client-go/informers/apps/v1"
@@ -17,9 +18,10 @@ import (
 )
 
 type K8sClient struct {
-	Namespace string
-	Clientset kubernetes.Interface
-	Config    *restclient.Config
+	Namespace     string
+	Clientset     kubernetes.Interface
+	Config        *restclient.Config
+	ServerVersion *version.Info
 
 	InformerFactory    informers.SharedInformerFactory
 	NodeInformer       coreinformers.NodeInformer
@@ -44,12 +46,18 @@ func New(namespace string, resyncPeriod time.Duration) (*K8sClient, error) {
 		return nil, err
 	}
 
+	svrver, err := clientset.ServerVersion()
+	if err != nil {
+		return nil, err
+	}
+
 	factory := informers.NewFilteredSharedInformerFactory(clientset, time.Second*3, namespace, nil)
 
 	client := &K8sClient{
 		Namespace:           namespace,
 		Clientset:           clientset,
 		Config:              config,
+		ServerVersion:       svrver,
 		InformerFactory:     factory,
 		NodeInformer:        factory.Core().V1().Nodes(),
 		PodInformer:         factory.Core().V1().Pods(),

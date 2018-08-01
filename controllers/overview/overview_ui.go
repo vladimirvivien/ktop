@@ -50,9 +50,7 @@ type workloadSummary struct {
 }
 
 type overviewPage struct {
-	//app    *tview.Application
-	root   *tview.Flex
-	header *tview.TextView
+	root *tview.Flex
 
 	nodeListFormat string
 	nodeListCols   []string
@@ -75,10 +73,6 @@ func newPage() *overviewPage {
 }
 
 func (p *overviewPage) layout() {
-	p.header = tview.NewTextView().
-		SetDynamicColors(true)
-	p.header.SetBorder(true)
-	fmt.Fprint(p.header, "[green]loading...")
 
 	p.nodeList = tview.NewTable()
 	p.nodeList.SetBorder(true)
@@ -102,17 +96,11 @@ func (p *overviewPage) layout() {
 	p.nodeList.SetBorderColor(tcell.ColorWhite)
 
 	page := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.header, 3, 1, true).
 		AddItem(p.nodeList, 7, 1, true).
 		AddItem(p.workloadGrid, 4, 1, true).
 		AddItem(p.podList, 0, 1, true)
 
 	p.root = page
-}
-
-func (p *overviewPage) drawHeader(host, namespace string) {
-	p.header.Clear()
-	fmt.Fprintf(p.header, "[green]API server: [white]%s [green]namespace: [white]%s", host, namespace)
 }
 
 func (p *overviewPage) drawNodeList(sortByCol int, rows []nodeRow) {

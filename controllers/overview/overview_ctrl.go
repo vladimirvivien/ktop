@@ -187,8 +187,6 @@ func (c *overviewController) updateReplicaSets(obj interface{}) {
 }
 
 func (c *overviewController) initScreen() error {
-	c.page.drawHeader(c.k8s.Config.Host, c.k8s.Namespace)
-
 	if err := c.syncNodeList(); err != nil {
 		return err
 	}

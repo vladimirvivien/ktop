@@ -22,40 +22,50 @@ var (
 
 type Application struct {
 	app            *tview.Application
+	header         *tview.TextView
 	buttons        *tview.Table
 	buttonsBgColor *tcell.Color
 	root           *tview.Pages
 
 	refreshQ chan struct{}
+	stopCh   chan struct{}
 }
 
 func New() *Application {
 	app := tview.NewApplication()
+	header := tview.NewTextView().
+		SetDynamicColors(true)
+	header.SetBorder(true)
+
 	pages := tview.NewPages()
 	buttons := makeButtons()
 
 	content := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(header, 3, 1, false).
 		AddItem(pages, 0, 1, true).
-		AddItem(buttons, 3, 1, true)
+		AddItem(buttons, 3, 1, false)
 
 	app.SetRoot(content, true)
 
 	ui := &Application{
 		app:      app,
+		header:   header,
 		root:     pages,
 		buttons:  buttons,
 		refreshQ: make(chan struct{}),
+		stopCh:   make(chan struct{}),
 	}
 
-	app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-
+	ui.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
 		case tcell.KeyEsc:
-			app.Stop()
+			ui.Stop()
 		case tcell.KeyF1:
 			ui.switchPage(0)
 		case tcell.KeyF2:
 			ui.switchPage(1)
+		default:
+			return event
 		}
 
 		return event
@@ -71,8 +81,8 @@ func New() *Application {
 	return ui
 }
 
-func (ui *Application) TviewApplication() *tview.Application {
-	return ui.app
+func (ui *Application) SetHeader(title string) {
+	fmt.Fprintf(ui.header, title)
 }
 
 func (ui *Application) AddPage(title string, page tview.Primitive) {
@@ -99,9 +109,24 @@ func (ui *Application) ViewPage(index int) {
 	ui.switchPage(index)
 }
 
+func (ui *Application) StopChan() <-chan struct{} {
+	return ui.stopCh
+}
+
+// ShowBanner displays a welcome banner
+func (ui *Application) WelcomeBanner() {
+	fmt.Println(`
+ _    _              
+| | _| |_ ___  _ __  
+| |/ / __/ _ \| '_ \ 
+|   <| || (_) | |_) |
+|_|\_\\__\___/| .__/ 
+              |_|`)
+}
+
 func (ui *Application) Start() error {
 	if ui.app == nil {
-		return errors.New("tview.Application nil")
+		return errors.New("failed to start, tview.Application nil")
 	}
 
 	if err := ui.app.Run(); err != nil {
@@ -111,11 +136,25 @@ func (ui *Application) Start() error {
 	return nil
 }
 
+func (ui *Application) Stop() error {
+	if ui.app == nil {
+		return errors.New("failed to stop, tview.Application nil")
+	}
+	ui.app.Stop()
+	fmt.Println("ktop closed")
+	close(ui.stopCh)
+	return nil
+}
+
 func (ui *Application) switchPage(index int) {
-	row := 1
+	if !ui.root.HasPage(PageNames[index]) {
+		return
+	}
+
+	row := 0
 	cols := ui.buttons.GetColumnCount()
 
-	for i := 0; i < cols-1; i++ {
+	for i := 0; i < cols; i++ {
 		cell := ui.buttons.GetCell(row, i)
 		if i == index {
 			cell.SetTextColor(buttonSelectedFgColor)
@@ -124,8 +163,6 @@ func (ui *Application) switchPage(index int) {
 			cell.SetTextColor(buttonUnselectedFgColor)
 			cell.SetBackgroundColor(buttonUnselectedBgColor)
 		}
-
-		ui.buttons.SetCell(row, i, cell)
 	}
 
 	ui.root.SwitchToPage(PageNames[index])
@@ -143,7 +180,7 @@ func makeButtons() *tview.Table {
 				Color:           buttonUnselectedFgColor,
 				Align:           tview.AlignCenter,
 				BackgroundColor: buttonUnselectedBgColor,
-				Expansion:       100,
+				Expansion:       1,
 			},
 		)
 	}
