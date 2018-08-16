@@ -1,15 +1,18 @@
 package deployments
 
 import (
-	"fmt"
+	"sort"
 
 	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
 )
 
+type deployRow struct {
+	name string
+}
+
 type deploymentPage struct {
-	root   *tview.Flex
-	header *tview.TextView
+	root *tview.Flex
 
 	depListFormat string
 	depListCols   []string
@@ -25,11 +28,6 @@ func newPage() *deploymentPage {
 }
 
 func (p *deploymentPage) layout() {
-	p.header = tview.NewTextView().
-		SetDynamicColors(true)
-	p.header.SetBorder(true)
-	fmt.Fprint(p.header, "[green]loading...")
-
 	p.depList = tview.NewTable()
 	p.depList.SetBorder(true)
 	p.depList.SetBorders(false)
@@ -38,8 +36,16 @@ func (p *deploymentPage) layout() {
 	p.depList.SetBorderColor(tcell.ColorWhite)
 
 	page := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.header, 3, 1, true).
 		AddItem(p.depList, 0, 1, true)
 
 	p.root = page
+}
+
+func (p *deploymentPage) drawDepList(sortCol int, rows []deployRow) {
+	if sortCol > len(rows)-1 {
+		sortCol = 0
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		return rows[i].name < rows[j].name
+	})
 }

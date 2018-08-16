@@ -141,7 +141,7 @@ func (ui *Application) Stop() error {
 		return errors.New("failed to stop, tview.Application nil")
 	}
 	ui.app.Stop()
-	fmt.Println("ktop closed")
+	fmt.Println("ktop finished")
 	close(ui.stopCh)
 	return nil
 }
@@ -176,11 +176,11 @@ func makeButtons() *tview.Table {
 	for i := 0; i < len(PageNames); i++ {
 		buttons.SetCell(0, i,
 			&tview.TableCell{
-				Text:            fmt.Sprintf("%s (F%d)", PageNames[i], i+1),
+				Text:            fmt.Sprintf("  %s (F%d)  ", PageNames[i], i+1),
 				Color:           buttonUnselectedFgColor,
 				Align:           tview.AlignCenter,
 				BackgroundColor: buttonUnselectedBgColor,
-				Expansion:       1,
+				Expansion:       0,
 			},
 		)
 	}
