@@ -5,6 +5,7 @@ import (
 
 	"github.com/vladimirvivien/ktop/client"
 	"github.com/vladimirvivien/ktop/ui"
+	appsV1 "k8s.io/api/apps/v1"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	appslisters "k8s.io/client-go/listers/apps/v1"
 	"k8s.io/client-go/tools/cache"
@@ -32,12 +33,22 @@ func New(
 	ctrl.depLister = k8s.DeploymentInformer.Lister()
 	ctrl.depSynced = k8s.DeploymentInformer.Informer().HasSynced
 	k8s.DeploymentInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    nil,
-		UpdateFunc: nil,
-		DeleteFunc: nil,
+		AddFunc: ctrl.updateDeploymentList,
+		UpdateFunc: func(old, new interface{}) {
+			newPod := new.(*appsV1.Deployment)
+			oldPod := old.(*appsV1.Deployment)
+			if newPod.ResourceVersion == oldPod.ResourceVersion {
+				return
+			}
+			ctrl.updateDeploymentList(new)
+		},
+		DeleteFunc: ctrl.updateDeploymentList,
 	})
-
 	return ctrl
+}
+
+func (c *deploymentController) updateDeploymentList(obj interface{}) {
+
 }
 
 func (c *deploymentController) Run(stopCh <-chan struct{}) error {

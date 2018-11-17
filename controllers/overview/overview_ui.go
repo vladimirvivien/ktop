@@ -106,6 +106,7 @@ func (p *overviewPage) drawNodeList(sortByCol int, rows []nodeRow) {
 	if sortByCol > len(rows)-1 {
 		sortByCol = 0
 	}
+	//TODO implement sortby column
 	sort.Slice(rows, func(i, j int) bool {
 		return rows[i].name < rows[j].name
 	})

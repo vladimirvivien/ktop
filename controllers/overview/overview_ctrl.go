@@ -19,6 +19,10 @@ import (
 	"github.com/vladimirvivien/ktop/ui"
 )
 
+// overviewController type represents a view controller for displaying
+// overview screen.  The controller follows a simple approach of using
+// internal informers and theirn event handlers to react and update screen
+// elemements.
 type overviewController struct {
 	k8s *client.K8sClient
 	app *ui.Application
@@ -41,6 +45,8 @@ type overviewController struct {
 	page *overviewPage
 }
 
+// New creates a new overviewController. It sets up informers and listers
+// that are used to retrieve updated resource values and display them.
 func New(
 	k8s *client.K8sClient,
 	app *ui.Application,
@@ -50,7 +56,7 @@ func New(
 	ctrl.page = newPage()
 	ctrl.app.AddPage(pgTitle, ctrl.page.root)
 
-	// setup node informer
+	// setup node informer and eventHandlers to update screen
 	ctrl.nodeLister = k8s.NodeInformer.Lister()
 	ctrl.nodeSynced = k8s.NodeInformer.Informer().HasSynced
 	k8s.NodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -66,7 +72,7 @@ func New(
 		DeleteFunc: ctrl.updateNodeList,
 	})
 
-	// setup pod informer
+	// setup pod informer and eventHandlers to update screen
 	ctrl.podLister = k8s.PodInformer.Lister()
 	ctrl.podSynced = k8s.PodInformer.Informer().HasSynced
 	k8s.PodInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -79,10 +85,10 @@ func New(
 			}
 			ctrl.updatePodList(new)
 		},
-		DeleteFunc: ctrl.updateNodeList,
+		DeleteFunc: ctrl.updatePodList,
 	})
 
-	// setup deployment informer
+	// setup deployment informer and eventHandlers to update screen
 	ctrl.depLister = k8s.DeploymentInformer.Lister()
 	ctrl.depSynced = k8s.DeploymentInformer.Informer().HasSynced
 	k8s.DeploymentInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -98,6 +104,7 @@ func New(
 		DeleteFunc: ctrl.updateDeps,
 	})
 
+	// setup DaemonSet informer and eventHandlers to update screen
 	ctrl.dsLister = k8s.DaemonSetInformer.Lister()
 	ctrl.dsSynced = k8s.DaemonSetInformer.Informer().HasSynced
 	k8s.DaemonSetInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -113,6 +120,7 @@ func New(
 		DeleteFunc: ctrl.updateDaemonSets,
 	})
 
+	// setup ReplicaSet informer and eventHandlers to update screen
 	ctrl.rsLister = k8s.ReplicaSetInformer.Lister()
 	ctrl.rsSynced = k8s.ReplicaSetInformer.Informer().HasSynced
 	k8s.ReplicaSetInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -131,6 +139,8 @@ func New(
 	return ctrl
 }
 
+// Run starts the controller.  It initialize screen elements
+// and waits for informers to sycn.
 func (c *overviewController) Run(stopCh <-chan struct{}) error {
 	defer utilruntime.HandleCrash()
 
@@ -148,6 +158,11 @@ func (c *overviewController) Run(stopCh <-chan struct{}) error {
 	return nil
 }
 
+// runMetricsUpdate setups a ticker to intermittently update
+// the metrics in the node and pod list.  This is necessary because
+// the metric types do not have a watchers or informers.
+// In an active cluster, this will be a bit noisy. However, the best
+// TODO figure a way to create metrics informer (pull request or otherwise).
 func (c *overviewController) runMetricsUpdates(done <-chan struct{}) error {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
@@ -186,6 +201,7 @@ func (c *overviewController) updateReplicaSets(obj interface{}) {
 	c.syncWorkload()
 }
 
+// initScreen initializes screen elements
 func (c *overviewController) initScreen() error {
 	if err := c.syncNodeList(); err != nil {
 		return err
@@ -205,6 +221,9 @@ func convertNodesPtr(nodes []*coreV1.Node) (out []coreV1.Node) {
 	return
 }
 
+// syncNodeList fetches data from node lister.  For each fetched item
+// it then retrieves associated NodeMetrics values (if available).
+// This method is called by node informer events (or metrics refresh event)
 func (c *overviewController) syncNodeList() error {
 	nodeList, err := c.nodeLister.List(labels.Everything())
 	if err != nil {
@@ -221,6 +240,8 @@ func (c *overviewController) syncNodeList() error {
 		nodeMetrics = nodeMetricsList.Items
 	}
 
+	// collect node and metrics info in nodeRow type
+	// used for display.
 	nodeListRows := make([]nodeRow, len(nodes))
 	for i, node := range nodes {
 		conds := node.Status.Conditions
@@ -248,6 +269,9 @@ func (c *overviewController) syncNodeList() error {
 	return nil
 }
 
+// syncPodList fetches data from pod lister.  For each fetched item
+// it then retrieves associated NodeMetrics values (if available).
+// This method is called by pod informer events (or metrics refresh event)
 func (c *overviewController) syncPodList() error {
 	// get pod list
 	podList, err := c.podLister.List(labels.Everything())
@@ -256,7 +280,7 @@ func (c *overviewController) syncPodList() error {
 	}
 	pods := convertPodsPtr(podList)
 
-	// get pod metrics
+	// get pod metrics and associated node metrics
 	var podMetricsItems []metricsV1beta1.PodMetrics
 	var nodeMetricsItems []metricsV1beta1.NodeMetrics
 	if c.k8s.MetricsAPIAvailable {
@@ -274,6 +298,7 @@ func (c *overviewController) syncPodList() error {
 
 	}
 
+	// transfer pod and metric data to type podRow for display
 	podListRows := make([]podRow, len(pods))
 	for i, pod := range pods {
 		podMetrics := getMetricsByPodName(podMetricsItems, pod.Name)
@@ -298,6 +323,9 @@ func (c *overviewController) syncPodList() error {
 	return nil
 }
 
+// syncWorkload fetches summarial data from multiple sources including deployments,
+// daemonsets, and replicasets.  This method is called by its respective eventhandlers
+// when associated informers have data.
 func (c *overviewController) syncWorkload() error {
 	summary := workloadSummary{}
 
