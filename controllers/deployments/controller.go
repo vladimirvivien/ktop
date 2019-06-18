@@ -6,7 +6,6 @@ import (
 	"github.com/vladimirvivien/ktop/client"
 	"github.com/vladimirvivien/ktop/ui"
 	appsV1 "k8s.io/api/apps/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	appslisters "k8s.io/client-go/listers/apps/v1"
 	"k8s.io/client-go/tools/cache"
@@ -75,11 +74,11 @@ func (c *deploymentController) syncDepList() error {
 }
 
 func (c *deploymentController) syncNodeList() error {
-	depList, err := c.depLister.List(labels.Everything())
-	if err != nil {
-		return err
-	}
-	deps := toDeploymentSlice(depList)
+	// depList, err := c.depLister.List(labels.Everything())
+	// if err != nil {
+	// 	return err
+	// }
+	// deps := toDeploymentSlice(depList)
 
 	return nil
 }
