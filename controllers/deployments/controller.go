@@ -6,6 +6,7 @@ import (
 	"github.com/vladimirvivien/ktop/client"
 	"github.com/vladimirvivien/ktop/ui"
 	appsV1 "k8s.io/api/apps/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	appslisters "k8s.io/client-go/listers/apps/v1"
 	"k8s.io/client-go/tools/cache"
@@ -48,7 +49,7 @@ func New(
 }
 
 func (c *deploymentController) updateDeploymentList(obj interface{}) {
-
+	c.syncDepList()
 }
 
 func (c *deploymentController) Run(stopCh <-chan struct{}) error {
@@ -59,5 +60,40 @@ func (c *deploymentController) Run(stopCh <-chan struct{}) error {
 	}
 
 	<-stopCh
+	return nil
+}
+
+func (c *deploymentController) initScreen() error {
+	if err := c.syncDepList(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *deploymentController) syncDepList() error {
+	return nil
+}
+
+func (c *deploymentController) syncNodeList() error {
+	depList, err := c.depLister.List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	deps := toDeploymentSlice(depList)
+
+	return nil
+}
+
+// syncWorkload fetches summary of deployment workload.
+func (c *deploymentController) syncUsage() error {
+	// usage := usage{}
+
+	// deps, err := c.depLister.List(labels.Everything())
+	// if err != nil {
+	// 	return err
+	// }
+
+	// c.app.Reresh()
+
 	return nil
 }

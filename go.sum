@@ -76,10 +76,12 @@ k8s.io/client-go v9.0.0+incompatible h1:NXWpDuPFeVB5lYP1fTqJUtwigjtmRXJNtndnN53l
 k8s.io/client-go v9.0.0+incompatible/go.mod h1:7vJpHMYJwNQCWgzmNV+VYUl1zCObLyodBc8nIyt8L5s=
 k8s.io/klog v0.1.0 h1:I5HMfc/DtuVaGR1KPwUrTc476K8NCqNBldC7H4dYEzk=
 k8s.io/klog v0.1.0/go.mod h1:Gq+BEi5rUBO/HRz0bTSXDUcqjScdoY3a9IHpCEIOOfk=
+k8s.io/kubernetes v1.12.3 h1:oeHm3OGHDkPbQtnQhF9CDvW1Vj4D0PhVCDOVvkNViqQ=
 k8s.io/metrics v0.0.0-20180327034054-189abc117eb8 h1:mXiGGeBc6E9ZODgDKFDDnvUVLRfabz12Lh1do47zNRY=
 k8s.io/metrics v0.0.0-20180327034054-189abc117eb8/go.mod h1:a25VAbm3QT3xiVl1jtoF1ueAKQM149UdZ+L93ePfV3M=
 k8s.io/metrics v0.0.0-20181026191550-988b2e695787 h1:wwp6QzBV094DHl1JIXaQwrYljnzYXj+NruB9nYxSPzc=
 k8s.io/metrics v0.0.0-20181026191550-988b2e695787/go.mod h1:a25VAbm3QT3xiVl1jtoF1ueAKQM149UdZ+L93ePfV3M=
 k8s.io/metrics v0.0.0-20181116232942-4773e9d50c6b h1:rCqo83EJX/vGZJwzXpr2KowGCIBuBoruGg+sb5sDzQQ=
+k8s.io/metrics v0.0.0-20190612130948-e6f7ac4c8f3b h1:5liHfbg+Sh1GEMMo7s/KR6QhY5rrir/rsSERM9KXLnk=
 sigs.k8s.io/yaml v1.1.0 h1:4A07+ZFc2wgJwo8YNlQpr1rVlgUDlxXHhPJciaPY5gs=
 sigs.k8s.io/yaml v1.1.0/go.mod h1:UJmg0vDUVViEyp3mgSv9WPwZCDxu4rQW1olrI1uml+o=

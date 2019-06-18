@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/tools/clientcmd"
 	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
-	metricsclientset "k8s.io/metrics/pkg/client/clientset_generated/clientset"
+	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
 func main() {
