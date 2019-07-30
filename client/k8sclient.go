@@ -1,10 +1,9 @@
 package client
 
 import (
-	"os"
-	"path/filepath"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/informers"
@@ -15,6 +14,11 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics"
 	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
+)
+
+var (
+	DeploymentsResource = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
+	NodesResource       = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"}
 )
 
 type K8sClient struct {
@@ -34,8 +38,7 @@ type K8sClient struct {
 	MetricsClient       metricsclientset.Interface
 }
 
-func New(namespace string, resyncPeriod time.Duration) (*K8sClient, error) {
-	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
+func New(kubeconfig, namespace string, resyncPeriod time.Duration) (*K8sClient, error) {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		return nil, err

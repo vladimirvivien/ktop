@@ -33,8 +33,7 @@ type Application struct {
 
 func New() *Application {
 	app := tview.NewApplication()
-	header := tview.NewTextView().
-		SetDynamicColors(true)
+	header := tview.NewTextView().SetDynamicColors(true)
 	header.SetBorder(true)
 
 	pages := tview.NewPages()
@@ -101,7 +100,7 @@ func (ui *Application) Focus(t tview.Primitive) {
 	ui.app.SetFocus(t)
 }
 
-func (ui *Application) Reresh() {
+func (ui *Application) Refresh() {
 	ui.refreshQ <- struct{}{}
 }
 
@@ -122,6 +121,7 @@ func (ui *Application) WelcomeBanner() {
 |   <| || (_) | |_) |
 |_|\_\\__\___/| .__/ 
               |_|`)
+	fmt.Println("Version 0.1.0-alpha.1")
 }
 
 func (ui *Application) Start() error {
@@ -148,7 +148,7 @@ func (ui *Application) Stop() error {
 
 func (ui *Application) switchPage(index int) {
 	if !ui.root.HasPage(PageNames[index]) {
-		return
+		panic(fmt.Sprintf("Screen page %s not found", PageNames[index]))
 	}
 
 	row := 0
@@ -166,7 +166,7 @@ func (ui *Application) switchPage(index int) {
 	}
 
 	ui.root.SwitchToPage(PageNames[index])
-	ui.Reresh()
+	ui.Refresh()
 }
 
 func makeButtons() *tview.Table {

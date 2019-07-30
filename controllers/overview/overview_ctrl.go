@@ -264,7 +264,7 @@ func (c *overviewController) syncNodeList() error {
 		nodeListRows[i] = row
 	}
 	c.page.drawNodeList(0, nodeListRows)
-	c.app.Reresh()
+	c.app.Refresh()
 
 	return nil
 }
@@ -318,7 +318,7 @@ func (c *overviewController) syncPodList() error {
 		podListRows[i] = row
 	}
 	c.page.drawPodList(0, podListRows)
-	c.app.Reresh()
+	c.app.Refresh()
 
 	return nil
 }
@@ -354,7 +354,7 @@ func (c *overviewController) syncWorkload() error {
 	summary.podsTotal, summary.podsReady = getPodSummary(pods)
 
 	c.page.drawWorkloadGrid(summary)
-	c.app.Reresh()
+	c.app.Refresh()
 
 	return nil
 }
@@ -366,17 +366,17 @@ func convertPodsPtr(nodes []*coreV1.Pod) (out []coreV1.Pod) {
 	return
 }
 
-func isNodeMaster(node coreV1.Node) bool {
-	_, ok := node.Labels["node-role.kubernetes.io/master"]
-	return ok
-}
+// func isNodeMaster(node coreV1.Node) bool {
+// 	_, ok := node.Labels["node-role.kubernetes.io/master"]
+// 	return ok
+// }
 
-func nodeRole(node coreV1.Node) string {
-	if isNodeMaster(node) {
-		return "Master"
-	}
-	return "Node"
-}
+// func nodeRole(node coreV1.Node) string {
+// 	if isNodeMaster(node) {
+// 		return "Master"
+// 	}
+// 	return "Node"
+// }
 
 func isPodRunning(pod coreV1.Pod) bool {
 	return pod.Status.Phase == coreV1.PodRunning
