@@ -129,11 +129,7 @@ func (ui *Application) Start() error {
 		return errors.New("failed to start, tview.Application nil")
 	}
 
-	if err := ui.app.Run(); err != nil {
-		return err
-	}
-
-	return nil
+	return ui.app.Run()
 }
 
 func (ui *Application) Stop() error {

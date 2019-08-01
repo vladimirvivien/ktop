@@ -7,7 +7,6 @@ import (
 	appsV1 "k8s.io/api/apps/v1"
 	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	metaV1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	appslisters "k8s.io/client-go/listers/apps/v1"
@@ -57,84 +56,84 @@ func New(
 	ctrl.app.AddPage(pgTitle, ctrl.page.root)
 
 	// setup node informer and eventHandlers to update screen
-	ctrl.nodeLister = k8s.NodeInformer.Lister()
-	ctrl.nodeSynced = k8s.NodeInformer.Informer().HasSynced
-	k8s.NodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: ctrl.updateNodeList,
-		UpdateFunc: func(old, new interface{}) {
-			newNode := new.(*coreV1.Node)
-			oldNode := old.(*coreV1.Node)
-			if newNode.ResourceVersion == oldNode.ResourceVersion {
-				return
-			}
-			ctrl.updateNodeList(new)
-		},
-		DeleteFunc: ctrl.updateNodeList,
-	})
+	// ctrl.nodeLister = k8s.NodeInformer.Lister()
+	// ctrl.nodeSynced = k8s.NodeInformer.Informer().HasSynced
+	// k8s.NodeInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	// 	AddFunc: ctrl.updateNodeList,
+	// 	UpdateFunc: func(old, new interface{}) {
+	// 		newNode := new.(*coreV1.Node)
+	// 		oldNode := old.(*coreV1.Node)
+	// 		if newNode.ResourceVersion == oldNode.ResourceVersion {
+	// 			return
+	// 		}
+	// 		ctrl.updateNodeList(new)
+	// 	},
+	// 	DeleteFunc: ctrl.updateNodeList,
+	// })
 
-	// setup pod informer and eventHandlers to update screen
-	ctrl.podLister = k8s.PodInformer.Lister()
-	ctrl.podSynced = k8s.PodInformer.Informer().HasSynced
-	k8s.PodInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: ctrl.updatePodList,
-		UpdateFunc: func(old, new interface{}) {
-			newPod := new.(*coreV1.Pod)
-			oldPod := old.(*coreV1.Pod)
-			if newPod.ResourceVersion == oldPod.ResourceVersion {
-				return
-			}
-			ctrl.updatePodList(new)
-		},
-		DeleteFunc: ctrl.updatePodList,
-	})
+	// // setup pod informer and eventHandlers to update screen
+	// ctrl.podLister = k8s.PodInformer.Lister()
+	// ctrl.podSynced = k8s.PodInformer.Informer().HasSynced
+	// k8s.PodInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	// 	AddFunc: ctrl.updatePodList,
+	// 	UpdateFunc: func(old, new interface{}) {
+	// 		newPod := new.(*coreV1.Pod)
+	// 		oldPod := old.(*coreV1.Pod)
+	// 		if newPod.ResourceVersion == oldPod.ResourceVersion {
+	// 			return
+	// 		}
+	// 		ctrl.updatePodList(new)
+	// 	},
+	// 	DeleteFunc: ctrl.updatePodList,
+	// })
 
-	// setup deployment informer and eventHandlers to update screen
-	ctrl.depLister = k8s.DeploymentInformer.Lister()
-	ctrl.depSynced = k8s.DeploymentInformer.Informer().HasSynced
-	k8s.DeploymentInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: ctrl.updateDeps,
-		UpdateFunc: func(old, new interface{}) {
-			newPod := new.(*appsV1.Deployment)
-			oldPod := old.(*appsV1.Deployment)
-			if newPod.ResourceVersion == oldPod.ResourceVersion {
-				return
-			}
-			ctrl.updateDeps(new)
-		},
-		DeleteFunc: ctrl.updateDeps,
-	})
+	// // setup deployment informer and eventHandlers to update screen
+	// ctrl.depLister = k8s.DeploymentInformer.Lister()
+	// ctrl.depSynced = k8s.DeploymentInformer.Informer().HasSynced
+	// k8s.DeploymentInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	// 	AddFunc: ctrl.updateDeps,
+	// 	UpdateFunc: func(old, new interface{}) {
+	// 		newPod := new.(*appsV1.Deployment)
+	// 		oldPod := old.(*appsV1.Deployment)
+	// 		if newPod.ResourceVersion == oldPod.ResourceVersion {
+	// 			return
+	// 		}
+	// 		ctrl.updateDeps(new)
+	// 	},
+	// 	DeleteFunc: ctrl.updateDeps,
+	// })
 
-	// setup DaemonSet informer and eventHandlers to update screen
-	ctrl.dsLister = k8s.DaemonSetInformer.Lister()
-	ctrl.dsSynced = k8s.DaemonSetInformer.Informer().HasSynced
-	k8s.DaemonSetInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: ctrl.updateDaemonSets,
-		UpdateFunc: func(old, new interface{}) {
-			newPod := new.(*appsV1.DaemonSet)
-			oldPod := old.(*appsV1.DaemonSet)
-			if newPod.ResourceVersion == oldPod.ResourceVersion {
-				return
-			}
-			ctrl.updateDaemonSets(new)
-		},
-		DeleteFunc: ctrl.updateDaemonSets,
-	})
+	// // setup DaemonSet informer and eventHandlers to update screen
+	// ctrl.dsLister = k8s.DaemonSetInformer.Lister()
+	// ctrl.dsSynced = k8s.DaemonSetInformer.Informer().HasSynced
+	// k8s.DaemonSetInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	// 	AddFunc: ctrl.updateDaemonSets,
+	// 	UpdateFunc: func(old, new interface{}) {
+	// 		newPod := new.(*appsV1.DaemonSet)
+	// 		oldPod := old.(*appsV1.DaemonSet)
+	// 		if newPod.ResourceVersion == oldPod.ResourceVersion {
+	// 			return
+	// 		}
+	// 		ctrl.updateDaemonSets(new)
+	// 	},
+	// 	DeleteFunc: ctrl.updateDaemonSets,
+	// })
 
-	// setup ReplicaSet informer and eventHandlers to update screen
-	ctrl.rsLister = k8s.ReplicaSetInformer.Lister()
-	ctrl.rsSynced = k8s.ReplicaSetInformer.Informer().HasSynced
-	k8s.ReplicaSetInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: ctrl.updateReplicaSets,
-		UpdateFunc: func(old, new interface{}) {
-			newPod := new.(*appsV1.ReplicaSet)
-			oldPod := old.(*appsV1.ReplicaSet)
-			if newPod.ResourceVersion == oldPod.ResourceVersion {
-				return
-			}
-			ctrl.updateReplicaSets(new)
-		},
-		DeleteFunc: ctrl.updateReplicaSets,
-	})
+	// // setup ReplicaSet informer and eventHandlers to update screen
+	// ctrl.rsLister = k8s.ReplicaSetInformer.Lister()
+	// ctrl.rsSynced = k8s.ReplicaSetInformer.Informer().HasSynced
+	// k8s.ReplicaSetInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	// 	AddFunc: ctrl.updateReplicaSets,
+	// 	UpdateFunc: func(old, new interface{}) {
+	// 		newPod := new.(*appsV1.ReplicaSet)
+	// 		oldPod := old.(*appsV1.ReplicaSet)
+	// 		if newPod.ResourceVersion == oldPod.ResourceVersion {
+	// 			return
+	// 		}
+	// 		ctrl.updateReplicaSets(new)
+	// 	},
+	// 	DeleteFunc: ctrl.updateReplicaSets,
+	// })
 
 	return ctrl
 }
@@ -232,13 +231,13 @@ func (c *overviewController) syncNodeList() error {
 	nodes := convertNodesPtr(nodeList)
 
 	var nodeMetrics []metricsV1beta1.NodeMetrics
-	if c.k8s.MetricsAPIAvailable {
-		nodeMetricsList, err := c.k8s.MetricsClient.Metrics().NodeMetricses().List(metaV1.ListOptions{})
-		if err != nil {
-			return err
-		}
-		nodeMetrics = nodeMetricsList.Items
-	}
+	// if c.k8s.MetricsAPIAvailable {
+	// 	nodeMetricsList, err := c.k8s.MetricsClient.Metrics().NodeMetricses().List(metaV1.ListOptions{})
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	nodeMetrics = nodeMetricsList.Items
+	// }
 
 	// collect node and metrics info in nodeRow type
 	// used for display.
@@ -283,20 +282,20 @@ func (c *overviewController) syncPodList() error {
 	// get pod metrics and associated node metrics
 	var podMetricsItems []metricsV1beta1.PodMetrics
 	var nodeMetricsItems []metricsV1beta1.NodeMetrics
-	if c.k8s.MetricsAPIAvailable {
-		podMetrics, err := c.k8s.MetricsClient.Metrics().PodMetricses(c.k8s.Namespace).List(metaV1.ListOptions{})
-		if err != nil {
-			return err
-		}
-		podMetricsItems = podMetrics.Items
+	// if c.k8s.MetricsAPIAvailable {
+	// 	podMetrics, err := c.k8s.MetricsClient.Metrics().PodMetricses(c.k8s.Namespace).List(metaV1.ListOptions{})
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	podMetricsItems = podMetrics.Items
 
-		nodeMetrics, err := c.k8s.MetricsClient.Metrics().NodeMetricses().List(metaV1.ListOptions{})
-		if err != nil {
-			return err
-		}
-		nodeMetricsItems = nodeMetrics.Items
+	// 	nodeMetrics, err := c.k8s.MetricsClient.Metrics().NodeMetricses().List(metaV1.ListOptions{})
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// 	nodeMetricsItems = nodeMetrics.Items
 
-	}
+	// }
 
 	// transfer pod and metric data to type podRow for display
 	podListRows := make([]podRow, len(pods))

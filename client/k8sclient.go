@@ -1,86 +1,75 @@
 package client
 
 import (
+	"fmt"
 	"time"
 
+	"k8s.io/client-go/dynamic/dynamicinformer"
+
+	"k8s.io/client-go/dynamic"
+
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/informers"
-	appsinformers "k8s.io/client-go/informers/apps/v1"
-	coreinformers "k8s.io/client-go/informers/core/v1"
-	"k8s.io/client-go/kubernetes"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics"
-	metricsclientset "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
 var (
-	DeploymentsResource = schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}
-	NodesResource       = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"}
+	NodeMetricsResource = "nodemetrics"
+	PodMetricsResource  = "podmetrics"
+	DeploymentsResource = "deployments"
+	NodesResource       = "nodes"
+
+	Resources = map[string]schema.GroupVersionResource{
+		NodesResource:       schema.GroupVersionResource{Group: "", Version: "v1", Resource: NodesResource},
+		DeploymentsResource: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: DeploymentsResource},
+		NodeMetricsResource: schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: NodeMetricsResource},
+		PodMetricsResource:  schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: PodMetricsResource},
+	}
 )
 
 type K8sClient struct {
-	Namespace     string
-	Clientset     kubernetes.Interface
-	Config        *restclient.Config
-	ServerVersion *version.Info
+	Namespace       string
+	DynamicClient   dynamic.Interface
+	InformerFactory dynamicinformer.DynamicSharedInformerFactory
+	Config          *restclient.Config
 
-	InformerFactory    informers.SharedInformerFactory
-	NodeInformer       coreinformers.NodeInformer
-	PodInformer        coreinformers.PodInformer
-	DeploymentInformer appsinformers.DeploymentInformer
-	DaemonSetInformer  appsinformers.DaemonSetInformer
-	ReplicaSetInformer appsinformers.ReplicaSetInformer
-
-	MetricsAPIAvailable bool
-	MetricsClient       metricsclientset.Interface
+	MetricsAreAvailable bool
 }
 
-func New(kubeconfig, namespace string, resyncPeriod time.Duration) (*K8sClient, error) {
+func New(kubeconfig string, namespace string) (*K8sClient, error) {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		return nil, err
 	}
 
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, err
+	dynclient := dynamic.NewForConfigOrDie(config)
+	discoClient := discovery.NewDiscoveryClientForConfigOrDie(config)
+	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(dynclient, time.Second*3, namespace, nil)
+	k8sClient := &K8sClient{
+		Namespace:       namespace,
+		DynamicClient:   dynclient,
+		Config:          config,
+		InformerFactory: factory,
 	}
-
-	svrver, err := clientset.ServerVersion()
-	if err != nil {
-		return nil, err
-	}
-
-	factory := informers.NewFilteredSharedInformerFactory(clientset, time.Second*3, namespace, nil)
-
-	client := &K8sClient{
-		Namespace:           namespace,
-		Clientset:           clientset,
-		Config:              config,
-		ServerVersion:       svrver,
-		InformerFactory:     factory,
-		NodeInformer:        factory.Core().V1().Nodes(),
-		PodInformer:         factory.Core().V1().Pods(),
-		DeploymentInformer:  factory.Apps().V1().Deployments(),
-		DaemonSetInformer:   factory.Apps().V1().DaemonSets(),
-		ReplicaSetInformer:  factory.Apps().V1().ReplicaSets(),
-		MetricsAPIAvailable: isMetricAPIAvail(clientset.Discovery()),
-	}
-
-	if client.MetricsAPIAvailable {
-		client.MetricsClient, err = metricsclientset.NewForConfig(config)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return client, nil
+	k8sClient.MetricsAreAvailable = areMetricsAvail(discoClient)
+	return k8sClient, nil
 }
 
-func isMetricAPIAvail(disco discovery.DiscoveryInterface) bool {
+func (c *K8sClient) Start(stopCh <-chan struct{}) {
+	if c.InformerFactory == nil {
+		panic("Failed to start K8sClient, nil InformerFactory")
+	}
+
+	for name, res := range Resources {
+		if synced := c.InformerFactory.WaitForCacheSync(stopCh); !synced[res] {
+			panic(fmt.Sprintf("Informer for %s did not sync", name))
+		}
+	}
+}
+
+func areMetricsAvail(disco *discovery.DiscoveryClient) bool {
 	groups, err := disco.ServerGroups()
 	if err != nil {
 		return false

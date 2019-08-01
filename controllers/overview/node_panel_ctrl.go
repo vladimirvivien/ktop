@@ -1,110 +1,114 @@
 package overview
 
 import (
-	"context"
+	"fmt"
 
+	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/application"
 	"github.com/vladimirvivien/ktop/client"
-	topctx "github.com/vladimirvivien/ktop/context"
 	"github.com/vladimirvivien/ktop/controllers"
 	"github.com/vladimirvivien/ktop/ui"
 	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/dynamic/dynamicinformer"
-	"k8s.io/client-go/kubernetes"
+	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
 type OverviewController struct {
-	nodeInformer   *controllers.InformerAdapter
-	k8s            kubernetes.Interface
-	isMetricsAvail bool
-	ns             string
-	app            *ui.Application
-	nodePanel      ui.Panel
+	nodeMetricsInformer *controllers.InformerAdapter
+	nodeInformer        *controllers.InformerAdapter
+	k8sClient           *client.K8sClient
+	app                 *application.Application
+	nodePanel           ui.Panel
+	podPanel            ui.Panel
 }
 
-func NewNodePanelCtrl(ctx context.Context, informerFac dynamicinformer.DynamicSharedInformerFactory, app *ui.Application) *OverviewController {
-	k8s, _ := topctx.K8sInterface(ctx)
-	ns, _ := topctx.Namespace(ctx)
-	isMetrics, _ := topctx.IsMetricsAvailable(ctx)
-
+func NewNodePanelCtrl(k8sClient *client.K8sClient, app *application.Application) *OverviewController {
+	informerFac := k8sClient.InformerFactory
 	ctrl := &OverviewController{
-		nodeInformer:   controllers.NewInformerAdapter(informerFac.ForResource(client.NodesResource)),
-		k8s:            k8s,
-		ns:             ns,
-		isMetricsAvail: isMetrics,
-		app:            app,
+		nodeInformer: controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.NodesResource])),
+		app:          app,
+		k8sClient:    k8sClient,
 	}
+
+	if k8sClient.MetricsAreAvailable {
+		ctrl.nodeMetricsInformer = controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.NodeMetricsResource]))
+	}
+
 	return ctrl
 }
 
-func (c *OverviewController) Start() {
-	c.setupEventHandlers()
+func (c *OverviewController) Run() {
+	c.setupNodeEventHandlers()
 	c.setupViews()
 }
 
-func (c *OverviewController) setupEventHandlers() {
+func (c *OverviewController) setupNodeEventHandlers() {
 	c.nodeInformer.SetAddObjectFunc(func(obj interface{}) {
-		c.refreshNode(obj)
+		c.refreshNodes(obj)
 	})
 
 	c.nodeInformer.SetUpdateObjectFunc(func(old, new interface{}) {
-		c.refreshNode(new)
+		c.refreshNodes(new)
 	})
+
+	if c.k8sClient.MetricsAreAvailable {
+		c.nodeMetricsInformer.SetAddObjectFunc(func(obj interface{}) {
+			c.refreshNodes(obj)
+		})
+
+		c.nodeMetricsInformer.SetUpdateObjectFunc(func(old, new interface{}) {
+			c.refreshNodes(new)
+		})
+	}
 }
 
-func (c *OverviewController) refreshNode(obj interface{}) error {
-	unstructList, err := c.nodeInformer.Lister().List(labels.Everything())
+func (c *OverviewController) refreshNodes(obj interface{}) error {
+	nodeObjects, err := c.nodeInformer.Lister().List(labels.Everything())
 	if err != nil {
 		return err
 	}
 
-	// for i, obj := range unstructList {
-	// 	unstructNode := obj.(*unstructured.Unstructured)
-	// 	node := new(coreV1.Node)
-	// 	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructNode.Object, &node); err != nil {
-	// 		return err
-	// 	}
-
-	// 	name := node.GetName()
-	// 	role := nodeRole(node)
-	// }
-
-	// var nodeMetrics []metricsV1beta1.NodeMetrics
-	// if c.isMetricsAvail {
-	// 	nodeMetricsList, err := c.k8s.MetricsClient.Metrics().NodeMetricses().List(metaV1.ListOptions{})
-	// 	if err != nil {
-	// 		return err
-	// 	}
-	// 	nodeMetrics = nodeMetricsList.Items
-	// }
+	// get all metrics for all nodes
+	var nodeMetricsObjects []runtime.Object
+	if c.k8sClient.MetricsAreAvailable {
+		list, err := c.nodeMetricsInformer.Lister().List(labels.Everything())
+		if err != nil {
+			return err
+		}
+		nodeMetricsObjects = list
+	}
 
 	// collect node and metrics info in nodeRow type
 	// used for display.
-	nodeListRows := make([]NodeItem, len(unstructList))
-	for i, obj := range unstructList {
+	nodeListRows := make([]NodeItem, len(nodeObjects))
+	for i, obj := range nodeObjects {
 		unstructNode := obj.(*unstructured.Unstructured)
 		node := new(coreV1.Node)
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructNode.Object, &node); err != nil {
 			return err
 		}
+		metrics, err := getNodeMetricsByName(nodeMetricsObjects, node.Name)
+		if err != nil {
+			return err
+		}
+
 		conds := node.Status.Conditions
-		//availRes := node.Status.Allocatable
-		//metrics := getMetricsByNodeName(nodeMetrics, node.Name)
+		availRes := node.Status.Allocatable
 		row := NodeItem{
-			Name:    node.Name,
-			Role:    nodeRole(*node),
-			Status:  string(conds[len(conds)-1].Type),
-			Version: node.Status.NodeInfo.KubeletVersion,
-			// 		cpuAvail:      availRes.Cpu().String(),
-			// 		cpuAvailValue: availRes.Cpu().MilliValue(),
-			// 		cpuUsage:      metrics.Usage.Cpu().String(),
-			// 		cpuValue:      metrics.Usage.Cpu().MilliValue(),
-			// 		memAvail:      availRes.Memory().String(),
-			// 		memAvailValue: availRes.Memory().MilliValue(),
-			// 		memUsage:      metrics.Usage.Memory().String(),
-			// 		memValue:      metrics.Usage.Memory().MilliValue(),
+			Name:          node.Name,
+			Role:          nodeRole(*node),
+			Status:        string(conds[len(conds)-1].Type),
+			Version:       node.Status.NodeInfo.KubeletVersion,
+			CpuAvail:      availRes.Cpu().String(),
+			CpuAvailValue: availRes.Cpu().MilliValue(),
+			CpuUsage:      metrics.Usage.Cpu().String(),
+			CpuValue:      metrics.Usage.Cpu().MilliValue(),
+			MemAvail:      availRes.Memory().String(),
+			MemAvailValue: availRes.Memory().MilliValue(),
+			MemUsage:      metrics.Usage.Memory().String(),
+			MemValue:      metrics.Usage.Memory().MilliValue(),
 		}
 		nodeListRows[i] = row
 	}
@@ -118,7 +122,17 @@ func (c *OverviewController) setupViews() {
 	c.nodePanel = NewNodePanel("Nodes")
 	c.nodePanel.Layout()
 	c.nodePanel.DrawHeader("NAME", "STATUS", "ROLE", "VERSION", "CPU", "MEMORY")
-	c.app.AddPage("Overview", c.nodePanel.GetView())
+
+	c.podPanel = NewPodPanel("Pods")
+	c.podPanel.Layout()
+	c.podPanel.DrawHeader("NAME", "STATUS", "IP", "NODE", "CPU", "MEMORY")
+
+	page := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(c.nodePanel.GetView(), 7, 1, true).
+		AddItem(c.podPanel.GetView(), 4, 1, true)
+		//AddItem(p.podList, 0, 1, true)
+
+	c.app.AddPage("Overview", page)
 }
 
 func isNodeMaster(node coreV1.Node) bool {
@@ -131,4 +145,21 @@ func nodeRole(node coreV1.Node) string {
 		return "Master"
 	}
 	return "Node"
+}
+
+func getNodeMetricsByName(metricsObjects []runtime.Object, nodeName string) (*metricsV1beta1.NodeMetrics, error) {
+	for _, obj := range metricsObjects {
+		metrics, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return nil, fmt.Errorf("unexpected type for NodeMetrics")
+		}
+		if metrics.GetName() == nodeName {
+			nodeMetrics := new(metricsV1beta1.NodeMetrics)
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(metrics.Object, &nodeMetrics); err != nil {
+				return nil, err
+			}
+			return nodeMetrics, nil
+		}
+	}
+	return new(metricsV1beta1.NodeMetrics), nil
 }

@@ -40,3 +40,7 @@ func (c *InformerAdapter) SetDeleteObjectFunc(fn DeleteObjectEventFunc) *Informe
 func (c *InformerAdapter) Lister() cache.GenericLister {
 	return c.informer.Lister()
 }
+
+func (c *InformerAdapter) Informer() cache.SharedIndexInformer {
+	return c.informer.Informer()
+}

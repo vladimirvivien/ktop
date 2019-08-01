@@ -11,5 +11,5 @@ type Panel interface {
 	DrawBody(data interface{})
 	DrawFooter(...string)
 	GetTitle() string
-	GetView() *tview.Flex
+	GetView() tview.Primitive
 }

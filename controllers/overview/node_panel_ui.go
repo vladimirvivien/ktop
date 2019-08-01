@@ -137,6 +137,6 @@ func (p *nodePanel) Clear() {
 
 }
 
-func (p *nodePanel) GetView() *tview.Flex {
+func (p *nodePanel) GetView() tview.Primitive {
 	return p.root
 }
