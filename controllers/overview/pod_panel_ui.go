@@ -29,7 +29,7 @@ type podPanel struct {
 }
 
 func NewPodPanel(title string) ui.Panel {
-	p := &nodePanel{title: title}
+	p := &podPanel{title: title}
 	p.Layout()
 	return p
 }
@@ -64,7 +64,7 @@ func (p *podPanel) DrawHeader(cols ...string) {
 func (p *podPanel) DrawBody(data interface{}) {
 	rows, ok := data.([]PodItem)
 	if !ok {
-		panic("type mismatched for PodPanel.DrawBody")
+		panic(fmt.Sprintf("PodPanel.DrawBody got unexpected type %T", data))
 	}
 
 	sort.Slice(rows, func(i, j int) bool {

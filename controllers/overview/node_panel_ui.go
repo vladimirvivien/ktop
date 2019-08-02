@@ -67,7 +67,7 @@ func (p *nodePanel) DrawHeader(cols ...string) {
 func (p *nodePanel) DrawBody(data interface{}) {
 	rows, ok := data.([]NodeItem)
 	if !ok {
-		panic("type mismatched for NodePanel.DrawBody")
+		panic(fmt.Sprintf("NodePanel.DrawBody got unexpected type %T", data))
 	}
 
 	sort.Slice(rows, func(i, j int) bool {
