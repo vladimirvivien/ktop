@@ -60,7 +60,7 @@ func (c *OverviewController) setupViews() {
 
 	page := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(c.nodePanel.GetView(), 7, 1, true).
-		AddItem(c.podPanel.GetView(), 4, 1, true)
+		AddItem(c.podPanel.GetView(), 0, 1, true)
 		//AddItem(p.podList, 0, 1, true)
 
 	c.app.AddPage("Overview", page)

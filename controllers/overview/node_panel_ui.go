@@ -48,7 +48,7 @@ func (p *nodePanel) Layout() {
 	p.list.SetBorderColor(tcell.ColorWhite)
 
 	p.root = tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.list, 7, 1, true)
+		AddItem(p.list, 0, 1, true)
 }
 
 func (p *nodePanel) DrawHeader(cols ...string) {
