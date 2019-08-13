@@ -21,6 +21,8 @@ var (
 	DeploymentsResource = "deployments"
 	NodesResource       = "nodes"
 	PodsResource        = "pods"
+	DaemonSetsResource  = "daemonsets"
+	ReplicaSetsResource = "replicasets"
 
 	Resources = map[string]schema.GroupVersionResource{
 		NodesResource:       schema.GroupVersionResource{Group: "", Version: "v1", Resource: NodesResource},
@@ -28,6 +30,8 @@ var (
 		DeploymentsResource: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: DeploymentsResource},
 		NodeMetricsResource: schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: NodeMetricsResource},
 		PodMetricsResource:  schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: PodMetricsResource},
+		DaemonSetsResource:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: DaemonSetsResource},
+		ReplicaSetsResource: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: ReplicaSetsResource},
 	}
 )
 

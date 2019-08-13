@@ -8,6 +8,7 @@ import (
 	"github.com/vladimirvivien/ktop/client"
 	"github.com/vladimirvivien/ktop/controllers"
 	"github.com/vladimirvivien/ktop/ui"
+	appsV1 "k8s.io/api/apps/v1"
 	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -21,10 +22,14 @@ type OverviewController struct {
 	podMetricsInformer  *controllers.InformerAdapter
 	podInformer         *controllers.InformerAdapter
 	nodeInformer        *controllers.InformerAdapter
+	depInformer         *controllers.InformerAdapter
+	dsInformer          *controllers.InformerAdapter
+	rsInformer          *controllers.InformerAdapter
 	k8sClient           *client.K8sClient
 	app                 *application.Application
 	nodePanel           ui.Panel
 	podPanel            ui.Panel
+	workloadPanel       ui.Panel
 }
 
 func NewNodePanelCtrl(k8sClient *client.K8sClient, app *application.Application) *OverviewController {
@@ -32,6 +37,9 @@ func NewNodePanelCtrl(k8sClient *client.K8sClient, app *application.Application)
 	ctrl := &OverviewController{
 		nodeInformer: controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.NodesResource])),
 		podInformer:  controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.PodsResource])),
+		depInformer:  controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.DeploymentsResource])),
+		dsInformer:   controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.DaemonSetsResource])),
+		rsInformer:   controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.ReplicaSetsResource])),
 		app:          app,
 		k8sClient:    k8sClient,
 	}
@@ -54,14 +62,18 @@ func (c *OverviewController) setupViews() {
 	c.nodePanel.Layout()
 	c.nodePanel.DrawHeader("NAME", "STATUS", "ROLE", "VERSION", "CPU", "MEMORY")
 
+	c.workloadPanel = NewWorkloadPanel("Workload")
+	c.workloadPanel.Layout()
+	c.workloadPanel.DrawHeader()
+
 	c.podPanel = NewPodPanel("Pods")
 	c.podPanel.Layout()
 	c.podPanel.DrawHeader("NAME", "STATUS", "IP", "NODE", "CPU", "MEMORY")
 
 	page := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(c.nodePanel.GetView(), 7, 1, true).
+		AddItem(c.workloadPanel.GetView(), 4, 1, true).
 		AddItem(c.podPanel.GetView(), 0, 1, true)
-		//AddItem(p.podList, 0, 1, true)
 
 	c.app.AddPage("Overview", page)
 }
@@ -70,7 +82,6 @@ func (c *OverviewController) setupNodeEventHandlers() {
 	c.nodeInformer.SetAddObjectFunc(func(obj interface{}) {
 		c.refreshNodes(obj)
 	})
-
 	c.nodeInformer.SetUpdateObjectFunc(func(old, new interface{}) {
 		c.refreshNodes(new)
 	})
@@ -78,9 +89,29 @@ func (c *OverviewController) setupNodeEventHandlers() {
 	c.podInformer.SetAddObjectFunc(func(obj interface{}) {
 		c.refreshPods(obj)
 	})
-
 	c.podInformer.SetUpdateObjectFunc(func(old, new interface{}) {
 		c.refreshPods(new)
+	})
+
+	c.depInformer.SetAddObjectFunc(func(obj interface{}) {
+		c.refreshWorkload()
+	})
+	c.depInformer.SetUpdateObjectFunc(func(old, new interface{}) {
+		c.refreshWorkload()
+	})
+
+	c.dsInformer.SetAddObjectFunc(func(obj interface{}) {
+		c.refreshWorkload()
+	})
+	c.dsInformer.SetUpdateObjectFunc(func(old, new interface{}) {
+		c.refreshWorkload()
+	})
+
+	c.rsInformer.SetAddObjectFunc(func(obj interface{}) {
+		c.refreshWorkload()
+	})
+	c.rsInformer.SetUpdateObjectFunc(func(old, new interface{}) {
+		c.refreshWorkload()
 	})
 
 	if c.k8sClient.MetricsAreAvailable {
@@ -216,6 +247,51 @@ func (c *OverviewController) refreshPods(obj interface{}) error {
 	return nil
 }
 
+func (c *OverviewController) refreshWorkload() error {
+	var summary WorkloadItem
+
+	deps, err := c.depInformer.Lister().List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	summary.DeploymentsTotal, summary.DeploymentsReady, err = getDepsSummary(deps)
+	if err != nil {
+		return err
+	}
+
+	daemonSets, err := c.dsInformer.Lister().List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	summary.DaemonSetsTotal, summary.DaemonSetsReady, err = getDSSummary(daemonSets)
+	if err != nil {
+		return err
+	}
+
+	reps, err := c.rsInformer.Lister().List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	summary.ReplicaSetsTotal, summary.ReplicaSetsReady, err = getRSSummary(reps)
+	if err != nil {
+		return err
+	}
+
+	pods, err := c.podInformer.Lister().List(labels.Everything())
+	if err != nil {
+		return err
+	}
+	summary.PodsTotal, summary.PodsReady, err = getPodsSummary(pods)
+	if err != nil {
+		return err
+	}
+
+	c.workloadPanel.DrawBody(summary)
+	c.app.Refresh()
+
+	return nil
+}
+
 func isNodeMaster(node coreV1.Node) bool {
 	_, ok := node.Labels["node-role.kubernetes.io/master"]
 	return ok
@@ -228,11 +304,77 @@ func nodeRole(node coreV1.Node) string {
 	return "Node"
 }
 
+func getDepsSummary(depObjects []runtime.Object) (desired, ready int, err error) {
+	for _, obj := range depObjects {
+		unstructObj, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return 0, 0, fmt.Errorf("unexpected type %T", obj)
+		}
+		dep := new(appsV1.Deployment)
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructObj.Object, &dep); err != nil {
+			return 0, 0, err
+		}
+		desired += int(dep.Status.Replicas)
+		ready += int(dep.Status.ReadyReplicas)
+	}
+	return
+}
+
+func getDSSummary(dsObjects []runtime.Object) (desired, ready int, err error) {
+	for _, obj := range dsObjects {
+		unstructObj, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return 0, 0, fmt.Errorf("unexpected type %T", obj)
+		}
+		ds := new(appsV1.DaemonSet)
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructObj.Object, &ds); err != nil {
+			return 0, 0, err
+		}
+		desired += int(ds.Status.DesiredNumberScheduled)
+		ready += int(ds.Status.NumberReady)
+	}
+	return
+}
+
+func getRSSummary(rsObjects []runtime.Object) (desired, ready int, err error) {
+	for _, obj := range rsObjects {
+		unstructObj, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return 0, 0, fmt.Errorf("unexpected type %T", obj)
+		}
+		rs := new(appsV1.ReplicaSet)
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructObj.Object, &rs); err != nil {
+			return 0, 0, err
+		}
+		desired += int(rs.Status.Replicas)
+		ready += int(rs.Status.ReadyReplicas)
+	}
+	return
+}
+
+func getPodsSummary(podObjects []runtime.Object) (desired, ready int, err error) {
+	desired = len(podObjects)
+	for _, obj := range podObjects {
+		unstructObj, ok := obj.(*unstructured.Unstructured)
+		if !ok {
+			return 0, 0, fmt.Errorf("unexpected type %T", obj)
+		}
+		pod := new(coreV1.Pod)
+		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructObj.Object, &pod); err != nil {
+			return 0, 0, err
+		}
+		if pod.Status.Phase == coreV1.PodRunning {
+			ready++
+		}
+	}
+	return
+}
+
 func getNodeMetricsByName(metricsObjects []runtime.Object, nodeName string) (*metricsV1beta1.NodeMetrics, error) {
 	for _, obj := range metricsObjects {
 		unstructMetrics, ok := obj.(*unstructured.Unstructured)
 		if !ok {
-			return nil, fmt.Errorf("unexpected type for NodeMetrics")
+			return nil, fmt.Errorf("unexpected type %T", obj)
 		}
 		if unstructMetrics.GetName() == nodeName {
 			metrics := new(metricsV1beta1.NodeMetrics)
