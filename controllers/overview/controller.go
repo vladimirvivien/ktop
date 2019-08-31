@@ -18,18 +18,16 @@ import (
 )
 
 type OverviewController struct {
-	nodeMetricsInformer *controllers.InformerAdapter
-	podMetricsInformer  *controllers.InformerAdapter
-	podInformer         *controllers.InformerAdapter
-	nodeInformer        *controllers.InformerAdapter
-	depInformer         *controllers.InformerAdapter
-	dsInformer          *controllers.InformerAdapter
-	rsInformer          *controllers.InformerAdapter
-	k8sClient           *client.K8sClient
-	app                 *application.Application
-	nodePanel           ui.Panel
-	podPanel            ui.Panel
-	workloadPanel       ui.Panel
+	podInformer   *controllers.InformerAdapter
+	nodeInformer  *controllers.InformerAdapter
+	depInformer   *controllers.InformerAdapter
+	dsInformer    *controllers.InformerAdapter
+	rsInformer    *controllers.InformerAdapter
+	k8sClient     *client.K8sClient
+	app           *application.Application
+	nodePanel     ui.Panel
+	podPanel      ui.Panel
+	workloadPanel ui.Panel
 }
 
 func NewNodePanelCtrl(k8sClient *client.K8sClient, app *application.Application) *OverviewController {
@@ -42,11 +40,6 @@ func NewNodePanelCtrl(k8sClient *client.K8sClient, app *application.Application)
 		rsInformer:   controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.ReplicaSetsResource])),
 		app:          app,
 		k8sClient:    k8sClient,
-	}
-
-	if k8sClient.MetricsAreAvailable {
-		ctrl.nodeMetricsInformer = controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.NodeMetricsResource]))
-		ctrl.podMetricsInformer = controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.PodMetricsResource]))
 	}
 
 	return ctrl
@@ -113,40 +106,12 @@ func (c *OverviewController) setupNodeEventHandlers() {
 	c.rsInformer.SetUpdateObjectFunc(func(old, new interface{}) {
 		c.refreshWorkload()
 	})
-
-	if c.k8sClient.MetricsAreAvailable {
-		c.nodeMetricsInformer.SetAddObjectFunc(func(obj interface{}) {
-			c.refreshNodes(nil)
-		})
-
-		c.nodeMetricsInformer.SetUpdateObjectFunc(func(old, new interface{}) {
-			c.refreshNodes(nil)
-		})
-
-		c.podMetricsInformer.SetAddObjectFunc(func(obj interface{}) {
-			c.refreshPods(nil)
-		})
-
-		c.podMetricsInformer.SetUpdateObjectFunc(func(old, new interface{}) {
-			c.refreshPods(nil)
-		})
-	}
 }
 
 func (c *OverviewController) refreshNodes(obj interface{}) error {
 	nodeObjects, err := c.nodeInformer.Lister().List(labels.Everything())
 	if err != nil {
 		return err
-	}
-
-	// get all metrics for all nodes
-	var nodeMetricsObjects []runtime.Object
-	if c.k8sClient.MetricsAreAvailable {
-		list, err := c.nodeMetricsInformer.Lister().List(labels.Everything())
-		if err != nil {
-			return err
-		}
-		nodeMetricsObjects = list
 	}
 
 	// collect node and metrics info in nodeRow type
@@ -158,7 +123,7 @@ func (c *OverviewController) refreshNodes(obj interface{}) error {
 		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructNode.Object, &node); err != nil {
 			return err
 		}
-		metrics, err := getNodeMetricsByName(nodeMetricsObjects, node.Name)
+		metrics, err := c.k8sClient.GetMetricsByNode(node.Name)
 		if err != nil {
 			return err
 		}
@@ -193,22 +158,6 @@ func (c *OverviewController) refreshPods(obj interface{}) error {
 		return err
 	}
 
-	var nodeMetricsObjects []runtime.Object
-	var podMetricsObjects []runtime.Object
-	if c.k8sClient.MetricsAreAvailable {
-		podMetrics, err := c.podMetricsInformer.Lister().List(labels.Everything())
-		if err != nil {
-			return err
-		}
-		podMetricsObjects = podMetrics
-
-		nodeMetrics, err := c.nodeMetricsInformer.Lister().List(labels.Everything())
-		if err != nil {
-			return err
-		}
-		nodeMetricsObjects = nodeMetrics
-	}
-
 	podRows := make([]PodItem, len(podObjects))
 	for i, obj := range podObjects {
 		unstructPod := obj.(*unstructured.Unstructured)
@@ -217,12 +166,12 @@ func (c *OverviewController) refreshPods(obj interface{}) error {
 			return err
 		}
 
-		podMetrics, err := getPodMetricsByName(podMetricsObjects, pod.Name)
+		podMetrics, err := c.k8sClient.GetMetricsByPod(pod.Name)
 		if err != nil {
 			return err
 		}
 
-		nodeMetrics, err := getNodeMetricsByName(nodeMetricsObjects, pod.Spec.NodeName)
+		nodeMetrics, err := c.k8sClient.GetMetricsByNode(pod.Spec.NodeName)
 		if err != nil {
 			return err
 		}
@@ -368,40 +317,6 @@ func getPodsSummary(podObjects []runtime.Object) (desired, ready int, err error)
 		}
 	}
 	return
-}
-
-func getNodeMetricsByName(metricsObjects []runtime.Object, nodeName string) (*metricsV1beta1.NodeMetrics, error) {
-	for _, obj := range metricsObjects {
-		unstructMetrics, ok := obj.(*unstructured.Unstructured)
-		if !ok {
-			return nil, fmt.Errorf("unexpected type %T", obj)
-		}
-		if unstructMetrics.GetName() == nodeName {
-			metrics := new(metricsV1beta1.NodeMetrics)
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructMetrics.Object, &metrics); err != nil {
-				return nil, err
-			}
-			return metrics, nil
-		}
-	}
-	return new(metricsV1beta1.NodeMetrics), nil
-}
-
-func getPodMetricsByName(metricsObjects []runtime.Object, podName string) (*metricsV1beta1.PodMetrics, error) {
-	for _, obj := range metricsObjects {
-		unstructMetrics, ok := obj.(*unstructured.Unstructured)
-		if !ok {
-			return nil, fmt.Errorf("unexpected type for NodeMetrics")
-		}
-		if unstructMetrics.GetName() == podName {
-			metrics := new(metricsV1beta1.PodMetrics)
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructMetrics.Object, &metrics); err != nil {
-				return nil, err
-			}
-			return metrics, nil
-		}
-	}
-	return new(metricsV1beta1.PodMetrics), nil
 }
 
 func podMetricsTotals(metrics *metricsV1beta1.PodMetrics) (totalCpu, totalMem resource.Quantity) {

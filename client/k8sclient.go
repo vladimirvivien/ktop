@@ -4,15 +4,17 @@ import (
 	"fmt"
 	"time"
 
-	"k8s.io/client-go/dynamic/dynamicinformer"
+	"k8s.io/apimachinery/pkg/runtime"
 
-	"k8s.io/client-go/dynamic"
-
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/dynamic/dynamicinformer"
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics"
+	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
 var (
@@ -28,8 +30,8 @@ var (
 		NodesResource:       schema.GroupVersionResource{Group: "", Version: "v1", Resource: NodesResource},
 		PodsResource:        schema.GroupVersionResource{Group: "", Version: "v1", Resource: PodsResource},
 		DeploymentsResource: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: DeploymentsResource},
-		NodeMetricsResource: schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: NodeMetricsResource},
-		PodMetricsResource:  schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: PodMetricsResource},
+		NodeMetricsResource: schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "nodes"},
+		PodMetricsResource:  schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "pods"},
 		DaemonSetsResource:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: DaemonSetsResource},
 		ReplicaSetsResource: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: ReplicaSetsResource},
 	}
@@ -87,4 +89,56 @@ func areMetricsAvail(disco *discovery.DiscoveryClient) bool {
 		}
 	}
 	return false
+}
+
+// GetMetricsByNode returns metrics for specified node
+func (c *K8sClient) GetMetricsByNode(nodeName string) (*metricsV1beta1.NodeMetrics, error) {
+	// TODO unfortunately, nodemetric types are not watchable (without applying RBAC rules)
+	// for now, the code just does a simple list every time metrics are needed
+
+	if !c.MetricsAreAvailable {
+		return new(metricsV1beta1.NodeMetrics), nil
+	}
+
+	objList, err := c.DynamicClient.Resource(Resources[NodeMetricsResource]).List(metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, obj := range objList.Items {
+		if obj.GetName() == nodeName {
+			metrics := new(metricsV1beta1.NodeMetrics)
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &metrics); err != nil {
+				return nil, err
+			}
+			return metrics, nil
+		}
+	}
+	return new(metricsV1beta1.NodeMetrics), nil
+}
+
+// GetMetricsByPod returns metrics for specified pod
+func (c *K8sClient) GetMetricsByPod(podName string) (*metricsV1beta1.PodMetrics, error) {
+	// TODO unfortunately, podmetric types are not watchable (without applying RBAC rules)
+	// for now, the code just does a simple list every time metrics are needed
+
+	if !c.MetricsAreAvailable {
+		return new(metricsV1beta1.PodMetrics), nil
+	}
+
+	objList, err := c.DynamicClient.Resource(Resources[PodMetricsResource]).List(metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	for _, obj := range objList.Items {
+		if obj.GetName() == podName {
+			metrics := new(metricsV1beta1.PodMetrics)
+			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &metrics); err != nil {
+				return nil, err
+			}
+			return metrics, nil
+		}
+	}
+	return new(metricsV1beta1.PodMetrics), nil
 }
