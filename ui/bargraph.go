@@ -96,7 +96,7 @@ func BarGraph(scale int, ratio Ratio, colors ColorKeys) string {
 	graph.WriteString("]")
 
 	for i := 0; i < int(math.Min(float64(scale), float64(graphVal))); i++ {
-		graph.WriteString("|")
+		graph.WriteRune('|')
 	}
 
 	for j := 0; j < (scale - graphVal); j++ {

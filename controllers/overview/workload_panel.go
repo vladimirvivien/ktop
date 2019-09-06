@@ -39,7 +39,7 @@ func (p *workloadPanel) Layout() {
 	p.table = tview.NewTable()
 	p.table.SetBorder(true)
 	p.table.SetBorders(false)
-	p.table.SetTitle(" Running Workload ")
+	p.table.SetTitle(p.GetTitle())
 	p.table.SetTitleAlign(tview.AlignLeft)
 	p.table.SetBorderColor(tcell.ColorWhite)
 

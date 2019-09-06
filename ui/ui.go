@@ -9,6 +9,16 @@ import (
 )
 
 var (
+	Icons = struct {
+		Factory,
+		Battery,
+		Package rune
+	}{
+		Factory: 0x1F3ED, // 🏭
+		Battery: 0x1F50B, // 🔋
+		Package: 0x1F4E6, // 📦
+	}
+
 	PageNames = []string{
 		"Overview",
 		"Deployments",

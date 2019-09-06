@@ -40,7 +40,7 @@ func (p *podPanel) Layout() {
 	p.list = tview.NewTable()
 	p.list.SetBorder(true)
 	p.list.SetBorders(false)
-	p.list.SetTitle(" Pods ")
+	p.list.SetTitle(p.GetTitle())
 	p.list.SetTitleAlign(tview.AlignLeft)
 	p.list.SetBorderColor(tcell.ColorWhite)
 

@@ -51,15 +51,15 @@ func (c *OverviewController) Run() {
 }
 
 func (c *OverviewController) setupViews() {
-	c.nodePanel = NewNodePanel("Nodes")
+	c.nodePanel = NewNodePanel(fmt.Sprintf(" %c Nodes ", ui.Icons.Factory))
 	c.nodePanel.Layout()
 	c.nodePanel.DrawHeader("NAME", "STATUS", "ROLE", "VERSION", "CPU", "MEMORY")
 
-	c.workloadPanel = NewWorkloadPanel("Workload")
+	c.workloadPanel = NewWorkloadPanel(fmt.Sprintf(" %c Workload Health ", ui.Icons.Battery))
 	c.workloadPanel.Layout()
 	c.workloadPanel.DrawHeader()
 
-	c.podPanel = NewPodPanel("Pods")
+	c.podPanel = NewPodPanel(fmt.Sprintf(" %c Pods ", ui.Icons.Package))
 	c.podPanel.Layout()
 	c.podPanel.DrawHeader("NAME", "STATUS", "IP", "NODE", "CPU", "MEMORY")
 
