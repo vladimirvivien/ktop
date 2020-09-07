@@ -1,4 +1,4 @@
-package client
+package k8s
 
 import (
 	"fmt"
@@ -37,7 +37,7 @@ var (
 	}
 )
 
-type K8sClient struct {
+type Client struct {
 	Namespace       string
 	DynamicClient   dynamic.Interface
 	InformerFactory dynamicinformer.DynamicSharedInformerFactory
@@ -46,7 +46,7 @@ type K8sClient struct {
 	MetricsAreAvailable bool
 }
 
-func New(kubeconfig string, namespace string) (*K8sClient, error) {
+func NewClient(kubeconfig string, namespace string) (*Client, error) {
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
 	if err != nil {
 		return nil, err
@@ -55,7 +55,7 @@ func New(kubeconfig string, namespace string) (*K8sClient, error) {
 	dynclient := dynamic.NewForConfigOrDie(config)
 	discoClient := discovery.NewDiscoveryClientForConfigOrDie(config)
 	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(dynclient, time.Second*3, namespace, nil)
-	k8sClient := &K8sClient{
+	k8sClient := &Client{
 		Namespace:       namespace,
 		DynamicClient:   dynclient,
 		Config:          config,
@@ -65,9 +65,9 @@ func New(kubeconfig string, namespace string) (*K8sClient, error) {
 	return k8sClient, nil
 }
 
-func (c *K8sClient) Start(stopCh <-chan struct{}) {
+func (c *Client) Start(stopCh <-chan struct{}) {
 	if c.InformerFactory == nil {
-		panic("Failed to start K8sClient, nil InformerFactory")
+		panic("Failed to start Client, nil InformerFactory")
 	}
 
 	for name, res := range Resources {
@@ -92,7 +92,7 @@ func areMetricsAvail(disco *discovery.DiscoveryClient) bool {
 }
 
 // GetMetricsByNode returns metrics for specified node
-func (c *K8sClient) GetMetricsByNode(nodeName string) (*metricsV1beta1.NodeMetrics, error) {
+func (c *Client) GetMetricsByNode(nodeName string) (*metricsV1beta1.NodeMetrics, error) {
 	// TODO unfortunately, nodemetric types are not watchable (without applying RBAC rules)
 	// for now, the code just does a simple list every time metrics are needed
 
@@ -118,7 +118,7 @@ func (c *K8sClient) GetMetricsByNode(nodeName string) (*metricsV1beta1.NodeMetri
 }
 
 // GetMetricsByPod returns metrics for specified pod
-func (c *K8sClient) GetMetricsByPod(podName string) (*metricsV1beta1.PodMetrics, error) {
+func (c *Client) GetMetricsByPod(podName string) (*metricsV1beta1.PodMetrics, error) {
 	// TODO unfortunately, podmetric types are not watchable (without applying RBAC rules)
 	// for now, the code just does a simple list every time metrics are needed
 

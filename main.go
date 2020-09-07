@@ -9,7 +9,7 @@ import (
 	"github.com/vladimirvivien/ktop/controllers/overview"
 
 	"github.com/vladimirvivien/ktop/application"
-	"github.com/vladimirvivien/ktop/client"
+	"github.com/vladimirvivien/ktop/k8s"
 )
 
 func main() {
@@ -21,7 +21,7 @@ func main() {
 	flag.Parse()
 
 	fmt.Println("Connecting ...")
-	k8sClient, err := client.New(kubeconfig, ns)
+	k8sClient, err := k8s.NewClient(kubeconfig, ns)
 	if err != nil {
 		fmt.Println("Failed:", err)
 		os.Exit(1)
@@ -31,7 +31,7 @@ func main() {
 	app := application.New(k8sClient)
 	app.WelcomeBanner()
 	fmt.Println("Connecting to API server...")
-	overview.NewNodePanelCtrl(k8sClient, app).Run()
+	overview.New(app).Run()
 	app.ShowPage(0) // set default page
 
 	if err := app.Run(); err != nil {

@@ -4,21 +4,20 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/vladimirvivien/ktop/client"
-
 	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/k8s"
 )
 
 type Application struct {
-	k8sClient *client.K8sClient
+	k8sClient *k8s.Client
 	tviewApp  *tview.Application
 	appui     *appPanel
 	refreshQ  chan struct{}
 	stopCh    chan struct{}
 }
 
-func New(k8sClient *client.K8sClient) *Application {
+func New(k8sClient *k8s.Client) *Application {
 	app := &Application{
 		k8sClient: k8sClient,
 		tviewApp:  tview.NewApplication(),
@@ -60,6 +59,10 @@ func (app *Application) setHeader() {
 		app.k8sClient.Config.Host,
 		app.k8sClient.Namespace,
 	))
+}
+
+func (app *Application) GetK8sClient() *k8s.Client {
+	return app.k8sClient
 }
 
 func (app *Application) AddPage(title string, page tview.Primitive) {

@@ -5,8 +5,7 @@ import (
 
 	"github.com/rivo/tview"
 	"github.com/vladimirvivien/ktop/application"
-	"github.com/vladimirvivien/ktop/client"
-	"github.com/vladimirvivien/ktop/controllers"
+	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/ui"
 	appsV1 "k8s.io/api/apps/v1"
 	coreV1 "k8s.io/api/core/v1"
@@ -18,26 +17,27 @@ import (
 )
 
 type OverviewController struct {
-	podInformer   *controllers.InformerAdapter
-	nodeInformer  *controllers.InformerAdapter
-	depInformer   *controllers.InformerAdapter
-	dsInformer    *controllers.InformerAdapter
-	rsInformer    *controllers.InformerAdapter
-	k8sClient     *client.K8sClient
+	podInformer   *k8s.InformerAdapter
+	nodeInformer  *k8s.InformerAdapter
+	depInformer   *k8s.InformerAdapter
+	dsInformer    *k8s.InformerAdapter
+	rsInformer    *k8s.InformerAdapter
+	k8sClient     *k8s.Client
 	app           *application.Application
 	nodePanel     ui.Panel
 	podPanel      ui.Panel
 	workloadPanel ui.Panel
 }
 
-func NewNodePanelCtrl(k8sClient *client.K8sClient, app *application.Application) *OverviewController {
+func New(app *application.Application) *OverviewController {
+	k8sClient := app.GetK8sClient()
 	informerFac := k8sClient.InformerFactory
 	ctrl := &OverviewController{
-		nodeInformer: controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.NodesResource])),
-		podInformer:  controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.PodsResource])),
-		depInformer:  controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.DeploymentsResource])),
-		dsInformer:   controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.DaemonSetsResource])),
-		rsInformer:   controllers.NewInformerAdapter(informerFac.ForResource(client.Resources[client.ReplicaSetsResource])),
+		nodeInformer: k8s.NewInformerAdapter(informerFac.ForResource(k8s.Resources[k8s.NodesResource])),
+		podInformer:  k8s.NewInformerAdapter(informerFac.ForResource(k8s.Resources[k8s.PodsResource])),
+		depInformer:  k8s.NewInformerAdapter(informerFac.ForResource(k8s.Resources[k8s.DeploymentsResource])),
+		dsInformer:   k8s.NewInformerAdapter(informerFac.ForResource(k8s.Resources[k8s.DaemonSetsResource])),
+		rsInformer:   k8s.NewInformerAdapter(informerFac.ForResource(k8s.Resources[k8s.ReplicaSetsResource])),
 		app:          app,
 		k8sClient:    k8sClient,
 	}
@@ -46,7 +46,7 @@ func NewNodePanelCtrl(k8sClient *client.K8sClient, app *application.Application)
 }
 
 func (c *OverviewController) Run() {
-	c.setupNodeEventHandlers()
+	c.setupEventHandlers()
 	c.setupViews()
 }
 
@@ -71,7 +71,7 @@ func (c *OverviewController) setupViews() {
 	c.app.AddPage("Overview", page)
 }
 
-func (c *OverviewController) setupNodeEventHandlers() {
+func (c *OverviewController) setupEventHandlers() {
 	c.nodeInformer.SetAddObjectFunc(func(obj interface{}) {
 		c.refreshNodes(obj)
 	})
