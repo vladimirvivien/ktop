@@ -7,6 +7,7 @@ import (
 	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
 	"github.com/vladimirvivien/ktop/k8s"
+	"github.com/vladimirvivien/ktop/ui"
 )
 
 type Application struct {
@@ -55,7 +56,8 @@ func New(k8sClient *k8s.Client) *Application {
 
 func (app *Application) setHeader() {
 	app.appui.DrawHeader(fmt.Sprintf(
-		"[green]API server: [white]%s [green]namespace: [white]%s",
+		"%c [green]API server: [white]%s [green]namespace: [white]%s",
+		ui.Icons.Rocket,
 		app.k8sClient.Config.Host,
 		app.k8sClient.Namespace,
 	))

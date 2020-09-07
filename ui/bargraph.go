@@ -91,12 +91,12 @@ func BarGraph(scale int, ratio Ratio, colors ColorKeys) string {
 	}
 
 	// draw graph
-	graph.WriteString("[")
+	graph.WriteString(string(Icons.BargraphLBorder))
 	graph.WriteString(color)
-	graph.WriteString("]")
+	graph.WriteString(string(Icons.BargraphRBorder))
 
 	for i := 0; i < int(math.Min(float64(scale), float64(graphVal))); i++ {
-		graph.WriteRune('|')
+		graph.WriteRune(Icons.BargraphChar)
 	}
 
 	for j := 0; j < (scale - graphVal); j++ {
