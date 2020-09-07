@@ -1,6 +1,7 @@
 package k8s
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -14,7 +15,9 @@ import (
 	restclient "k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics"
+	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
+	ctrl "sigs.k8s.io/controller-runtime"
 )
 
 var (
@@ -37,6 +40,101 @@ var (
 	}
 )
 
+type Interface interface {
+	Start() error
+	Namespace() string
+	AssertMetricsAvailable() error
+}
+
+type k8sClient struct {
+	ctx              context.Context
+	namespace        string
+	manager          ctrl.Manager
+	discoClient      *discovery.DiscoveryClient
+	metricsClient *metricsclient.Clientset
+	metricsAvailable bool
+}
+
+func New(ctx context.Context, namespace string) (Interface, error) {
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+		Scheme:    runtime.NewScheme(),
+		Namespace: namespace,
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	config := mgr.GetConfig()
+
+	disco, err := discovery.NewDiscoveryClientForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	metrics, err := metricsclient.NewForConfig(mgr.GetConfig())
+	if err != nil {
+		return nil, err
+	}
+
+	client := &k8sClient{
+		ctx:         ctx,
+		namespace:   namespace,
+		manager:     mgr,
+		discoClient: disco,
+		metricsClient: metrics,
+	}
+
+	if client.AssertMetricsAvailable()  != nil {
+		return nil, fmt.Errorf("metrics not available: %s", err)
+	}
+
+	return client, nil
+}
+
+func (k8s *k8sClient) Start() error {
+	return k8s.manager.Start(ctrl.SetupSignalHandler())
+}
+
+func (k8s *k8sClient) Namespace() string {
+	return k8s.namespace
+}
+
+func (k8s *k8sClient) AssertMetricsAvailable() error {
+	groups, err := k8s.discoClient.ServerGroups()
+	if err != nil {
+		return err
+	}
+
+	avail := false
+	for _, group := range groups.Groups {
+		if group.Name == metricsapi.GroupName {
+			avail = true
+		}
+	}
+
+	k8s.metricsAvailable =  avail
+	if !avail {
+		return fmt.Errorf("metrics api not available")
+	}
+	return nil
+}
+
+// GetMetricsByNode returns metrics for specified node
+func (k8s *k8sClient) GetNodeMetrics(nodeName string) (*metricsV1beta1.NodeMetrics, error) {
+	if !k8s.metricsAvailable {
+		return nil, fmt.Errorf("metrics api not available")
+	}
+
+	metrics, err := k8s.metricsClient.MetricsV1beta1().NodeMetricses().Get(k8s.ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return metrics, nil
+}
+
+// ********************************************************************************************************
 type Client struct {
 	Namespace       string
 	DynamicClient   dynamic.Interface
@@ -100,7 +198,7 @@ func (c *Client) GetMetricsByNode(nodeName string) (*metricsV1beta1.NodeMetrics,
 		return new(metricsV1beta1.NodeMetrics), nil
 	}
 
-	objList, err := c.DynamicClient.Resource(Resources[NodeMetricsResource]).List(metav1.ListOptions{})
+	objList, err := c.DynamicClient.Resource(Resources[NodeMetricsResource]).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +224,7 @@ func (c *Client) GetMetricsByPod(podName string) (*metricsV1beta1.PodMetrics, er
 		return new(metricsV1beta1.PodMetrics), nil
 	}
 
-	objList, err := c.DynamicClient.Resource(Resources[PodMetricsResource]).List(metav1.ListOptions{})
+	objList, err := c.DynamicClient.Resource(Resources[PodMetricsResource]).List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
