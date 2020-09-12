@@ -6,69 +6,47 @@ import (
 
 	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
+
 	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/ui"
 )
 
+type ApplicationPanel struct {
+	Title string
+	View  tview.Primitive
+}
+
 type Application struct {
 	k8sClient *k8s.Client
 	tviewApp  *tview.Application
-	appui     *appPanel
+	views     []ApplicationPanel
+	visibleView int
+	panel     *appPanel
 	refreshQ  chan struct{}
 	stopCh    chan struct{}
 }
 
 func New(k8sClient *k8s.Client) *Application {
+	tapp := tview.NewApplication()
 	app := &Application{
 		k8sClient: k8sClient,
-		tviewApp:  tview.NewApplication(),
+		tviewApp:  tapp,
+		panel:     newPanel(tapp),
 		refreshQ:  make(chan struct{}, 1),
-		stopCh:    make(chan struct{}),
 	}
-
-	app.appui = newAppPanel(app.tviewApp)
-	app.setHeader()
-
-	app.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyEsc:
-			app.Stop()
-		case tcell.KeyF1:
-			app.appui.switchToPage(0)
-		case tcell.KeyF2:
-			app.appui.switchToPage(1)
-		default:
-			return event
-		}
-
-		return event
-	})
-
-	// setup refresh queue
-	go func() {
-		for range app.refreshQ {
-			app.tviewApp.Draw()
-		}
-	}()
-
 	return app
-}
-
-func (app *Application) setHeader() {
-	app.appui.DrawHeader(fmt.Sprintf(
-		"%c [green]API server: [white]%s [green]namespace: [white]%s",
-		ui.Icons.Rocket,
-		app.k8sClient.Config.Host,
-		app.k8sClient.Namespace,
-	))
 }
 
 func (app *Application) GetK8sClient() *k8s.Client {
 	return app.k8sClient
 }
 
-func (app *Application) AddPage(title string, page tview.Primitive) {
-	app.appui.addPage(title, page)
+func (app *Application) AddPanel(panel ui.PanelController) {
+	title := panel.GetTitle()
+	if err := panel.Run(); err != nil {
+		panic(fmt.Sprintf("application.AddPanel failed: %s", err))
+	}
+	app.views = append(app.views, ApplicationPanel{Title: title, View: panel.GetView()})
 }
 
 func (app *Application) Focus(t tview.Primitive) {
@@ -76,11 +54,11 @@ func (app *Application) Focus(t tview.Primitive) {
 }
 
 func (app *Application) Refresh() {
-	app.refreshQ <- struct{}{}
+		app.refreshQ <- struct{}{}
 }
 
-func (app *Application) ShowPage(i int) {
-	app.appui.switchToPage(i)
+func (app *Application) ShowPanel(i int) {
+	app.visibleView = i
 }
 
 func (app *Application) GetStopChan() <-chan struct{} {
@@ -99,11 +77,43 @@ func (app *Application) WelcomeBanner() {
 	fmt.Println("Version 0.1.0-alpha.1")
 }
 
+func (app *Application) Init() {
+	app.panel.Layout(app.views)
+
+	app.panel.DrawHeader(fmt.Sprintf(
+		"%c [green]API server: [white]%s [green]namespace: [white]%s",
+		ui.Icons.Rocket, app.k8sClient.Config().Host, app.k8sClient.Namespace(),
+	))
+	app.panel.DrawFooter(app.getPageTitles()[app.visibleView])
+
+	app.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEsc {
+			app.Stop()
+		}
+
+		if event.Key() < tcell.KeyF1 || event.Key() > tcell.KeyF12 {
+			return event
+		}
+
+		keyPos := event.Key() - tcell.KeyF1
+		titles := app.getPageTitles()
+		if (keyPos >= 0 || keyPos <= 9) && (int(keyPos) <= len(titles)-1) {
+			app.panel.switchToPage(app.getPageTitles()[keyPos])
+		}
+		return event
+	})
+
+}
+
 func (app *Application) Run() error {
-	if app.tviewApp == nil {
-		return errors.New("failed to start, tview.Application nil")
-	}
-	app.k8sClient.InformerFactory.Start(app.GetStopChan())
+
+	// setup refresh queue
+	go func() {
+		for range app.refreshQ {
+			app.tviewApp.Draw()
+		}
+	}()
+
 	return app.tviewApp.Run()
 }
 
@@ -112,7 +122,13 @@ func (app *Application) Stop() error {
 		return errors.New("failed to stop, tview.Application nil")
 	}
 	app.tviewApp.Stop()
-	close(app.stopCh)
 	fmt.Println("ktop finished")
 	return nil
+}
+
+func (app *Application) getPageTitles() (titles []string) {
+	for _, page := range app.views {
+		titles = append(titles, page.Title)
+	}
+	return
 }

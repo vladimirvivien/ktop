@@ -1,40 +1,31 @@
-package deployments
+package overview
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
+
+	"github.com/vladimirvivien/ktop/views/model"
 	"github.com/vladimirvivien/ktop/ui"
 )
 
-type DepItem struct {
-	Name       string
-	Status     string
-	Age        int
-	Strategy   string
-	PodsStatus string
-	VolStatus  string
-}
-type depPanel struct {
+type nodePanel struct {
 	title    string
 	root     *tview.Flex
 	listCols []string
 	list     *tview.Table
 }
 
-func NewDeploymentPanel(title string) ui.Panel {
-	p := &depPanel{title: title}
-	p.Layout()
+func NewNodePanel(title string) ui.Panel {
+	p := &nodePanel{title: title}
+	p.Layout(nil)
 	return p
 }
-
-func (p *depPanel) GetTitle() string {
+func (p *nodePanel) GetTitle() string {
 	return p.title
 }
-
-func (p *depPanel) Layout() {
+func (p *nodePanel) Layout(data interface{}) {
 	p.list = tview.NewTable()
 	p.list.SetBorder(true)
 	p.list.SetBorders(false)
@@ -46,7 +37,12 @@ func (p *depPanel) Layout() {
 		AddItem(p.list, 0, 1, true)
 }
 
-func (p *depPanel) DrawHeader(cols ...string) {
+func (p *nodePanel) DrawHeader(data interface{}) {
+	cols, ok := data.([]string)
+	if !ok {
+		panic(fmt.Sprintf("nodePanel.DrawHeader got unexpected data type %T", data))
+	}
+
 	p.listCols = cols
 	for i, col := range p.listCols {
 		p.list.SetCell(0, i,
@@ -59,62 +55,71 @@ func (p *depPanel) DrawHeader(cols ...string) {
 	}
 }
 
-func (p *depPanel) DrawBody(data interface{}) {
-	rows, ok := data.([]DepItem)
+func (p *nodePanel) DrawBody(data interface{}) {
+	store, ok := data.(*model.Store)
 	if !ok {
-		panic(fmt.Sprintf("DepPanel.DrawBody got unexpected type %T", data))
+		panic(fmt.Sprintf("NodePanel.DrawBody got unexpected store type %T", data))
 	}
-
-	sort.Slice(rows, func(i, j int) bool {
-		return rows[i].Name < rows[j].Name
-	})
 
 	colorKeys := ui.ColorKeys{0: "green", 50: "yellow", 90: "red"}
 
-	for i, row := range rows {
+	for i, key := range store.Keys() {
+		r, found := store.Get(key)
+		if !found {
+			continue
+		}
+		row, ok := r.(model.NodeModel)
+		if !ok {
+			panic(fmt.Sprintf("NodePanel.DrawBody got unexpected model type %T", data))
+		}
+
 		cpuRatio := ui.GetRatio(float64(row.CpuValue), float64(row.CpuAvailValue))
 		cpuGraph := ui.BarGraph(10, cpuRatio, colorKeys)
 
 		memRatio := ui.GetRatio(float64(row.MemValue), float64(row.MemAvailValue))
 		memGraph := ui.BarGraph(10, memRatio, colorKeys)
 
+		if !found {
+			continue
+		}
+		i++
 		p.list.SetCell(
-			i+1, 0,
+			i, 0,
 			&tview.TableCell{
 				Text:  row.Name,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
 		).SetCell(
-			i+1, 1,
+			i, 1,
 			&tview.TableCell{
 				Text:  row.Status,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
 		).SetCell(
-			i+1, 2,
+			i, 2,
 			&tview.TableCell{
 				Text:  row.Role,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
 		).SetCell(
-			i+1, 3,
+			i, 3,
 			&tview.TableCell{
 				Text:  row.Version,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
 		).SetCell(
-			i+1, 4,
+			i, 4,
 			&tview.TableCell{
 				Text:  fmt.Sprintf("[white][%s[white]] %-2.1f%%", cpuGraph, cpuRatio*100),
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
 		).SetCell(
-			i+1, 5,
+			i, 5,
 			&tview.TableCell{
 				Text:  fmt.Sprintf("[white][%s[white]] %02.1f%%", memGraph, memRatio*100),
 				Color: tcell.ColorYellow,
@@ -124,14 +129,14 @@ func (p *depPanel) DrawBody(data interface{}) {
 	}
 }
 
-func (p *depPanel) DrawFooter(cols ...string) {
+func (p *nodePanel) DrawFooter(data interface{}) {
 
 }
 
-func (p *depPanel) Clear() {
+func (p *nodePanel) Clear() {
 
 }
 
-func (p *depPanel) GetView() tview.Primitive {
+func (p *nodePanel) GetView() tview.Primitive {
 	return p.root
 }

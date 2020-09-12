@@ -1,38 +1,42 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
-
-	"github.com/vladimirvivien/ktop/controllers/overview"
 
 	"github.com/vladimirvivien/ktop/application"
 	"github.com/vladimirvivien/ktop/k8s"
+	"github.com/vladimirvivien/ktop/views/overview"
 )
 
 func main() {
 	var ns, pg string
-	kubeconfig := filepath.Join(os.Getenv("HOME"), ".kube", "config")
-	flag.StringVar(&kubeconfig, "kubeconfig", kubeconfig, "kubeconfig file")
 	flag.StringVar(&ns, "namespace", "default", "namespace")
 	flag.StringVar(&pg, "page", "overview", "the default UI page to show")
 	flag.Parse()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	fmt.Println("Connecting ...")
-	k8sClient, err := k8s.NewClient(kubeconfig, ns)
+	k8sClient, err := k8s.New(ctx, ns)
 	if err != nil {
 		fmt.Println("Failed:", err)
 		os.Exit(1)
 	}
-	fmt.Println("Connected to server: ", k8sClient.Config.Host)
+	fmt.Println("Connected to server: ", k8sClient.Config().Host)
+	if err := k8sClient.Start(); err != nil {
+		fmt.Println("failed to start:", err)
+		os.Exit(1)
+	}
 
 	app := application.New(k8sClient)
 	app.WelcomeBanner()
-	fmt.Println("Connecting to API server...")
-	overview.New(app).Run()
-	app.ShowPage(0) // set default page
+	app.AddPanel(overview.New(k8sClient, "Overview", app.Refresh))
+	app.Init()
+	//app.ShowPanel(0) // set default page
 
 	if err := app.Run(); err != nil {
 		fmt.Println(err)

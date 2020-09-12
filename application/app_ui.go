@@ -9,11 +9,6 @@ import (
 )
 
 var (
-	PageNames = []string{
-		"Overview",
-		"Deployments",
-	}
-
 	buttonUnselectedBgColor = tcell.ColorPaleGreen
 	buttonUnselectedFgColor = tcell.ColorDarkBlue
 	buttonSelectedBgColor   = tcell.ColorBlue
@@ -21,17 +16,15 @@ var (
 )
 
 type appPanel struct {
-	tviewApp   *tview.Application
-	title      string
-	header     *tview.TextView
-	pages      *tview.Pages
-	pageTitles []string
-	buttons    *tview.Table
+	tviewApp *tview.Application
+	title    string
+	header   *tview.TextView
+	pages    *tview.Pages
+	footer   *tview.Table
 }
 
-func newAppPanel(app *tview.Application) *appPanel {
+func newPanel(app *tview.Application) *appPanel {
 	p := &appPanel{title: "ktop", tviewApp: app}
-	p.Layout()
 	return p
 }
 
@@ -39,37 +32,32 @@ func (p *appPanel) GetTitle() string {
 	return p.title
 }
 
-func (p *appPanel) Layout() {
+func (p *appPanel) Layout(data interface{}) {
 	p.header = tview.NewTextView().SetDynamicColors(true)
 	p.header.SetBorder(true)
 	p.pages = tview.NewPages()
-	p.DrawFooter(PageNames...)
+	p.footer = tview.NewTable()
+	p.footer.SetBorder(true)
 
 	content := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(p.header, 3, 1, false). // header
 		AddItem(p.pages, 0, 1, true).   // body
-		AddItem(p.buttons, 3, 1, false) // footer
+		AddItem(p.footer, 3, 1, false) // footer
 
 	p.tviewApp.SetRoot(content, true)
-}
 
-func (p *appPanel) DrawHeader(headers ...string) {
-	title := strings.Join(headers, " ")
-	fmt.Fprintf(p.header, title)
-}
+	// add pages
+	pages, ok := data.([]ApplicationPanel)
+	if !ok{
+		panic(fmt.Sprintf("application.Layout got unexpected data type: %T", data))
+	}
 
-func (p *appPanel) DrawBody(data interface{}) {
-	p.tviewApp.Draw()
-}
-
-func (p *appPanel) DrawFooter(buttonNames ...string) {
-	buttons := tview.NewTable()
-	buttons.SetBorder(true)
-
-	for i := 0; i < len(buttonNames); i++ {
-		buttons.SetCell(0, i,
+	// setup page and page buttons in footer
+	for i, page := range pages {
+		p.pages.AddPage(page.Title, page.View, true, false)
+		p.footer.SetCell(0, i,
 			&tview.TableCell{
-				Text:            fmt.Sprintf("  %s (F%d)  ", PageNames[i], i+1),
+				Text:            fmt.Sprintf("  %s (F%d)  ", page.Title, i+1),
 				Color:           buttonUnselectedFgColor,
 				Align:           tview.AlignCenter,
 				BackgroundColor: buttonUnselectedBgColor,
@@ -77,8 +65,25 @@ func (p *appPanel) DrawFooter(buttonNames ...string) {
 			},
 		)
 	}
+}
 
-	p.buttons = buttons
+func (p *appPanel) DrawHeader(data interface{}) {
+	header, ok := data.(string)
+	if !ok{
+		panic(fmt.Sprintf("application.Drawheader got unexpected type %T", data))
+	}
+
+	fmt.Fprintf(p.header, header)
+}
+
+func (p *appPanel) DrawBody(data interface{}) {}
+
+func (p *appPanel) DrawFooter(data interface{}) {
+	title, ok := data.(string)
+	if !ok{
+		panic(fmt.Sprintf("application.DrawBody got unexpected data type: %T", data))
+	}
+	p.switchToPage(title)
 }
 
 func (p *appPanel) Clear() {
@@ -89,25 +94,14 @@ func (p *appPanel) GetView() tview.Primitive {
 	return p.pages
 }
 
-func (p *appPanel) addPage(pageTitle string, page tview.Primitive) {
-	if p.pages == nil {
-		panic("Application panel UI missing pages")
-	}
-	p.pageTitles = append(p.pageTitles, pageTitle)
-	p.pages.AddPage(pageTitle, page, true, false)
-}
-
-func (p *appPanel) switchToPage(pgIdx int) {
-	if !p.pages.HasPage(PageNames[pgIdx]) {
-		panic(fmt.Sprintf("Screen page %s not found", PageNames[pgIdx]))
-	}
+func (p *appPanel) switchToPage(title string) {
 
 	row := 0
-	cols := p.buttons.GetColumnCount()
+	cols := p.footer.GetColumnCount()
 
 	for i := 0; i < cols; i++ {
-		cell := p.buttons.GetCell(row, i)
-		if i == pgIdx {
+		cell := p.footer.GetCell(row, i)
+		if strings.HasPrefix(strings.TrimSpace(cell.Text),title) {
 			cell.SetTextColor(buttonSelectedFgColor)
 			cell.SetBackgroundColor(buttonSelectedBgColor)
 		} else {
@@ -115,7 +109,5 @@ func (p *appPanel) switchToPage(pgIdx int) {
 			cell.SetBackgroundColor(buttonUnselectedBgColor)
 		}
 	}
-
-	p.pages.SwitchToPage(PageNames[pgIdx])
-	p.tviewApp.Draw()
+	p.pages.SwitchToPage(title)
 }

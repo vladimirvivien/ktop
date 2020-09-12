@@ -3,61 +3,28 @@ package k8s
 import (
 	"context"
 	"fmt"
-	"time"
-
-	"k8s.io/apimachinery/pkg/runtime"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/dynamic/dynamicinformer"
 	restclient "k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics"
-	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
+	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
 
-var (
-	NodeMetricsResource = "nodemetrics"
-	PodMetricsResource  = "podmetrics"
-	DeploymentsResource = "deployments"
-	NodesResource       = "nodes"
-	PodsResource        = "pods"
-	DaemonSetsResource  = "daemonsets"
-	ReplicaSetsResource = "replicasets"
-
-	Resources = map[string]schema.GroupVersionResource{
-		NodesResource:       schema.GroupVersionResource{Group: "", Version: "v1", Resource: NodesResource},
-		PodsResource:        schema.GroupVersionResource{Group: "", Version: "v1", Resource: PodsResource},
-		DeploymentsResource: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: DeploymentsResource},
-		NodeMetricsResource: schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "nodes"},
-		PodMetricsResource:  schema.GroupVersionResource{Group: "metrics.k8s.io", Version: "v1beta1", Resource: "pods"},
-		DaemonSetsResource:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: DaemonSetsResource},
-		ReplicaSetsResource: schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: ReplicaSetsResource},
-	}
-)
-
-type Interface interface {
-	Start() error
-	Namespace() string
-	AssertMetricsAvailable() error
-}
-
-type k8sClient struct {
+type Client struct {
 	ctx              context.Context
 	namespace        string
 	manager          ctrl.Manager
 	discoClient      *discovery.DiscoveryClient
-	metricsClient *metricsclient.Clientset
+	metricsClient    *metricsclient.Clientset
 	metricsAvailable bool
+	nodeCtrl         *NodeController
 }
 
-func New(ctx context.Context, namespace string) (Interface, error) {
+func New(ctx context.Context, namespace string) (*Client, error) {
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:    runtime.NewScheme(),
 		Namespace: namespace,
 	})
 
@@ -77,30 +44,51 @@ func New(ctx context.Context, namespace string) (Interface, error) {
 		return nil, err
 	}
 
-	client := &k8sClient{
-		ctx:         ctx,
-		namespace:   namespace,
-		manager:     mgr,
-		discoClient: disco,
-		metricsClient: metrics,
+	nodeCtrl, err := NewNodeController(ctx, mgr)
+	if err != nil {
+		return nil, err
 	}
 
-	if client.AssertMetricsAvailable()  != nil {
-		return nil, fmt.Errorf("metrics not available: %s", err)
+	client := &Client{
+		ctx:           ctx,
+		namespace:     namespace,
+		manager:       mgr,
+		discoClient:   disco,
+		metricsClient: metrics,
+		nodeCtrl:      nodeCtrl,
+	}
+
+	if err := client.AssertMetricsAvailable(); err != nil {
+		return nil, fmt.Errorf("failed to create client: %s", err)
 	}
 
 	return client, nil
 }
 
-func (k8s *k8sClient) Start() error {
-	return k8s.manager.Start(ctrl.SetupSignalHandler())
-}
-
-func (k8s *k8sClient) Namespace() string {
+func (k8s *Client) Namespace() string {
 	return k8s.namespace
 }
 
-func (k8s *k8sClient) AssertMetricsAvailable() error {
+func (k8s *Client) Config() *restclient.Config {
+	return k8s.manager.GetConfig()
+}
+
+func (k8s *Client) Start() error {
+	errCh := make(chan error)
+
+	go func() {
+		errCh <- k8s.manager.Start(ctrl.SetupSignalHandler())
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	default:
+		return nil
+	}
+}
+
+func (k8s *Client) AssertMetricsAvailable() error {
 	groups, err := k8s.discoClient.ServerGroups()
 	if err != nil {
 		return err
@@ -113,15 +101,15 @@ func (k8s *k8sClient) AssertMetricsAvailable() error {
 		}
 	}
 
-	k8s.metricsAvailable =  avail
+	k8s.metricsAvailable = avail
 	if !avail {
 		return fmt.Errorf("metrics api not available")
 	}
 	return nil
 }
 
-// GetMetricsByNode returns metrics for specified node
-func (k8s *k8sClient) GetNodeMetrics(nodeName string) (*metricsV1beta1.NodeMetrics, error) {
+// GetNodeMetrics returns metrics for specified node
+func (k8s *Client) GetNodeMetrics(nodeName string) (*metricsV1beta1.NodeMetrics, error) {
 	if !k8s.metricsAvailable {
 		return nil, fmt.Errorf("metrics api not available")
 	}
@@ -134,109 +122,131 @@ func (k8s *k8sClient) GetNodeMetrics(nodeName string) (*metricsV1beta1.NodeMetri
 	return metrics, nil
 }
 
-// ********************************************************************************************************
-type Client struct {
-	Namespace       string
-	DynamicClient   dynamic.Interface
-	InformerFactory dynamicinformer.DynamicSharedInformerFactory
-	Config          *restclient.Config
+// GetPodMetrics returns metrics for specified pod
+func (k8s *Client) GetPodMetrics(podName string) (*metricsV1beta1.PodMetrics, error) {
+	if !k8s.metricsAvailable {
+		return nil, fmt.Errorf("metrics api not available")
+	}
 
-	MetricsAreAvailable bool
-}
-
-func NewClient(kubeconfig string, namespace string) (*Client, error) {
-	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	metrics, err := k8s.metricsClient.MetricsV1beta1().PodMetricses(k8s.namespace).Get(k8s.ctx, podName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
 
-	dynclient := dynamic.NewForConfigOrDie(config)
-	discoClient := discovery.NewDiscoveryClientForConfigOrDie(config)
-	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(dynclient, time.Second*3, namespace, nil)
-	k8sClient := &Client{
-		Namespace:       namespace,
-		DynamicClient:   dynclient,
-		Config:          config,
-		InformerFactory: factory,
-	}
-	k8sClient.MetricsAreAvailable = areMetricsAvail(discoClient)
-	return k8sClient, nil
+	return metrics, nil
 }
 
-func (c *Client) Start(stopCh <-chan struct{}) {
-	if c.InformerFactory == nil {
-		panic("Failed to start Client, nil InformerFactory")
-	}
-
-	for name, res := range Resources {
-		if synced := c.InformerFactory.WaitForCacheSync(stopCh); !synced[res] {
-			panic(fmt.Sprintf("Informer for %s did not sync", name))
-		}
-	}
+func (k8s *Client) AddNodeUpdateHandler(f NodeUpdateFunc) {
+	k8s.nodeCtrl.AddUpdateHandler(f)
 }
 
-func areMetricsAvail(disco *discovery.DiscoveryClient) bool {
-	groups, err := disco.ServerGroups()
-	if err != nil {
-		return false
-	}
-
-	for _, group := range groups.Groups {
-		if group.Name == metricsapi.GroupName {
-			return true
-		}
-	}
-	return false
+func (k8s *Client) AddNodeDeleteHandler(f NodeDeleteFunc) {
+	k8s.nodeCtrl.AddDeleteHandler(f)
 }
 
-// GetMetricsByNode returns metrics for specified node
-func (c *Client) GetMetricsByNode(nodeName string) (*metricsV1beta1.NodeMetrics, error) {
-	// TODO unfortunately, nodemetric types are not watchable (without applying RBAC rules)
-	// for now, the code just does a simple list every time metrics are needed
-
-	if !c.MetricsAreAvailable {
-		return new(metricsV1beta1.NodeMetrics), nil
-	}
-
-	objList, err := c.DynamicClient.Resource(Resources[NodeMetricsResource]).List(context.Background(), metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	for _, obj := range objList.Items {
-		if obj.GetName() == nodeName {
-			metrics := new(metricsV1beta1.NodeMetrics)
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &metrics); err != nil {
-				return nil, err
-			}
-			return metrics, nil
-		}
-	}
-	return new(metricsV1beta1.NodeMetrics), nil
-}
-
-// GetMetricsByPod returns metrics for specified pod
-func (c *Client) GetMetricsByPod(podName string) (*metricsV1beta1.PodMetrics, error) {
-	// TODO unfortunately, podmetric types are not watchable (without applying RBAC rules)
-	// for now, the code just does a simple list every time metrics are needed
-
-	if !c.MetricsAreAvailable {
-		return new(metricsV1beta1.PodMetrics), nil
-	}
-
-	objList, err := c.DynamicClient.Resource(Resources[PodMetricsResource]).List(context.Background(), metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	for _, obj := range objList.Items {
-		if obj.GetName() == podName {
-			metrics := new(metricsV1beta1.PodMetrics)
-			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &metrics); err != nil {
-				return nil, err
-			}
-			return metrics, nil
-		}
-	}
-	return new(metricsV1beta1.PodMetrics), nil
-}
+//// ********************************************************************************************************
+//type Client struct {
+//	Namespace       string
+//	DynamicClient   dynamic.Interface
+//	InformerFactory dynamicinformer.DynamicSharedInformerFactory
+//	Config          *restclient.Config
+//
+//	MetricsAreAvailable bool
+//}
+//
+//func NewClient(kubeconfig string, namespace string) (*Client, error) {
+//	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	dynclient := dynamic.NewForConfigOrDie(config)
+//	discoClient := discovery.NewDiscoveryClientForConfigOrDie(config)
+//	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(dynclient, time.Second*3, namespace, nil)
+//	Client := &Client{
+//		Namespace:       namespace,
+//		DynamicClient:   dynclient,
+//		Config:          config,
+//		InformerFactory: factory,
+//	}
+//	Client.MetricsAreAvailable = areMetricsAvail(discoClient)
+//	return Client, nil
+//}
+//
+//func (c *Client) Start(stopCh <-chan struct{}) {
+//	if c.InformerFactory == nil {
+//		panic("Failed to start Client, nil InformerFactory")
+//	}
+//
+//	for name, res := range Resources {
+//		if synced := c.InformerFactory.WaitForCacheSync(stopCh); !synced[res] {
+//			panic(fmt.Sprintf("Informer for %s did not sync", name))
+//		}
+//	}
+//}
+//
+//func areMetricsAvail(disco *discovery.DiscoveryClient) bool {
+//	groups, err := disco.ServerGroups()
+//	if err != nil {
+//		return false
+//	}
+//
+//	for _, group := range groups.Groups {
+//		if group.Name == metricsapi.GroupName {
+//			return true
+//		}
+//	}
+//	return false
+//}
+//
+//// GetMetricsByNode returns metrics for specified node
+//func (c *Client) GetMetricsByNode(nodeName string) (*metricsV1beta1.NodeMetrics, error) {
+//	// TODO unfortunately, nodemetric types are not watchable (without applying RBAC rules)
+//	// for now, the code just does a simple list every time metrics are needed
+//
+//	if !c.MetricsAreAvailable {
+//		return new(metricsV1beta1.NodeMetrics), nil
+//	}
+//
+//	objList, err := c.DynamicClient.Resource(Resources[NodeMetricsResource]).List(context.Background(), metav1.ListOptions{})
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	for _, obj := range objList.Items {
+//		if obj.GetName() == nodeName {
+//			metrics := new(metricsV1beta1.NodeMetrics)
+//			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &metrics); err != nil {
+//				return nil, err
+//			}
+//			return metrics, nil
+//		}
+//	}
+//	return new(metricsV1beta1.NodeMetrics), nil
+//}
+//
+//// GetMetricsByPod returns metrics for specified pod
+//func (c *Client) GetMetricsByPod(podName string) (*metricsV1beta1.PodMetrics, error) {
+//	// TODO unfortunately, podmetric types are not watchable (without applying RBAC rules)
+//	// for now, the code just does a simple list every time metrics are needed
+//
+//	if !c.MetricsAreAvailable {
+//		return new(metricsV1beta1.PodMetrics), nil
+//	}
+//
+//	objList, err := c.DynamicClient.Resource(Resources[PodMetricsResource]).List(context.Background(), metav1.ListOptions{})
+//	if err != nil {
+//		return nil, err
+//	}
+//
+//	for _, obj := range objList.Items {
+//		if obj.GetName() == podName {
+//			metrics := new(metricsV1beta1.PodMetrics)
+//			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &metrics); err != nil {
+//				return nil, err
+//			}
+//			return metrics, nil
+//		}
+//	}
+//	return new(metricsV1beta1.PodMetrics), nil
+//}

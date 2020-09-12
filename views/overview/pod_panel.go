@@ -30,13 +30,13 @@ type podPanel struct {
 
 func NewPodPanel(title string) ui.Panel {
 	p := &podPanel{title: title}
-	p.Layout()
+	p.Layout(nil)
 	return p
 }
 func (p *podPanel) GetTitle() string {
 	return p.title
 }
-func (p *podPanel) Layout() {
+func (p *podPanel) Layout(data interface{}) {
 	p.list = tview.NewTable()
 	p.list.SetBorder(true)
 	p.list.SetBorders(false)
@@ -48,7 +48,12 @@ func (p *podPanel) Layout() {
 		AddItem(p.list, 0, 1, true)
 }
 
-func (p *podPanel) DrawHeader(cols ...string) {
+func (p *podPanel) DrawHeader(data interface{}) {
+	cols, ok := data.([]string)
+	if !ok {
+		panic(fmt.Sprintf("podPanel.DrawBody got unexpected data type %T", data))
+	}
+
 	p.listCols = cols
 	for i, col := range p.listCols {
 		p.list.SetCell(0, i,
@@ -123,7 +128,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 	}
 }
 
-func (p *podPanel) DrawFooter(cols ...string) {
+func (p *podPanel) DrawFooter(data interface{}) {
 
 }
 

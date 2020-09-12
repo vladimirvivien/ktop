@@ -5,11 +5,16 @@ import (
 )
 
 type Panel interface {
-	Layout()
-	Clear()
-	DrawHeader(...string)
+	Layout(data interface{})
+	DrawHeader(data interface{})
 	DrawBody(data interface{})
-	DrawFooter(...string)
+	DrawFooter(param interface{})
+	Clear()
 	GetTitle() string
 	GetView() tview.Primitive
+}
+
+type PanelController interface {
+	Panel
+	Run() error
 }

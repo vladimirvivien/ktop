@@ -28,14 +28,14 @@ type workloadPanel struct {
 
 func NewWorkloadPanel(title string) ui.Panel {
 	p := &workloadPanel{title: title}
-	p.Layout()
+	p.Layout(nil)
 	return p
 }
 
 func (p *workloadPanel) GetTitle() string {
 	return p.title
 }
-func (p *workloadPanel) Layout() {
+func (p *workloadPanel) Layout(data interface{}) {
 	p.table = tview.NewTable()
 	p.table.SetBorder(true)
 	p.table.SetBorders(false)
@@ -47,7 +47,7 @@ func (p *workloadPanel) Layout() {
 		AddItem(p.table, 0, 1, true)
 }
 
-func (p *workloadPanel) DrawHeader(cols ...string) {}
+func (p *workloadPanel) DrawHeader(data interface{}) {}
 
 func (p *workloadPanel) DrawBody(data interface{}) {
 	wl, ok := data.(WorkloadItem)
@@ -122,7 +122,7 @@ func (p *workloadPanel) DrawBody(data interface{}) {
 	)
 }
 
-func (p *workloadPanel) DrawFooter(cols ...string) {
+func (p *workloadPanel) DrawFooter(data interface{}) {
 
 }
 
