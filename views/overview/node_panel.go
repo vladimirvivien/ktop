@@ -70,7 +70,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 		}
 		row, ok := r.(model.NodeModel)
 		if !ok {
-			panic(fmt.Sprintf("NodePanel.DrawBody got unexpected model type %T", data))
+			panic(fmt.Sprintf("NodePanel.DrawBody got unexpected model type %T", r))
 		}
 
 		cpuRatio := ui.GetRatio(float64(row.CpuValue), float64(row.CpuAvailValue))
@@ -129,13 +129,8 @@ func (p *nodePanel) DrawBody(data interface{}) {
 	}
 }
 
-func (p *nodePanel) DrawFooter(data interface{}) {
-
-}
-
-func (p *nodePanel) Clear() {
-
-}
+func (p *nodePanel) DrawFooter(data interface{}) {}
+func (p *nodePanel) Clear() {}
 
 func (p *nodePanel) GetView() tview.Primitive {
 	return p.root

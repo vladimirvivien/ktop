@@ -2,24 +2,13 @@ package overview
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
-	"github.com/vladimirvivien/ktop/ui"
-)
 
-type PodItem struct {
-	Name,
-	Status,
-	Node,
-	IP string
-	PodCPUValue,
-	PodMemValue,
-	NodeCPUValue,
-	NodeMemValue int64
-	Volumes int
-}
+	"github.com/vladimirvivien/ktop/ui"
+	"github.com/vladimirvivien/ktop/views/model"
+)
 
 type podPanel struct {
 	title    string
@@ -67,18 +56,23 @@ func (p *podPanel) DrawHeader(data interface{}) {
 }
 
 func (p *podPanel) DrawBody(data interface{}) {
-	rows, ok := data.([]PodItem)
+	store, ok := data.(*model.Store)
 	if !ok {
 		panic(fmt.Sprintf("PodPanel.DrawBody got unexpected type %T", data))
 	}
 
-	sort.Slice(rows, func(i, j int) bool {
-		return rows[i].Name < rows[j].Name
-	})
-
 	colorKeys := ui.ColorKeys{0: "green", 50: "yellow", 90: "red"}
 
-	for i, row := range rows {
+	for i, key := range store.Keys() {
+		r, found := store.Get(key)
+		if !found {
+			continue
+		}
+		row, ok := r.(model.PodModel)
+		if !ok {
+			panic(fmt.Sprintf("PodPanel.DrawBody got unexpected model type %T", r))
+		}
+
 		p.list.SetCell(
 			i+1, 0,
 			tview.NewTableCell(row.Name).

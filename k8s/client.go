@@ -21,6 +21,7 @@ type Client struct {
 	metricsClient    *metricsclient.Clientset
 	metricsAvailable bool
 	nodeCtrl         *NodeController
+	podCtrl *PodController
 }
 
 func New(ctx context.Context, namespace string) (*Client, error) {
@@ -49,6 +50,11 @@ func New(ctx context.Context, namespace string) (*Client, error) {
 		return nil, err
 	}
 
+	podCtrl, err := NewPodController(ctx, mgr)
+	if err != nil {
+		return nil, err
+	}
+
 	client := &Client{
 		ctx:           ctx,
 		namespace:     namespace,
@@ -56,6 +62,7 @@ func New(ctx context.Context, namespace string) (*Client, error) {
 		discoClient:   disco,
 		metricsClient: metrics,
 		nodeCtrl:      nodeCtrl,
+		podCtrl: podCtrl,
 	}
 
 	if err := client.AssertMetricsAvailable(); err != nil {
@@ -144,109 +151,10 @@ func (k8s *Client) AddNodeDeleteHandler(f NodeDeleteFunc) {
 	k8s.nodeCtrl.AddDeleteHandler(f)
 }
 
-//// ********************************************************************************************************
-//type Client struct {
-//	Namespace       string
-//	DynamicClient   dynamic.Interface
-//	InformerFactory dynamicinformer.DynamicSharedInformerFactory
-//	Config          *restclient.Config
-//
-//	MetricsAreAvailable bool
-//}
-//
-//func NewClient(kubeconfig string, namespace string) (*Client, error) {
-//	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	dynclient := dynamic.NewForConfigOrDie(config)
-//	discoClient := discovery.NewDiscoveryClientForConfigOrDie(config)
-//	factory := dynamicinformer.NewFilteredDynamicSharedInformerFactory(dynclient, time.Second*3, namespace, nil)
-//	Client := &Client{
-//		Namespace:       namespace,
-//		DynamicClient:   dynclient,
-//		Config:          config,
-//		InformerFactory: factory,
-//	}
-//	Client.MetricsAreAvailable = areMetricsAvail(discoClient)
-//	return Client, nil
-//}
-//
-//func (c *Client) Start(stopCh <-chan struct{}) {
-//	if c.InformerFactory == nil {
-//		panic("Failed to start Client, nil InformerFactory")
-//	}
-//
-//	for name, res := range Resources {
-//		if synced := c.InformerFactory.WaitForCacheSync(stopCh); !synced[res] {
-//			panic(fmt.Sprintf("Informer for %s did not sync", name))
-//		}
-//	}
-//}
-//
-//func areMetricsAvail(disco *discovery.DiscoveryClient) bool {
-//	groups, err := disco.ServerGroups()
-//	if err != nil {
-//		return false
-//	}
-//
-//	for _, group := range groups.Groups {
-//		if group.Name == metricsapi.GroupName {
-//			return true
-//		}
-//	}
-//	return false
-//}
-//
-//// GetMetricsByNode returns metrics for specified node
-//func (c *Client) GetMetricsByNode(nodeName string) (*metricsV1beta1.NodeMetrics, error) {
-//	// TODO unfortunately, nodemetric types are not watchable (without applying RBAC rules)
-//	// for now, the code just does a simple list every time metrics are needed
-//
-//	if !c.MetricsAreAvailable {
-//		return new(metricsV1beta1.NodeMetrics), nil
-//	}
-//
-//	objList, err := c.DynamicClient.Resource(Resources[NodeMetricsResource]).List(context.Background(), metav1.ListOptions{})
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	for _, obj := range objList.Items {
-//		if obj.GetName() == nodeName {
-//			metrics := new(metricsV1beta1.NodeMetrics)
-//			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &metrics); err != nil {
-//				return nil, err
-//			}
-//			return metrics, nil
-//		}
-//	}
-//	return new(metricsV1beta1.NodeMetrics), nil
-//}
-//
-//// GetMetricsByPod returns metrics for specified pod
-//func (c *Client) GetMetricsByPod(podName string) (*metricsV1beta1.PodMetrics, error) {
-//	// TODO unfortunately, podmetric types are not watchable (without applying RBAC rules)
-//	// for now, the code just does a simple list every time metrics are needed
-//
-//	if !c.MetricsAreAvailable {
-//		return new(metricsV1beta1.PodMetrics), nil
-//	}
-//
-//	objList, err := c.DynamicClient.Resource(Resources[PodMetricsResource]).List(context.Background(), metav1.ListOptions{})
-//	if err != nil {
-//		return nil, err
-//	}
-//
-//	for _, obj := range objList.Items {
-//		if obj.GetName() == podName {
-//			metrics := new(metricsV1beta1.PodMetrics)
-//			if err := runtime.DefaultUnstructuredConverter.FromUnstructured(obj.Object, &metrics); err != nil {
-//				return nil, err
-//			}
-//			return metrics, nil
-//		}
-//	}
-//	return new(metricsV1beta1.PodMetrics), nil
-//}
+func (k8s *Client) AddPodUpdateHandler(f PodUpdateFunc) {
+	k8s.podCtrl.AddUpdateHandler(f)
+}
+
+func (k8s *Client) AddPodDeleteHandler(f PodDeleteFunc) {
+	k8s.podCtrl.AddDeleteHandler(f)
+}

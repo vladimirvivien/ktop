@@ -15,3 +15,16 @@ type NodeModel struct {
 	MemValue,
 	MemAvailValue int64
 }
+
+type PodModel struct {
+	UID,
+	Name,
+	Status,
+	Node,
+	IP string
+	PodCPUValue,
+	PodMemValue,
+	NodeCPUValue,
+	NodeMemValue int64
+	Volumes int
+}

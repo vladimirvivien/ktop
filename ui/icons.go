@@ -10,6 +10,7 @@ var (
 		Package         rune
 		Anchor          rune
 		Rocket          rune
+		Thermometer     rune
 	}{
 		BargraphChar:    '|',
 		BargraphLBorder: '[',
@@ -19,5 +20,6 @@ var (
 		Package:         '📦',
 		Anchor:          '⚓',
 		Rocket:          '🚀',
+		Thermometer:     '🌡',
 	}
 )

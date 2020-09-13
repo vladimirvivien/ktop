@@ -40,6 +40,7 @@ func (s *Store) Remove(key string) {
 	s.Lock()
 	defer s.Unlock()
 	delete(s.items, key)
+	// update keys
 	for i := range s.keys {
 		if s.keys[i] == key{
 			s.keys = append(s.keys[0:i], s.keys[i+1:]...)

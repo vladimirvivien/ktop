@@ -4,15 +4,16 @@ import (
 	"fmt"
 
 	"github.com/rivo/tview"
-	"github.com/vladimirvivien/ktop/k8s"
-	"github.com/vladimirvivien/ktop/ui"
-	"github.com/vladimirvivien/ktop/views/model"
 	appsV1 "k8s.io/api/apps/v1"
 	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
+
+	"github.com/vladimirvivien/ktop/k8s"
+	"github.com/vladimirvivien/ktop/ui"
+	"github.com/vladimirvivien/ktop/views/model"
 )
 
 type MainPanel struct {
@@ -23,6 +24,7 @@ type MainPanel struct {
 	nodePanel     ui.Panel
 	nodeStore     *model.Store
 	podPanel      ui.Panel
+	podStore      *model.Store
 	workloadPanel ui.Panel
 }
 
@@ -32,6 +34,7 @@ func New(client *k8s.Client, title string, refreshFunc func()) *MainPanel {
 		k8sClient: client,
 		refresh:   refreshFunc,
 		nodeStore: model.NewStore(),
+		podStore:  model.NewStore(),
 	}
 
 	return ctrl
@@ -42,7 +45,7 @@ func (p *MainPanel) Layout(data interface{}) {
 	p.nodePanel.Layout(nil)
 	p.nodePanel.DrawHeader([]string{"NAME", "STATUS", "ROLE", "VERSION", "CPU", "MEMORY"})
 
-	p.workloadPanel = NewWorkloadPanel(fmt.Sprintf(" %c Workload Health ", ui.Icons.Battery))
+	p.workloadPanel = NewWorkloadPanel(fmt.Sprintf(" %c Workload Health ", ui.Icons.Thermometer))
 	p.workloadPanel.Layout(nil)
 	p.workloadPanel.DrawHeader(nil)
 
@@ -80,46 +83,21 @@ func (p *MainPanel) setupEventHandlers() {
 	p.k8sClient.AddNodeUpdateHandler(func(name string, obj *coreV1.Node) {
 		p.refreshNodes(obj)
 	})
-	//p.nodeInformer.SetAddObjectFunc(func(obj interface{}) {
-	//	p.refreshNodes(obj)
-	//})
-	//p.nodeInformer.SetUpdateObjectFunc(func(old, new interface{}) {
-	//	p.refreshNodes(new)
-	//})
-	//
-	//p.podInformer.SetAddObjectFunc(func(obj interface{}) {
-	//	p.refreshPods(obj)
-	//})
-	//p.podInformer.SetUpdateObjectFunc(func(old, new interface{}) {
-	//	p.refreshPods(new)
-	//})
-	//
-	//p.depInformer.SetAddObjectFunc(func(obj interface{}) {
-	//	p.refreshWorkload()
-	//})
-	//p.depInformer.SetUpdateObjectFunc(func(old, new interface{}) {
-	//	p.refreshWorkload()
-	//})
-	//
-	//p.dsInformer.SetAddObjectFunc(func(obj interface{}) {
-	//	p.refreshWorkload()
-	//})
-	//p.dsInformer.SetUpdateObjectFunc(func(old, new interface{}) {
-	//	p.refreshWorkload()
-	//})
-	//
-	//p.rsInformer.SetAddObjectFunc(func(obj interface{}) {
-	//	p.refreshWorkload()
-	//})
-	//p.rsInformer.SetUpdateObjectFunc(func(old, new interface{}) {
-	//	p.refreshWorkload()
-	//})
+	p.k8sClient.AddNodeDeleteHandler(func(name string) {
+		p.removeNode(name)
+	})
+
+	p.k8sClient.AddPodUpdateHandler(func(name string, obj *coreV1.Pod) {
+		p.refreshPods(obj)
+	})
+
 }
 
 func (p *MainPanel) refreshNodes(node *coreV1.Node) error {
 	metrics, err := p.k8sClient.GetNodeMetrics(node.Name)
 	if err != nil {
-		return err
+		// TODO log metrics error on screen, but continue with display
+		metrics = new(metricsV1beta1.NodeMetrics)
 	}
 
 	conds := node.Status.Conditions
@@ -149,49 +127,72 @@ func (p *MainPanel) refreshNodes(node *coreV1.Node) error {
 	return nil
 }
 
-//func (c *MainPanel) refreshPods(obj interface{}) error {
-//	podObjects, err := p.podInformer.Lister().List(labels.Everything())
-//	if err != nil {
-//		return err
-//	}
-//
-//	podRows := make([]PodItem, len(podObjects))
-//	for i, obj := range podObjects {
-//		unstructPod := obj.(*unstructured.Unstructured)
-//		pod := new(coreV1.Pod)
-//		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructPod.Object, &pod); err != nil {
-//			return err
-//		}
-//
-//		podMetrics, err := p.k8sClient.GetMetricsByPod(pod.Name)
-//		if err != nil {
-//			return err
-//		}
-//
-//		nodeMetrics, err := p.k8sClient.GetMetricsByNode(pod.Spep.NodeName)
-//		if err != nil {
-//			return err
-//		}
-//
-//		totalCpu, totalMem := podMetricsTotals(podMetrics)
-//		row := PodItem{
-//			Name:         pod.Name,
-//			Status:       string(pod.Status.Phase),
-//			IP:           pod.Status.PodIP,
-//			Node:         pod.Spep.NodeName,
-//			Volumes:      len(pod.Spep.Volumes),
-//			NodeCPUValue: nodeMetrics.Usage.Cpu().MilliValue(),
-//			NodeMemValue: nodeMetrics.Usage.Memory().MilliValue(),
-//			PodCPUValue:  totalCpu.MilliValue(),
-//			PodMemValue:  totalMem.MilliValue(),
-//		}
-//		podRows[i] = row
-//	}
-//
-//	p.podPanel.DrawBody(podRows)
-//	p.app.Refresh()
-//	return nil
-//}
+func (p *MainPanel) removeNode(name string) error {
+	// look for node and remove from store
+	var node model.NodeModel
+	for _, key := range p.nodeStore.Keys() {
+		data, found := p.nodeStore.Get(key)
+		if !found {
+			return nil
+		}
+		node = data.(model.NodeModel)
+		if node.Name == name {
+			p.nodeStore.Remove(node.UID)
+			return nil
+		}
+	}
+	return nil
+}
+
+func (p *MainPanel) refreshPods(pod *coreV1.Pod) error {
+	podMetrics, err := p.k8sClient.GetPodMetrics(pod.Name)
+	if err != nil {
+		// TODO log metrics error on screen, but continue with display
+		podMetrics = new(metricsV1beta1.PodMetrics)
+	}
+	nodeMetrics, err := p.k8sClient.GetNodeMetrics(pod.Spec.NodeName)
+	if err != nil {
+		// TODO log metrics error on screen, but continue with display
+		nodeMetrics = new(metricsV1beta1.NodeMetrics)
+	}
+
+	totalCpu, totalMem := podMetricsTotals(podMetrics)
+	row := model.PodModel{
+		UID: string(pod.GetUID()),
+		Name:         pod.Name,
+		Status:       string(pod.Status.Phase),
+		IP:           pod.Status.PodIP,
+		Node:         pod.Spec.NodeName,
+		Volumes:      len(pod.Spec.Volumes),
+		NodeCPUValue: nodeMetrics.Usage.Cpu().MilliValue(),
+		NodeMemValue: nodeMetrics.Usage.Memory().MilliValue(),
+		PodCPUValue:  totalCpu.MilliValue(),
+		PodMemValue:  totalMem.MilliValue(),
+	}
+	p.podStore.Save(row.UID, row)
+	p.podPanel.DrawBody(p.podStore)
+	if p.refresh != nil {
+		p.refresh()
+	}
+	return nil
+}
+func (p *MainPanel) removePod(name string) error {
+	// look for node and remove from store
+	var pod model.PodModel
+	for _, key := range p.podStore.Keys() {
+		data, found := p.podStore.Get(key)
+		if !found {
+			return nil
+		}
+		pod = data.(model.PodModel)
+		if pod.Name == name {
+			p.podStore.Remove(pod.UID)
+			return nil
+		}
+	}
+	return nil
+}
+
 //
 //func (c *MainPanel) refreshWorkload() error {
 //	var summary WorkloadItem
