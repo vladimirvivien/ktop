@@ -87,10 +87,9 @@ func (p *MainPanel) setupEventHandlers() {
 		p.removeNode(name)
 	})
 
-	p.k8sClient.AddPodUpdateHandler(func(name string, obj *coreV1.Pod) {
-		p.refreshPods(obj)
+	p.k8sClient.SetPodListFunc(func (namespace string, list runtime.Object){
+		p.refreshPods(namespace, list)
 	})
-
 }
 
 func (p *MainPanel) refreshNodes(node *coreV1.Node) error {
@@ -144,51 +143,50 @@ func (p *MainPanel) removeNode(name string) error {
 	return nil
 }
 
-func (p *MainPanel) refreshPods(pod *coreV1.Pod) error {
-	podMetrics, err := p.k8sClient.GetPodMetrics(pod.Name)
-	if err != nil {
-		// TODO log metrics error on screen, but continue with display
-		podMetrics = new(metricsV1beta1.PodMetrics)
+func (p *MainPanel) refreshPods(namespace string, pods runtime.Object) error {
+	if pods == nil {
+		return fmt.Errorf("overview panel: pods nil")
 	}
-	nodeMetrics, err := p.k8sClient.GetNodeMetrics(pod.Spec.NodeName)
-	if err != nil {
-		// TODO log metrics error on screen, but continue with display
-		nodeMetrics = new(metricsV1beta1.NodeMetrics)
+	podList, ok := pods.(*coreV1.PodList)
+	if !ok {
+		return fmt.Errorf("overview panel: PodList type mismatched")
 	}
 
-	totalCpu, totalMem := podMetricsTotals(podMetrics)
-	row := model.PodModel{
-		UID: string(pod.GetUID()),
-		Name:         pod.Name,
-		Status:       string(pod.Status.Phase),
-		IP:           pod.Status.PodIP,
-		Node:         pod.Spec.NodeName,
-		Volumes:      len(pod.Spec.Volumes),
-		NodeCPUValue: nodeMetrics.Usage.Cpu().MilliValue(),
-		NodeMemValue: nodeMetrics.Usage.Memory().MilliValue(),
-		PodCPUValue:  totalCpu.MilliValue(),
-		PodMemValue:  totalMem.MilliValue(),
+	p.podPanel.Clear()
+
+
+	rows := make([]model.PodModel, len(podList.Items))
+	for i, pod := range podList.Items {
+		podMetrics, err := p.k8sClient.GetPodMetrics(pod.Name)
+		if err != nil {
+			// TODO log metrics error on screen, but continue with display
+			podMetrics = new(metricsV1beta1.PodMetrics)
+		}
+		nodeMetrics, err := p.k8sClient.GetNodeMetrics(pod.Spec.NodeName)
+		if err != nil {
+			// TODO log metrics error on screen, but continue with display
+			nodeMetrics = new(metricsV1beta1.NodeMetrics)
+		}
+
+		totalCpu, totalMem := podMetricsTotals(podMetrics)
+		row := model.PodModel{
+			UID:          model.GetNamespacedKey(namespace, pod.GetName()),
+			Namespace:    namespace,
+			Name:         pod.Name,
+			Status:       string(pod.Status.Phase),
+			IP:           pod.Status.PodIP,
+			Node:         pod.Spec.NodeName,
+			Volumes:      len(pod.Spec.Volumes),
+			NodeCPUValue: nodeMetrics.Usage.Cpu().MilliValue(),
+			NodeMemValue: nodeMetrics.Usage.Memory().MilliValue(),
+			PodCPUValue:  totalCpu.MilliValue(),
+			PodMemValue:  totalMem.MilliValue(),
+		}
+		rows[i] = row
 	}
-	p.podStore.Save(row.UID, row)
-	p.podPanel.DrawBody(p.podStore)
+	p.podPanel.DrawBody(rows)
 	if p.refresh != nil {
 		p.refresh()
-	}
-	return nil
-}
-func (p *MainPanel) removePod(name string) error {
-	// look for node and remove from store
-	var pod model.PodModel
-	for _, key := range p.podStore.Keys() {
-		data, found := p.podStore.Get(key)
-		if !found {
-			return nil
-		}
-		pod = data.(model.PodModel)
-		if pod.Name == name {
-			p.podStore.Remove(pod.UID)
-			return nil
-		}
 	}
 	return nil
 }

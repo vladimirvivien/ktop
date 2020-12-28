@@ -27,16 +27,19 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Println("Connected to server: ", k8sClient.Config().Host)
-	if err := k8sClient.Start(); err != nil {
-		fmt.Println("failed to start:", err)
-		os.Exit(1)
-	}
+
 
 	app := application.New(k8sClient)
 	app.WelcomeBanner()
 	app.AddPanel(overview.New(k8sClient, "Overview", app.Refresh))
 	app.Init()
 	//app.ShowPanel(0) // set default page
+
+	// start client
+	if err := k8sClient.Start(); err != nil {
+		fmt.Println("client: failed to start:", err)
+		os.Exit(1)
+	}
 
 	if err := app.Run(); err != nil {
 		fmt.Println(err)

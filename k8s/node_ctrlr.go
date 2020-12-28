@@ -47,7 +47,7 @@ func NewNodeController(ctx context.Context, mgr ctrl.Manager) (*NodeController, 
 	return nodeCtrl, nil
 }
 
-func (c *NodeController) Reconcile(req reconcile.Request) (reconcile.Result, error) {
+func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	client := c.manager.GetClient()
 	var node coreV1.Node
 	if err := client.Get(c.ctx, req.NamespacedName, &node); err != nil {

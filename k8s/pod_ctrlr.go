@@ -4,7 +4,7 @@ import (
 	"context"
 
 	coreV1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -12,27 +12,20 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-type PodUpdateFunc func(name string, node *coreV1.Pod)
-type PodDeleteFunc func(name string)
+type ListFunc func(namespace string, podList runtime.Object)
 
 type PodController struct {
 	ctx         context.Context
 	manager     ctrl.Manager
-	updateFuncs []PodUpdateFunc
-	deleteFuncs []PodDeleteFunc
+	listFunc ListFunc
 }
 
-func NewPodController(ctx context.Context, mgr ctrl.Manager) (*PodController, error) {
+func NewPodController(mgr ctrl.Manager) (*PodController, error) {
 	podCtrl := &PodController{
-		ctx:         ctx,
 		manager:     mgr,
-		updateFuncs: make([]PodUpdateFunc, 0),
-		deleteFuncs: make([]PodDeleteFunc, 0),
 	}
 
-	ctrl, err := controller.New("pod-runtimeCtrl", mgr, controller.Options{
-		Reconciler: podCtrl,
-	})
+	ctrl, err := controller.New("podCtrl", mgr, controller.Options{Reconciler: podCtrl})
 
 	if err != nil {
 		return nil, err
@@ -42,49 +35,26 @@ func NewPodController(ctx context.Context, mgr ctrl.Manager) (*PodController, er
 		return nil, err
 	}
 
+	//if err := ctrl.NewControllerManagedBy(mgr).For(&coreV1.Pod{}).Complete(podCtrl); err != nil {
+	//	return nil, err
+	//}
+
 	return podCtrl, nil
 }
 
-func (c *PodController) Reconcile(req reconcile.Request) (reconcile.Result, error) {
+func (c *PodController) SetListFunc(fn ListFunc) {
+	c.listFunc = fn
+}
+
+func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	client := c.manager.GetClient()
-	var pod coreV1.Pod
-	if err := client.Get(c.ctx, req.NamespacedName, &pod); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
-		}
-		// possibly a deletion
-		c.processDelete(req.Name)
+	var pods coreV1.PodList
+	if err := client.List(ctx, &pods); err != nil {
+		return ctrl.Result{Requeue: false}, err
 	}
-	c.processUpdate(&pod)
-
+	if c.listFunc != nil{
+		c.listFunc(req.Namespace, &pods)
+	}
 	return ctrl.Result{Requeue: false}, nil
-}
-
-func (c *PodController) AddUpdateHandler(f PodUpdateFunc) {
-	c.updateFuncs = append(c.updateFuncs, f)
-}
-
-func (c *PodController) AddDeleteHandler(f PodDeleteFunc) {
-	c.deleteFuncs = append(c.deleteFuncs, f)
-}
-
-func (c *PodController) processUpdate(n *coreV1.Pod) {
-	go func() {
-		for _, f := range c.updateFuncs {
-			if f != nil {
-				f(n.GetName(), n.DeepCopy())
-			}
-		}
-	}()
-}
-
-func (c *PodController) processDelete(name string) {
-	go func() {
-		for _, f := range c.deleteFuncs {
-			if f != nil {
-				f(name)
-			}
-		}
-	}()
 }
 

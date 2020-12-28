@@ -50,7 +50,7 @@ func New(ctx context.Context, namespace string) (*Client, error) {
 		return nil, err
 	}
 
-	podCtrl, err := NewPodController(ctx, mgr)
+	podCtrl, err := NewPodController(mgr)
 	if err != nil {
 		return nil, err
 	}
@@ -65,9 +65,9 @@ func New(ctx context.Context, namespace string) (*Client, error) {
 		podCtrl: podCtrl,
 	}
 
-	if err := client.AssertMetricsAvailable(); err != nil {
-		return nil, fmt.Errorf("failed to create client: %s", err)
-	}
+	//if err := client.AssertMetricsAvailable(); err != nil {
+	//	return nil, fmt.Errorf("client: unable to create: %s", err)
+	//}
 
 	return client, nil
 }
@@ -151,10 +151,6 @@ func (k8s *Client) AddNodeDeleteHandler(f NodeDeleteFunc) {
 	k8s.nodeCtrl.AddDeleteHandler(f)
 }
 
-func (k8s *Client) AddPodUpdateHandler(f PodUpdateFunc) {
-	k8s.podCtrl.AddUpdateHandler(f)
-}
-
-func (k8s *Client) AddPodDeleteHandler(f PodDeleteFunc) {
-	k8s.podCtrl.AddDeleteHandler(f)
+func (k8s *Client) SetPodListFunc(f ListFunc) {
+	k8s.podCtrl.SetListFunc(f)
 }

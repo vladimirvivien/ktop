@@ -79,10 +79,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 		memRatio := ui.GetRatio(float64(row.MemValue), float64(row.MemAvailValue))
 		memGraph := ui.BarGraph(10, memRatio, colorKeys)
 
-		if !found {
-			continue
-		}
-		i++
+		i++  // offset for header-row
 		p.list.SetCell(
 			i, 0,
 			&tview.TableCell{

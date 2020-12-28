@@ -18,6 +18,7 @@ type NodeModel struct {
 
 type PodModel struct {
 	UID,
+	Namespace,
 	Name,
 	Status,
 	Node,

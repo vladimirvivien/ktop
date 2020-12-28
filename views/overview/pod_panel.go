@@ -56,54 +56,46 @@ func (p *podPanel) DrawHeader(data interface{}) {
 }
 
 func (p *podPanel) DrawBody(data interface{}) {
-	store, ok := data.(*model.Store)
+	pods, ok := data.([]model.PodModel)
 	if !ok {
 		panic(fmt.Sprintf("PodPanel.DrawBody got unexpected type %T", data))
 	}
 
 	colorKeys := ui.ColorKeys{0: "green", 50: "yellow", 90: "red"}
 
-	for i, key := range store.Keys() {
-		r, found := store.Get(key)
-		if !found {
-			continue
-		}
-		row, ok := r.(model.PodModel)
-		if !ok {
-			panic(fmt.Sprintf("PodPanel.DrawBody got unexpected model type %T", r))
-		}
+	for i, pod := range pods {
 
 		p.list.SetCell(
 			i+1, 0,
-			tview.NewTableCell(row.Name).
+			tview.NewTableCell(pod.Name).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
 		p.list.SetCell(
 			i+1, 1,
-			tview.NewTableCell(row.Status).
+			tview.NewTableCell(pod.Status).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
 		p.list.SetCell(
 			i+1, 2,
-			tview.NewTableCell(row.IP).
+			tview.NewTableCell(pod.IP).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
 		p.list.SetCell(
 			i+1, 3,
-			tview.NewTableCell(row.Node).
+			tview.NewTableCell(pod.Node).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
-		cpuRatio := ui.GetRatio(float64(row.PodCPUValue), float64(row.NodeCPUValue))
+		cpuRatio := ui.GetRatio(float64(pod.PodCPUValue), float64(pod.NodeCPUValue))
 		cpuGraph := ui.BarGraph(10, cpuRatio, colorKeys)
-		memRatio := ui.GetRatio(float64(row.PodMemValue), float64(row.NodeMemValue))
+		memRatio := ui.GetRatio(float64(pod.PodMemValue), float64(pod.NodeMemValue))
 		memGraph := ui.BarGraph(10, memRatio, colorKeys)
 
 		p.list.SetCell(
@@ -127,7 +119,7 @@ func (p *podPanel) DrawFooter(data interface{}) {
 }
 
 func (p *podPanel) Clear() {
-
+	p.list.Clear()
 }
 
 func (p *podPanel) GetView() tview.Primitive {

@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"sync"
 )
 
@@ -47,4 +48,8 @@ func (s *Store) Remove(key string) {
 			break
 		}
 	}
+}
+
+func GetNamespacedKey(namespace, objName string) string {
+	return fmt.Sprintf("%s/%s",namespace, objName)
 }
