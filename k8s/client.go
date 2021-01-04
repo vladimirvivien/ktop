@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/discovery"
 	restclient "k8s.io/client-go/rest"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics"
@@ -12,6 +13,8 @@ import (
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 	ctrl "sigs.k8s.io/controller-runtime"
 )
+
+type ListFunc func(namespace string, list runtime.Object) error
 
 type Client struct {
 	ctx              context.Context
@@ -143,12 +146,8 @@ func (k8s *Client) GetPodMetrics(podName string) (*metricsV1beta1.PodMetrics, er
 	return metrics, nil
 }
 
-func (k8s *Client) AddNodeUpdateHandler(f NodeUpdateFunc) {
-	k8s.nodeCtrl.AddUpdateHandler(f)
-}
-
-func (k8s *Client) AddNodeDeleteHandler(f NodeDeleteFunc) {
-	k8s.nodeCtrl.AddDeleteHandler(f)
+func (k8s *Client) SetNodeListFunc(f ListFunc) {
+	k8s.nodeCtrl.SetListFunc(f)
 }
 
 func (k8s *Client) SetPodListFunc(f ListFunc) {

@@ -18,23 +18,23 @@ type podPanel struct {
 }
 
 func NewPodPanel(title string) ui.Panel {
-	p := &podPanel{title: title}
+	p := &podPanel{title: title, list: tview.NewTable()}
 	p.Layout(nil)
+	p.root = tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(p.list, 0, 1, true)
 	return p
 }
+
 func (p *podPanel) GetTitle() string {
 	return p.title
 }
+
 func (p *podPanel) Layout(data interface{}) {
-	p.list = tview.NewTable()
 	p.list.SetBorder(true)
 	p.list.SetBorders(false)
 	p.list.SetTitle(p.GetTitle())
 	p.list.SetTitleAlign(tview.AlignLeft)
 	p.list.SetBorderColor(tcell.ColorWhite)
-
-	p.root = tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.list, 0, 1, true)
 }
 
 func (p *podPanel) DrawHeader(data interface{}) {
@@ -53,6 +53,7 @@ func (p *podPanel) DrawHeader(data interface{}) {
 				SetExpansion(100),
 		)
 	}
+	p.list.SetFixed(1, 0)
 }
 
 func (p *podPanel) DrawBody(data interface{}) {
@@ -120,6 +121,8 @@ func (p *podPanel) DrawFooter(data interface{}) {
 
 func (p *podPanel) Clear() {
 	p.list.Clear()
+	p.Layout(nil)
+	p.DrawHeader(p.listCols)
 }
 
 func (p *podPanel) GetView() tview.Primitive {

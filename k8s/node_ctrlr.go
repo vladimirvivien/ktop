@@ -4,7 +4,6 @@ import (
 	"context"
 
 	coreV1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -12,29 +11,17 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-type NodeUpdateFunc func(name string, node *coreV1.Node)
-type NodeDeleteFunc func(name string)
-
 type NodeController struct {
-	ctx         context.Context
 	manager     ctrl.Manager
-	updateChan  chan *coreV1.Node
-	updateFuncs []NodeUpdateFunc
-	deleteFuncs []NodeDeleteFunc
+	listFunc ListFunc
 }
 
 func NewNodeController(ctx context.Context, mgr ctrl.Manager) (*NodeController, error) {
 	nodeCtrl := &NodeController{
-		ctx:         ctx,
 		manager:     mgr,
-		updateChan:  make(chan *coreV1.Node, 1),
-		updateFuncs: make([]NodeUpdateFunc, 0),
-		deleteFuncs: make([]NodeDeleteFunc, 0),
 	}
 
-	ctrl, err := controller.New("node-runtimeCtrl", mgr, controller.Options{
-		Reconciler: nodeCtrl,
-	})
+	ctrl, err := controller.New("nodeCtrl", mgr, controller.Options{Reconciler: nodeCtrl})
 
 	if err != nil {
 		return nil, err
@@ -47,45 +34,20 @@ func NewNodeController(ctx context.Context, mgr ctrl.Manager) (*NodeController, 
 	return nodeCtrl, nil
 }
 
+func (c *NodeController) SetListFunc(fn ListFunc) {
+	c.listFunc = fn
+}
+
 func (c *NodeController) Reconcile(ctx context.Context, req reconcile.Request) (reconcile.Result, error) {
 	client := c.manager.GetClient()
-	var node coreV1.Node
-	if err := client.Get(c.ctx, req.NamespacedName, &node); err != nil {
-		if !apierrors.IsNotFound(err) {
-			return ctrl.Result{}, err
-		}
-		// possibly a deletion
-		c.processDelete(req.Name)
+	var nodes coreV1.NodeList
+	if err := client.List(ctx, &nodes); err != nil {
+		return ctrl.Result{Requeue: false}, err
 	}
-	c.processUpdate(&node)
-
+	if c.listFunc != nil{
+		if err := c.listFunc(req.Namespace, &nodes); err != nil {
+			return ctrl.Result{Requeue: false}, err
+		}
+	}
 	return ctrl.Result{Requeue: false}, nil
-}
-
-func (c *NodeController) AddUpdateHandler(f NodeUpdateFunc) {
-	c.updateFuncs = append(c.updateFuncs, f)
-}
-
-func (c *NodeController) AddDeleteHandler(f NodeDeleteFunc) {
-	c.deleteFuncs = append(c.deleteFuncs, f)
-}
-
-func (c *NodeController) processUpdate(n *coreV1.Node) {
-	go func() {
-		for _, f := range c.updateFuncs {
-			if f != nil {
-				f(n.GetName(), n.DeepCopy())
-			}
-		}
-	}()
-}
-
-func (c *NodeController) processDelete(name string) {
-	go func() {
-		for _, f := range c.deleteFuncs {
-			if f != nil {
-				f(name)
-			}
-		}
-	}()
 }

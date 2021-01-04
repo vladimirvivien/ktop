@@ -18,23 +18,21 @@ type nodePanel struct {
 }
 
 func NewNodePanel(title string) ui.Panel {
-	p := &nodePanel{title: title}
+	p := &nodePanel{title: title, list: tview.NewTable()}
 	p.Layout(nil)
+	p.root = tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(p.list, 0, 1, true)
 	return p
 }
 func (p *nodePanel) GetTitle() string {
 	return p.title
 }
 func (p *nodePanel) Layout(data interface{}) {
-	p.list = tview.NewTable()
 	p.list.SetBorder(true)
 	p.list.SetBorders(false)
 	p.list.SetTitle(p.GetTitle())
 	p.list.SetTitleAlign(tview.AlignLeft)
 	p.list.SetBorderColor(tcell.ColorWhite)
-
-	p.root = tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.list, 0, 1, true)
 }
 
 func (p *nodePanel) DrawHeader(data interface{}) {
@@ -53,58 +51,51 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 				SetExpansion(100),
 		)
 	}
+	p.list.SetFixed(1, 0)
 }
 
 func (p *nodePanel) DrawBody(data interface{}) {
-	store, ok := data.(*model.Store)
+	nodes, ok := data.([]model.NodeModel)
 	if !ok {
-		panic(fmt.Sprintf("NodePanel.DrawBody got unexpected store type %T", data))
+		panic(fmt.Sprintf("NodePanel.DrawBody got unexpected type %T", data))
 	}
 
 	colorKeys := ui.ColorKeys{0: "green", 50: "yellow", 90: "red"}
 
-	for i, key := range store.Keys() {
-		r, found := store.Get(key)
-		if !found {
-			continue
-		}
-		row, ok := r.(model.NodeModel)
-		if !ok {
-			panic(fmt.Sprintf("NodePanel.DrawBody got unexpected model type %T", r))
-		}
+	for i, node := range nodes {
 
-		cpuRatio := ui.GetRatio(float64(row.CpuValue), float64(row.CpuAvailValue))
+		cpuRatio := ui.GetRatio(float64(node.CpuValue), float64(node.CpuAvailValue))
 		cpuGraph := ui.BarGraph(10, cpuRatio, colorKeys)
 
-		memRatio := ui.GetRatio(float64(row.MemValue), float64(row.MemAvailValue))
+		memRatio := ui.GetRatio(float64(node.MemValue), float64(node.MemAvailValue))
 		memGraph := ui.BarGraph(10, memRatio, colorKeys)
 
 		i++  // offset for header-row
 		p.list.SetCell(
 			i, 0,
 			&tview.TableCell{
-				Text:  row.Name,
+				Text:  node.Name,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
 		).SetCell(
 			i, 1,
 			&tview.TableCell{
-				Text:  row.Status,
+				Text:  node.Status,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
 		).SetCell(
 			i, 2,
 			&tview.TableCell{
-				Text:  row.Role,
+				Text:  node.Role,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
 		).SetCell(
 			i, 3,
 			&tview.TableCell{
-				Text:  row.Version,
+				Text:  node.Version,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
@@ -127,7 +118,11 @@ func (p *nodePanel) DrawBody(data interface{}) {
 }
 
 func (p *nodePanel) DrawFooter(data interface{}) {}
-func (p *nodePanel) Clear() {}
+func (p *nodePanel) Clear() {
+	p.list.Clear()
+	p.Layout(nil)
+	p.DrawHeader(p.listCols)
+}
 
 func (p *nodePanel) GetView() tview.Primitive {
 	return p.root

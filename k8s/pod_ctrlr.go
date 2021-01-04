@@ -4,7 +4,6 @@ import (
 	"context"
 
 	coreV1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -12,7 +11,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/source"
 )
 
-type ListFunc func(namespace string, podList runtime.Object)
+
 
 type PodController struct {
 	ctx         context.Context
@@ -53,7 +52,9 @@ func (c *PodController) Reconcile(ctx context.Context, req reconcile.Request) (r
 		return ctrl.Result{Requeue: false}, err
 	}
 	if c.listFunc != nil{
-		c.listFunc(req.Namespace, &pods)
+		if err := c.listFunc(req.Namespace, &pods); err != nil {
+			return ctrl.Result{Requeue: false}, err
+		}
 	}
 	return ctrl.Result{Requeue: false}, nil
 }

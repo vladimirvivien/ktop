@@ -22,9 +22,7 @@ type MainPanel struct {
 	refresh       func()
 	view          *tview.Flex
 	nodePanel     ui.Panel
-	nodeStore     *model.Store
 	podPanel      ui.Panel
-	podStore      *model.Store
 	workloadPanel ui.Panel
 }
 
@@ -33,8 +31,6 @@ func New(client *k8s.Client, title string, refreshFunc func()) *MainPanel {
 		title:     title,
 		k8sClient: client,
 		refresh:   refreshFunc,
-		nodeStore: model.NewStore(),
-		podStore:  model.NewStore(),
 	}
 
 	return ctrl
@@ -42,7 +38,6 @@ func New(client *k8s.Client, title string, refreshFunc func()) *MainPanel {
 
 func (p *MainPanel) Layout(data interface{}) {
 	p.nodePanel = NewNodePanel(fmt.Sprintf(" %c Nodes ", ui.Icons.Factory))
-	p.nodePanel.Layout(nil)
 	p.nodePanel.DrawHeader([]string{"NAME", "STATUS", "ROLE", "VERSION", "CPU", "MEMORY"})
 
 	p.workloadPanel = NewWorkloadPanel(fmt.Sprintf(" %c Workload Health ", ui.Icons.Thermometer))
@@ -50,7 +45,6 @@ func (p *MainPanel) Layout(data interface{}) {
 	p.workloadPanel.DrawHeader(nil)
 
 	p.podPanel = NewPodPanel(fmt.Sprintf(" %c Pods ", ui.Icons.Package))
-	p.podPanel.Layout(nil)
 	p.podPanel.DrawHeader([]string{"NAME", "STATUS", "IP", "NODE", "CPU", "MEMORY"})
 
 	view := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -80,68 +74,56 @@ func (p *MainPanel) Run() error {
 }
 
 func (p *MainPanel) setupEventHandlers() {
-	p.k8sClient.AddNodeUpdateHandler(func(name string, obj *coreV1.Node) {
-		p.refreshNodes(obj)
-	})
-	p.k8sClient.AddNodeDeleteHandler(func(name string) {
-		p.removeNode(name)
-	})
-
-	p.k8sClient.SetPodListFunc(func (namespace string, list runtime.Object){
-		p.refreshPods(namespace, list)
-	})
+	p.k8sClient.SetNodeListFunc(p.refreshNodes)
+	p.k8sClient.SetPodListFunc(p.refreshPods)
 }
 
-func (p *MainPanel) refreshNodes(node *coreV1.Node) error {
-	metrics, err := p.k8sClient.GetNodeMetrics(node.Name)
-	if err != nil {
-		// TODO log metrics error on screen, but continue with display
-		metrics = new(metricsV1beta1.NodeMetrics)
+func (p *MainPanel) refreshNodes(namespace string, nodes runtime.Object) error {
+	if nodes == nil {
+		return fmt.Errorf("overview panel: nodes nil")
+	}
+	nodeList, ok := nodes.(*coreV1.NodeList)
+	if !ok {
+		return fmt.Errorf("overview panel: NodeList type mismatched")
 	}
 
-	conds := node.Status.Conditions
-	availRes := node.Status.Allocatable
-	row := model.NodeModel{
-		UID:           string(node.GetUID()),
-		Name:          node.Name,
-		Role:          nodeRole(*node),
-		Status:        string(conds[len(conds)-1].Type),
-		Version:       node.Status.NodeInfo.KubeletVersion,
-		CpuAvail:      availRes.Cpu().String(),
-		CpuAvailValue: availRes.Cpu().MilliValue(),
-		CpuUsage:      metrics.Usage.Cpu().String(),
-		CpuValue:      metrics.Usage.Cpu().MilliValue(),
-		MemAvail:      availRes.Memory().String(),
-		MemAvailValue: availRes.Memory().MilliValue(),
-		MemUsage:      metrics.Usage.Memory().String(),
-		MemValue:      metrics.Usage.Memory().MilliValue(),
+	rows := make([]model.NodeModel, len(nodeList.Items))
+	for i, node := range nodeList.Items {
+		metrics, err := p.k8sClient.GetNodeMetrics(node.Name)
+		if err != nil {
+			// TODO log metrics error on screen, but continue with display
+			metrics = new(metricsV1beta1.NodeMetrics)
+		}
+
+		conds := node.Status.Conditions
+		availRes := node.Status.Allocatable
+		row := model.NodeModel{
+			UID:           string(node.GetUID()),
+			Name:          node.Name,
+			Role:          nodeRole(node),
+			Status:        string(conds[len(conds)-1].Type),
+			Version:       node.Status.NodeInfo.KubeletVersion,
+			CpuAvail:      availRes.Cpu().String(),
+			CpuAvailValue: availRes.Cpu().MilliValue(),
+			CpuUsage:      metrics.Usage.Cpu().String(),
+			CpuValue:      metrics.Usage.Cpu().MilliValue(),
+			MemAvail:      availRes.Memory().String(),
+			MemAvailValue: availRes.Memory().MilliValue(),
+			MemUsage:      metrics.Usage.Memory().String(),
+			MemValue:      metrics.Usage.Memory().MilliValue(),
+		}
+		rows[i] = row
 	}
 
-	p.nodeStore.Save(row.UID, row)
-
-	p.nodePanel.DrawBody(p.nodeStore)
+	p.nodePanel.Clear()
+	p.nodePanel.DrawBody(rows)
+	// required: always refresh screen
 	if p.refresh != nil {
 		p.refresh()
 	}
 	return nil
 }
 
-func (p *MainPanel) removeNode(name string) error {
-	// look for node and remove from store
-	var node model.NodeModel
-	for _, key := range p.nodeStore.Keys() {
-		data, found := p.nodeStore.Get(key)
-		if !found {
-			return nil
-		}
-		node = data.(model.NodeModel)
-		if node.Name == name {
-			p.nodeStore.Remove(node.UID)
-			return nil
-		}
-	}
-	return nil
-}
 
 func (p *MainPanel) refreshPods(namespace string, pods runtime.Object) error {
 	if pods == nil {
@@ -151,9 +133,6 @@ func (p *MainPanel) refreshPods(namespace string, pods runtime.Object) error {
 	if !ok {
 		return fmt.Errorf("overview panel: PodList type mismatched")
 	}
-
-	p.podPanel.Clear()
-
 
 	rows := make([]model.PodModel, len(podList.Items))
 	for i, pod := range podList.Items {
@@ -184,7 +163,9 @@ func (p *MainPanel) refreshPods(namespace string, pods runtime.Object) error {
 		}
 		rows[i] = row
 	}
+	p.podPanel.Clear()
 	p.podPanel.DrawBody(rows)
+	// required: always refresh screen
 	if p.refresh != nil {
 		p.refresh()
 	}
