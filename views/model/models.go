@@ -3,17 +3,25 @@ package model
 type NodeModel struct {
 	UID,
 	Name,
+	InternalIp,
+	ExternalIp,
+	Hostname,
 	Status,
 	Role,
 	Version,
-	CpuUsage,
-	CpuAvail string
+	OS,
+	OSImage,
+	OSKernel,
+	Architecture string
+	CpuUsage string
+	CpuAvail,
 	CpuValue,
 	CpuAvailValue int64
-	MemUsage,
-	MemAvail string
+	MemUsage string
+	MemAvail,
 	MemValue,
-	MemAvailValue int64
+	MemAvailValue,
+	StorageAvail int64
 }
 
 type PodModel struct {

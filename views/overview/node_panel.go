@@ -6,8 +6,8 @@ import (
 	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
 
-	"github.com/vladimirvivien/ktop/views/model"
 	"github.com/vladimirvivien/ktop/ui"
+	"github.com/vladimirvivien/ktop/views/model"
 )
 
 type nodePanel struct {
@@ -41,9 +41,20 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 		panic(fmt.Sprintf("nodePanel.DrawHeader got unexpected data type %T", data))
 	}
 
+	// legend column
+	p.list.SetCell(0, 0,
+		tview.NewTableCell("").
+			SetTextColor(tcell.ColorWhite).
+			SetAlign(tview.AlignCenter).
+			SetBackgroundColor(tcell.ColorDarkGreen).
+			SetMaxWidth(1).
+			SetExpansion(0),
+	)
+
 	p.listCols = cols
 	for i, col := range p.listCols {
-		p.list.SetCell(0, i,
+		pos := i + 1
+		p.list.SetCell(0, pos,
 			tview.NewTableCell(col).
 				SetTextColor(tcell.ColorWhite).
 				SetAlign(tview.AlignLeft).
@@ -70,44 +81,93 @@ func (p *nodePanel) DrawBody(data interface{}) {
 		memRatio := ui.GetRatio(float64(node.MemValue), float64(node.MemAvailValue))
 		memGraph := ui.BarGraph(10, memRatio, colorKeys)
 
-		i++  // offset for header-row
+		i++ // offset for header-row
+		masterLegend := ""
+		if node.Role == "Master" {
+			masterLegend = fmt.Sprintf("%c", ui.Icons.Plane)
+		}
+
 		p.list.SetCell(
 			i, 0,
+			&tview.TableCell{
+				Text:  masterLegend,
+				Color: tcell.ColorOrangeRed,
+				Align: tview.AlignCenter,
+			},
+		)
+
+		p.list.SetCell(
+			i, 1,
 			&tview.TableCell{
 				Text:  node.Name,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
-		).SetCell(
-			i, 1,
+		)
+
+		p.list.SetCell(
+			i, 2,
 			&tview.TableCell{
 				Text:  node.Status,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
-		).SetCell(
-			i, 2,
-			&tview.TableCell{
-				Text:  node.Role,
-				Color: tcell.ColorYellow,
-				Align: tview.AlignLeft,
-			},
-		).SetCell(
+		)
+
+		p.list.SetCell(
 			i, 3,
 			&tview.TableCell{
 				Text:  node.Version,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
-		).SetCell(
+		)
+
+		p.list.SetCell(
 			i, 4,
+			&tview.TableCell{
+				Text:  fmt.Sprintf("%s/%s", node.InternalIp, node.ExternalIp),
+				Color: tcell.ColorYellow,
+				Align: tview.AlignLeft,
+			},
+		)
+
+		p.list.SetCell(
+			i, 5,
+			&tview.TableCell{
+				Text:  fmt.Sprintf("%s;%s", node.OSImage, node.Architecture),
+				Color: tcell.ColorYellow,
+				Align: tview.AlignLeft,
+			},
+		)
+
+		p.list.SetCell(
+			i, 6,
+			&tview.TableCell{
+				Text:  fmt.Sprintf("%d/%dMi", node.CpuAvail, node.MemAvail),
+				Color: tcell.ColorYellow,
+				Align: tview.AlignLeft,
+			},
+		)
+
+		p.list.SetCell(
+			i, 7,
+			&tview.TableCell{
+				Text:  fmt.Sprintf("%dGi", node.StorageAvail),
+				Color: tcell.ColorYellow,
+				Align: tview.AlignLeft,
+			},
+		)
+
+		p.list.SetCell(
+			i, 8,
 			&tview.TableCell{
 				Text:  fmt.Sprintf("[white][%s[white]] %-2.1f%%", cpuGraph, cpuRatio*100),
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
 		).SetCell(
-			i, 5,
+			i, 9,
 			&tview.TableCell{
 				Text:  fmt.Sprintf("[white][%s[white]] %02.1f%%", memGraph, memRatio*100),
 				Color: tcell.ColorYellow,

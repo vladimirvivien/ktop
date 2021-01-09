@@ -3,6 +3,7 @@ package application
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/gdamore/tcell"
 	"github.com/rivo/tview"
@@ -80,10 +81,19 @@ func (app *Application) WelcomeBanner() {
 func (app *Application) Init() {
 	app.panel.Layout(app.views)
 
+	var hdr strings.Builder
+	hdr.WriteString("%c [green]API server: [white]%s [green]namespace: [white]%s [green] metrics:")
+	if err := app.k8sClient.AssertMetricsAvailable(); err != nil {
+		hdr.WriteString(" [red]server not available")
+	}else{
+		hdr.WriteString(" [white]server connected")
+	}
+
 	app.panel.DrawHeader(fmt.Sprintf(
-		"%c [green]API server: [white]%s [green]namespace: [white]%s",
+		hdr.String(),
 		ui.Icons.Rocket, app.k8sClient.Config().Host, app.k8sClient.Namespace(),
 	))
+
 	app.panel.DrawFooter(app.getPageTitles()[app.visibleView])
 
 	app.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {

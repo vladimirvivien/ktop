@@ -11,6 +11,12 @@ var (
 		Anchor          rune
 		Rocket          rune
 		Thermometer     rune
+		Sun             rune
+		Knobs           rune
+		Drum            rune
+		M               rune
+		Plane           rune
+		Controller      rune
 	}{
 		BargraphChar:    '|',
 		BargraphLBorder: '[',
@@ -21,5 +27,11 @@ var (
 		Anchor:          '⚓',
 		Rocket:          '🚀',
 		Thermometer:     '🌡',
+		Sun:             '☀',
+		Knobs:           '🎛',
+		Drum:            '🥁',
+		M:               'Ⓜ',
+		Plane:           '🛩',
+		Controller:      '🛂',
 	}
 )

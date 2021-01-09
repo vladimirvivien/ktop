@@ -38,7 +38,7 @@ func New(client *k8s.Client, title string, refreshFunc func()) *MainPanel {
 
 func (p *MainPanel) Layout(data interface{}) {
 	p.nodePanel = NewNodePanel(fmt.Sprintf(" %c Nodes ", ui.Icons.Factory))
-	p.nodePanel.DrawHeader([]string{"NAME", "STATUS", "ROLE", "VERSION", "CPU", "MEMORY"})
+	p.nodePanel.DrawHeader([]string{"NAME", "STATUS", "VERSION", "INT/EXT IP", "OS", "CPU/MEM", "STOR", "CPU/MEM USAGE", ""})
 
 	p.workloadPanel = NewWorkloadPanel(fmt.Sprintf(" %c Workload Health ", ui.Icons.Thermometer))
 	p.workloadPanel.Layout(nil)
@@ -95,22 +95,30 @@ func (p *MainPanel) refreshNodes(namespace string, nodes runtime.Object) error {
 			metrics = new(metricsV1beta1.NodeMetrics)
 		}
 
-		conds := node.Status.Conditions
 		availRes := node.Status.Allocatable
+
 		row := model.NodeModel{
 			UID:           string(node.GetUID()),
 			Name:          node.Name,
+			InternalIp:    getNodeInternalIp(node),
+			ExternalIp:    getNodeExternalIp(node),
+			Hostname:      getNodeHostName(node),
 			Role:          nodeRole(node),
-			Status:        string(conds[len(conds)-1].Type),
+			Status:        nodeStatus(node),
+			OS:            node.Status.NodeInfo.OperatingSystem,
+			OSImage:       node.Status.NodeInfo.OSImage,
+			OSKernel:      node.Status.NodeInfo.KernelVersion,
+			Architecture:  node.Status.NodeInfo.Architecture,
 			Version:       node.Status.NodeInfo.KubeletVersion,
-			CpuAvail:      availRes.Cpu().String(),
+			CpuAvail:      availRes.Cpu().Value(),
 			CpuAvailValue: availRes.Cpu().MilliValue(),
 			CpuUsage:      metrics.Usage.Cpu().String(),
 			CpuValue:      metrics.Usage.Cpu().MilliValue(),
-			MemAvail:      availRes.Memory().String(),
+			MemAvail:      availRes.Memory().ScaledValue(resource.Mega),
 			MemAvailValue: availRes.Memory().MilliValue(),
 			MemUsage:      metrics.Usage.Memory().String(),
 			MemValue:      metrics.Usage.Memory().MilliValue(),
+			StorageAvail:  availRes.StorageEphemeral().ScaledValue(resource.Giga),
 		}
 		rows[i] = row
 	}
@@ -123,7 +131,6 @@ func (p *MainPanel) refreshNodes(namespace string, nodes runtime.Object) error {
 	}
 	return nil
 }
-
 
 func (p *MainPanel) refreshPods(namespace string, pods runtime.Object) error {
 	if pods == nil {
@@ -228,6 +235,55 @@ func nodeRole(node coreV1.Node) string {
 		return "Master"
 	}
 	return "Node"
+}
+
+func nodeStatus(node coreV1.Node) string {
+	conds := node.Status.Conditions
+	if conds == nil || len(conds) == 0 {
+		return "Unknown"
+	}
+
+	for _, cond := range conds {
+		if cond.Status == coreV1.ConditionTrue {
+			return string(cond.Type)
+		}
+	}
+
+	return "NotReady"
+}
+
+func getNodeInternalIp(node coreV1.Node) string {
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == coreV1.NodeInternalIP {
+			return addr.Address
+		}
+	}
+	return "<none>"
+}
+
+func getNodeExternalIp(node coreV1.Node) string {
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == coreV1.NodeExternalIP {
+			return addr.Address
+		}
+	}
+	return "<none>"
+}
+
+func getNodeHostName(node coreV1.Node) string {
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == coreV1.NodeHostName {
+			return addr.Address
+		}
+	}
+	return "<none>"
+}
+
+func gigaScale(qty *resource.Quantity) string {
+	if qty.RoundUp(resource.Giga) {
+		return qty.String()
+	}
+	return qty.String()
 }
 
 func getDepsSummary(depObjects []runtime.Object) (desired, ready int, err error) {
