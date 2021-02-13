@@ -3,7 +3,7 @@ package overview
 import (
 	"fmt"
 
-	"github.com/gdamore/tcell"
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/vladimirvivien/ktop/ui"
 )
@@ -22,6 +22,7 @@ type WorkloadItem struct {
 type workloadPanel struct {
 	title    string
 	root     *tview.Flex
+	children  []tview.Primitive
 	listCols []string
 	table    *tview.Table
 }
@@ -29,6 +30,7 @@ type workloadPanel struct {
 func NewWorkloadPanel(title string) ui.Panel {
 	p := &workloadPanel{title: title}
 	p.Layout(nil)
+	p.children = append(p.children, p.table)
 	return p
 }
 
@@ -130,6 +132,10 @@ func (p *workloadPanel) Clear() {
 
 }
 
-func (p *workloadPanel) GetView() tview.Primitive {
+func (p *workloadPanel) GetRootView() tview.Primitive {
 	return p.root
+}
+
+func (p *workloadPanel) GetChildrenViews()[]tview.Primitive {
+	return p.children
 }

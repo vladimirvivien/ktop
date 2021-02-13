@@ -3,7 +3,7 @@ package overview
 import (
 	"fmt"
 
-	"github.com/gdamore/tcell"
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 
 	"github.com/vladimirvivien/ktop/ui"
@@ -13,6 +13,7 @@ import (
 type podPanel struct {
 	title    string
 	root     *tview.Flex
+	children []tview.Primitive
 	listCols []string
 	list     *tview.Table
 }
@@ -20,6 +21,7 @@ type podPanel struct {
 func NewPodPanel(title string) ui.Panel {
 	p := &podPanel{title: title, list: tview.NewTable()}
 	p.Layout(nil)
+	p.children = append(p.children, p.list)
 	p.root = tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(p.list, 0, 1, true)
 	return p
@@ -125,6 +127,10 @@ func (p *podPanel) Clear() {
 	p.DrawHeader(p.listCols)
 }
 
-func (p *podPanel) GetView() tview.Primitive {
+func (p *podPanel) GetRootView() tview.Primitive {
 	return p.root
+}
+
+func (p *podPanel) GetChildrenViews() []tview.Primitive {
+	return p.children
 }

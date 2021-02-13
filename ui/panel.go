@@ -11,7 +11,8 @@ type Panel interface {
 	DrawFooter(param interface{})
 	Clear()
 	GetTitle() string
-	GetView() tview.Primitive
+	GetRootView() tview.Primitive
+	GetChildrenViews() []tview.Primitive
 }
 
 type PanelController interface {
