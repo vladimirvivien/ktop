@@ -74,22 +74,22 @@ func (app *Application) GetStopChan() <-chan struct{} {
 	return app.stopCh
 }
 
-// ShowBanner displays a welcome banner
 func (app *Application) WelcomeBanner() {
 	fmt.Println(`
- _    _              
-| | _| |_ ___  _ __  
-| |/ / __/ _ \| '_ \ 
+ _    _ 
+| | _| |_ ___  _ __
+| |/ / __/ _ \| '_ \
 |   <| || (_) | |_) |
-|_|\_\\__\___/| .__/ 
+|_|\_\\__\___/| .__/
               |_|`)
 	fmt.Println("Version 0.1.0-alpha.1")
 }
 
-func (app *Application) setup() error {
+func (app *Application) setup(ctx context.Context) error {
 	// setup each page panel
 	for _, page := range app.pages {
-		if err := page.Panel.Run(); err != nil {
+		// TODO propagate context to panel run
+		if err := page.Panel.Run(ctx); err != nil {
 			return fmt.Errorf("init failed: page %s: %s", page.Title, err)
 		}
 	}
@@ -99,7 +99,7 @@ func (app *Application) setup() error {
 
 	var hdr strings.Builder
 	hdr.WriteString("%c [green]API server: [white]%s [green]namespace: [white]%s [green] metrics:")
-	if err := app.k8sClient.AssertMetricsAvailable(); err != nil {
+	if err := app.GetK8sClient().AssertMetricsAvailable(); err != nil {
 		hdr.WriteString(" [red]not connected")
 	} else {
 		hdr.WriteString(" [white]connected")
@@ -107,7 +107,7 @@ func (app *Application) setup() error {
 
 	app.panel.DrawHeader(fmt.Sprintf(
 		hdr.String(),
-		ui.Icons.Rocket, app.k8sClient.Config().Host, app.k8sClient.Namespace(),
+		ui.Icons.Rocket, app.GetK8sClient().Config().Host, app.k8sClient.Namespace(),
 	))
 
 	app.panel.DrawFooter(app.getPageTitles()[app.visibleView])
@@ -147,7 +147,7 @@ func (app *Application) setup() error {
 func (app *Application) Run(ctx context.Context) error {
 
 	// setup application UI
-	if err := app.setup(); err != nil {
+	if err := app.setup(ctx); err != nil {
 		return err
 	}
 

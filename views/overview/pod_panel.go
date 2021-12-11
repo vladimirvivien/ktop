@@ -5,12 +5,13 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-
+	"github.com/vladimirvivien/ktop/application"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/model"
 )
 
 type podPanel struct {
+	app *application.Application
 	title    string
 	root     *tview.Flex
 	children []tview.Primitive
@@ -18,8 +19,8 @@ type podPanel struct {
 	list     *tview.Table
 }
 
-func NewPodPanel(title string) ui.Panel {
-	p := &podPanel{title: title, list: tview.NewTable()}
+func NewPodPanel(app *application.Application, title string) ui.Panel {
+	p := &podPanel{app: app, title: title, list: tview.NewTable()}
 	p.Layout(nil)
 	p.children = append(p.children, p.list)
 	p.root = tview.NewFlex().SetDirection(tview.FlexRow).
@@ -70,27 +71,55 @@ func (p *podPanel) DrawBody(data interface{}) {
 
 		p.list.SetCell(
 			i+1, 0,
-			tview.NewTableCell(pod.Name).
+			tview.NewTableCell(pod.Namespace).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
 		p.list.SetCell(
 			i+1, 1,
-			tview.NewTableCell(pod.Status).
+			tview.NewTableCell(pod.Name).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
 		p.list.SetCell(
 			i+1, 2,
+			tview.NewTableCell(fmt.Sprintf("%d/%d", pod.ReadyContainers, pod.TotalContainers)).
+				SetTextColor(tcell.ColorYellow).
+				SetAlign(tview.AlignCenter),
+		)
+
+		p.list.SetCell(
+			i+1, 3,
+			tview.NewTableCell(pod.Status).
+				SetTextColor(tcell.ColorYellow).
+				SetAlign(tview.AlignLeft),
+		)
+
+		p.list.SetCell(
+			i+1, 4,
+			tview.NewTableCell(fmt.Sprintf("%d",pod.Restarts)).
+				SetTextColor(tcell.ColorYellow).
+				SetAlign(tview.AlignCenter),
+		)
+
+		p.list.SetCell(
+			i+1, 5,
+			tview.NewTableCell(pod.TimeSince).
+				SetTextColor(tcell.ColorYellow).
+				SetAlign(tview.AlignLeft),
+		)
+
+		p.list.SetCell(
+			i+1, 6,
 			tview.NewTableCell(pod.IP).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
 		p.list.SetCell(
-			i+1, 3,
+			i+1, 7,
 			tview.NewTableCell(pod.Node).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
@@ -102,14 +131,14 @@ func (p *podPanel) DrawBody(data interface{}) {
 		memGraph := ui.BarGraph(10, memRatio, colorKeys)
 
 		p.list.SetCell(
-			i+1, 4,
+			i+1, 8,
 			tview.NewTableCell(fmt.Sprintf("[white][%s[white]] %02.1f%%", cpuGraph, cpuRatio*100)).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
 		)
 
 		p.list.SetCell(
-			i+1, 5,
+			i+1, 9,
 			tview.NewTableCell(fmt.Sprintf("[white][%s[white]] %02.1f%%", memGraph, memRatio*100)).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft),
@@ -117,9 +146,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 	}
 }
 
-func (p *podPanel) DrawFooter(data interface{}) {
-
-}
+func (p *podPanel) DrawFooter(data interface{}) {}
 
 func (p *podPanel) Clear() {
 	p.list.Clear()

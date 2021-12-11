@@ -1,17 +1,14 @@
 package overview
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	coreV1 "k8s.io/api/core/v1"
-	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
-
 	"github.com/vladimirvivien/ktop/application"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/model"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 type nodePanel struct {
@@ -97,40 +94,27 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 
 func (p *nodePanel) DrawBody(data interface{}) {
 	colorKeys := ui.ColorKeys{0: "green", 50: "yellow", 90: "red"}
-	p.Clear()
-	nodeList, ok := data.(*coreV1.NodeList)
+	nodes, ok := data.([]model.NodeModel)
 	if !ok {
 		panic(fmt.Sprintf("NodePanel.DrawBody: unexpected type %T", data))
 	}
-	nodeItems := nodeList.Items
-	for i, nodeItem := range nodeItems {
-		metrics, err := p.app.GetK8sClient().GetNodeMetrics(context.Background(), nodeItem.Name)
-		if err != nil {
-			metrics = new(metricsV1beta1.NodeMetrics)
-		}
-		node := &model.NodeModel{
-			Node:        nodeItem,
-			NodeStatus:  nodeItem.Status,
-			AvailRes:    nodeItem.Status.Allocatable,
-			NodeMetrics: metrics,
-		}
-
-		cpuRatio := ui.GetRatio(float64(node.CpuUsageMillis()), float64(node.CpuAvailMillis()))
+	for i, node := range nodes {
+		cpuRatio := ui.GetRatio(float64(node.UsageCPU.MilliValue()), float64(node.CapacityCPU.MilliValue()))
 		cpuGraph := ui.BarGraph(10, cpuRatio, colorKeys)
 
-		memRatio := ui.GetRatio(float64(node.MemUsageMillis()), float64(node.MemAvailMillis()))
+		memRatio := ui.GetRatio(float64(node.UsageMem.MilliValue()), float64(node.CapacityMem.MilliValue()))
 		memGraph := ui.BarGraph(10, memRatio, colorKeys)
 
 		i++ // offset for header-row
-		masterLegend := ""
-		if node.NodeRole() == "Master" {
-			masterLegend = fmt.Sprintf("%c", ui.Icons.Plane)
+		controlLegend := ""
+		if node.Controller{
+			controlLegend = fmt.Sprintf("%c", ui.Icons.TrafficLight)
 		}
 
 		p.list.SetCell(
 			i, 0,
 			&tview.TableCell{
-				Text:          masterLegend,
+				Text:          controlLegend,
 				Color:         tcell.ColorOrangeRed,
 				Align:         tview.AlignCenter,
 				NotSelectable: true,
@@ -140,7 +124,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 		p.list.SetCell(
 			i, 1,
 			&tview.TableCell{
-				Text:  node.Node.Name,
+				Text:  node.Name,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
@@ -149,7 +133,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 		p.list.SetCell(
 			i, 2,
 			&tview.TableCell{
-				Text:  node.NodeState(),
+				Text:  node.Status,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
@@ -158,7 +142,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 		p.list.SetCell(
 			i, 3,
 			&tview.TableCell{
-				Text:  node.NodeStatus.NodeInfo.KubeletVersion,
+				Text:  node.TimeSinceStart,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
@@ -167,7 +151,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 		p.list.SetCell(
 			i, 4,
 			&tview.TableCell{
-				Text:  fmt.Sprintf("%s/%s", node.GetNodeInternalIp(), node.GetNodeExternalIp()),
+				Text:  node.KubeletVersion,
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
@@ -176,7 +160,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 		p.list.SetCell(
 			i, 5,
 			&tview.TableCell{
-				Text:  fmt.Sprintf("%s;%s", node.NodeStatus.NodeInfo.OSImage, node.NodeStatus.NodeInfo.Architecture),
+				Text:  fmt.Sprintf("%s/%s", node.InternalIP, node.ExternalIP),
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
@@ -185,7 +169,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 		p.list.SetCell(
 			i, 6,
 			&tview.TableCell{
-				Text:  fmt.Sprintf("%d/%dMi", node.CpuAvail(), node.MemAvail()),
+				Text:  fmt.Sprintf("%s/%s", node.OSImage, node.Architecture),
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
@@ -194,7 +178,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 		p.list.SetCell(
 			i, 7,
 			&tview.TableCell{
-				Text:  fmt.Sprintf("%dGi", node.EphStorageAvail()),
+				Text:  fmt.Sprintf("%d/%dMi", node.CapacityCPU.Value(), node.CapacityMem.ScaledValue(resource.Mega)),
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
@@ -203,14 +187,25 @@ func (p *nodePanel) DrawBody(data interface{}) {
 		p.list.SetCell(
 			i, 8,
 			&tview.TableCell{
-				Text:  fmt.Sprintf("[white][%s[white]] %dm (%1.0f%%)", cpuGraph, node.CpuUsageMillis(), cpuRatio*100),
+				Text:  fmt.Sprintf("%dGi", node.CapacityStorage.ScaledValue(resource.Giga)),
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},
-		).SetCell(
+		)
+
+		p.list.SetCell(
 			i, 9,
 			&tview.TableCell{
-				Text:  fmt.Sprintf("[white][%s[white]] %dMi (%01.0f%%)", memGraph, node.MemUsage(), memRatio*100),
+				Text:  fmt.Sprintf("[white][%s[white]] %dm (%1.0f%%)", cpuGraph, node.UsageCPU.MilliValue(), cpuRatio*100),
+				Color: tcell.ColorYellow,
+				Align: tview.AlignLeft,
+			},
+		)
+
+		p.list.SetCell(
+			i, 10,
+			&tview.TableCell{
+				Text:  fmt.Sprintf("[white][%s[white]] %dMi (%01.0f%%)", memGraph, node.UsageMem.ScaledValue(resource.Mega), memRatio*100),
 				Color: tcell.ColorYellow,
 				Align: tview.AlignLeft,
 			},

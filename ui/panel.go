@@ -1,12 +1,15 @@
 package ui
 
 import (
+	"context"
+
 	"github.com/rivo/tview"
 )
 
 type Panel interface {
 	Layout(data interface{})
 	DrawHeader(data interface{})
+	// TODO add context to DrawXXX methods
 	DrawBody(data interface{})
 	DrawFooter(param interface{})
 	Clear()
@@ -17,5 +20,5 @@ type Panel interface {
 
 type PanelController interface {
 	Panel
-	Run() error
+	Run(context.Context) error
 }

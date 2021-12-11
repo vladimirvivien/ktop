@@ -3,9 +3,9 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
@@ -15,13 +15,6 @@ import (
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
-var (
-	NodesResource = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"}
-	PodsResource  = schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
-)
-
-type ListFunc func(ctx context.Context, namespace string, list runtime.Object) error
-
 type Client struct {
 	namespace        string
 	config           *restclient.Config
@@ -29,8 +22,8 @@ type Client struct {
 	discoClient      *discovery.DiscoveryClient
 	metricsClient    *metricsclient.Clientset
 	metricsAvailable bool
-	nodeWatcher      *NodeWatcher
-	podWatcher       *PodWatcher
+	refreshTimeout   time.Duration
+	controller *Controller
 }
 
 func New(ctx context.Context, kubeconfig, kubectx, namespace string) (*Client, error) {
@@ -61,16 +54,7 @@ func New(ctx context.Context, kubeconfig, kubectx, namespace string) (*Client, e
 		discoClient:   disco,
 		metricsClient: metrics,
 	}
-
-	client.nodeWatcher = NewNodeWatcher(client)
-	if err := client.nodeWatcher.Start(ctx); err != nil {
-		return nil, err
-	}
-	client.podWatcher = NewPodWatcher(client)
-	if err := client.podWatcher.Start(ctx); err != nil {
-		return nil, err
-	}
-
+	client.controller = newController(client)
 	return client, nil
 }
 
@@ -138,10 +122,6 @@ func (k8s *Client) GetPodMetrics(ctx context.Context, podName string) (*metricsV
 	return metrics, nil
 }
 
-func (k8s *Client) AddNodeListFunc(f ListFunc) {
-	k8s.nodeWatcher.AddNodeListFunc(f)
-}
-
-func (k8s *Client) AddPodListFunc(f ListFunc) {
-	k8s.podWatcher.AddPodListFunc(f)
+func (k8s *Client) Controller() *Controller {
+	return k8s.controller
 }

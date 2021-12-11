@@ -23,7 +23,7 @@ func main() {
 
 	k8sC, err := k8s.New(ctx, kubeCfg, kubeCtx, ns)
 	if err != nil {
-		fmt.Printf("failed to create Kubernetes client: %s\n", err)
+		fmt.Printf("main: failed to create Kubernetes client: %s\n", err)
 		os.Exit(1)
 	}
 	fmt.Printf("Connected to: %s\n", k8sC.Config().Host)
