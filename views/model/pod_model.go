@@ -20,18 +20,31 @@ type PodModel struct {
 	IP        string
 	TimeSince string
 
-	PodCPUValue  int64
-	PodMemValue  int64
-	NodeCPUValue int64
-	NodeMemValue int64
+	PodRequestedCpuQty *resource.Quantity
+	PodRequestedMemQty *resource.Quantity
+	PodUsageCpuQty     *resource.Quantity
+	PodUsageMemQty     *resource.Quantity
+
+	NodeAllocatableCpuQty *resource.Quantity
+	NodeAllocatableMemQty *resource.Quantity
+	NodeUsageCpuQty       *resource.Quantity
+	NodeUsageMemQty       *resource.Quantity
 
 	ReadyContainers int
 	TotalContainers int
 	Restarts        int
 	Volumes         int
+	VolMounts       int
 }
 
-type ContainerSummary struct {
+type PodContainerSummary struct {
+	RequestedMemQty *resource.Quantity
+	RequestedCpuQty *resource.Quantity
+	VolMounts       int
+	Ports           int
+}
+
+type ContainerStatusSummary struct {
 	Ready       int
 	Total       int
 	Restarts    int
@@ -50,34 +63,40 @@ func SortPodModels(pods []PodModel) {
 
 func NewPodModel(pod *v1.Pod, podMetrics *metricsV1beta1.PodMetrics, nodeMetrics *metricsV1beta1.NodeMetrics) *PodModel {
 	totalCpu, totalMem := podMetricsTotals(podMetrics)
-	containerSummary := getContainerSummary(pod.Status.ContainerStatuses)
-	if (containerSummary.Status == "" || containerSummary.Status == "Completed") && containerSummary.SomeRunning {
+	statusSummary := getContainerStatusSummary(pod.Status.ContainerStatuses)
+	if (statusSummary.Status == "" || statusSummary.Status == "Completed") && statusSummary.SomeRunning {
 		if podIsReady(pod.Status.Conditions) {
-			containerSummary.Status = "Running"
+			statusSummary.Status = "Running"
 		} else {
-			containerSummary.Status = "NotReady"
+			statusSummary.Status = "NotReady"
 		}
 	}
+	containerSummary := GetPodContainerSummary(pod)
 	return &PodModel{
-		Namespace:       pod.GetNamespace(),
-		Name:            pod.Name,
-		Status:          containerSummary.Status,
-		TimeSince:       timeSince(pod.CreationTimestamp),
-		IP:              pod.Status.PodIP,
-		Node:            pod.Spec.NodeName,
-		Volumes:         len(pod.Spec.Volumes),
-		NodeCPUValue:    nodeMetrics.Usage.Cpu().MilliValue(),
-		NodeMemValue:    nodeMetrics.Usage.Memory().MilliValue(),
-		PodCPUValue:     totalCpu.MilliValue(),
-		PodMemValue:     totalMem.MilliValue(),
-		ReadyContainers: containerSummary.Ready,
-		TotalContainers: containerSummary.Total,
-		Restarts:        containerSummary.Restarts,
+		Namespace:          pod.GetNamespace(),
+		Name:               pod.Name,
+		Status:             statusSummary.Status,
+		TimeSince:          timeSince(pod.CreationTimestamp),
+		IP:                 pod.Status.PodIP,
+		Node:               pod.Spec.NodeName,
+		Volumes:            len(pod.Spec.Volumes),
+		VolMounts:          containerSummary.VolMounts,
+		PodRequestedMemQty: containerSummary.RequestedMemQty,
+		PodRequestedCpuQty: containerSummary.RequestedCpuQty,
+		NodeUsageCpuQty:    nodeMetrics.Usage.Cpu(),
+		NodeUsageMemQty:    nodeMetrics.Usage.Memory(),
+		PodUsageCpuQty:     totalCpu,
+		PodUsageMemQty:     totalMem,
+		ReadyContainers:    statusSummary.Ready,
+		TotalContainers:    statusSummary.Total,
+		Restarts:           statusSummary.Restarts,
 	}
 }
 
-func podMetricsTotals(metrics *metricsV1beta1.PodMetrics) (totalCpu, totalMem resource.Quantity) {
+func podMetricsTotals(metrics *metricsV1beta1.PodMetrics) (totalCpu, totalMem *resource.Quantity) {
 	containers := metrics.Containers
+	totalCpu = resource.NewQuantity(0, resource.DecimalSI)
+	totalMem = resource.NewQuantity(0, resource.DecimalSI)
 	for _, c := range containers {
 		totalCpu.Add(*c.Usage.Cpu())
 		totalMem.Add(*c.Usage.Memory())
@@ -85,8 +104,8 @@ func podMetricsTotals(metrics *metricsV1beta1.PodMetrics) (totalCpu, totalMem re
 	return
 }
 
-func getContainerSummary(containerStats []v1.ContainerStatus) ContainerSummary {
-	summary := ContainerSummary{Total: len(containerStats)}
+func getContainerStatusSummary(containerStats []v1.ContainerStatus) ContainerStatusSummary {
+	summary := ContainerStatusSummary{Total: len(containerStats)}
 	for _, stat := range containerStats {
 		summary.Restarts += int(stat.RestartCount)
 		switch {
@@ -125,35 +144,34 @@ func timeSince(ts metav1.Time) string {
 	return duration.HumanDuration(time.Since(ts.Time))
 }
 
-func GetPodResourceRequests(pod *v1.Pod) (cpus *resource.Quantity, mems *resource.Quantity) {
-	mems = resource.NewQuantity(0, resource.DecimalSI)
-	cpus = resource.NewQuantity(0, resource.DecimalSI)
+func GetPodContainerSummary(pod *v1.Pod) PodContainerSummary {
+	mems := resource.NewQuantity(0, resource.DecimalSI)
+	cpus := resource.NewQuantity(0, resource.DecimalSI)
+	var ports int
+	var mounts int
 	for _, container := range pod.Spec.Containers {
 		mems.Add(*container.Resources.Requests.Memory())
 		cpus.Add(*container.Resources.Requests.Cpu())
+		ports += len(container.Ports)
+		mounts += len(container.VolumeMounts)
 	}
 
 	for _, container := range pod.Spec.InitContainers {
 		mems.Add(*container.Resources.Requests.Memory())
 		mems.Add(*container.Resources.Requests.Cpu())
+		ports += len(container.Ports)
+		mounts += len(container.VolumeMounts)
 	}
 
 	if pod.Spec.Overhead != nil {
 		mems.Add(*pod.Spec.Overhead.Memory())
 		mems.Add(*pod.Spec.Overhead.Cpu())
 	}
-	return
-}
 
-func GetPodContainerLimits(pod *v1.Pod) v1.ResourceList {
-	limits := make(v1.ResourceList)
-	for _, container := range pod.Spec.Containers {
-		limits.Memory().Add(*container.Resources.Limits.Memory())
-		limits.Cpu().Add(*container.Resources.Limits.Cpu())
+	return PodContainerSummary{
+		RequestedMemQty: mems,
+		RequestedCpuQty: cpus,
+		VolMounts:       mounts,
+		Ports:           ports,
 	}
-	for _, container := range pod.Spec.InitContainers {
-		limits.Memory().Add(*container.Resources.Limits.Memory())
-		limits.Cpu().Add(*container.Resources.Limits.Cpu())
-	}
-	return limits
 }

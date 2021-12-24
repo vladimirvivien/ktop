@@ -19,6 +19,7 @@ var (
 		"nodes":                  {Group: "", Version: "v1", Resource: "nodes"},
 		"namespaces":             {Group: "", Version: "v1", Resource: "namespaces"},
 		"pods":                   {Group: "", Version: "v1", Resource: "pods"},
+		"persistentvolumes":      {Group: "", Version: "v1", Resource: "persistentvolumes"},
 		"persistentvolumeclaims": {Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
 		"deployments":            {Group: appsV1.GroupName, Version: "v1", Resource: "deployments"},
 		"daemonsets":             {Group: appsV1.GroupName, Version: "v1", Resource: "daemonsets"},
@@ -49,8 +50,10 @@ type Controller struct {
 	jobInformer     informers.GenericInformer
 	cronJobInformer informers.GenericInformer
 
+	pvInformer         informers.GenericInformer
 	pvcInformer        informers.GenericInformer
 	summaryRefreshFunc RefreshSummaryFunc
+
 }
 
 func newController(client *Client) *Controller {
@@ -76,6 +79,7 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	if ctx == nil {
 		return errors.New("context cannot be nil")
 	}
+
 	factory := dynamicinformer.NewDynamicSharedInformerFactory(c.client.dynaClient, resync)
 	c.namespaceInformer = factory.ForResource(GVRs["namespaces"])
 	c.nodeInformer = factory.ForResource(GVRs["nodes"])
@@ -86,8 +90,8 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	c.statefulSetInformer = factory.ForResource(GVRs["statefulsets"])
 	c.jobInformer = factory.ForResource(GVRs["jobs"])
 	c.cronJobInformer = factory.ForResource(GVRs["cronjobs"])
+	c.pvInformer = factory.ForResource(GVRs["persistentvolumes"])
 	c.pvcInformer = factory.ForResource(GVRs["persistentvolumeclaims"])
-	//c.installHandler(ctx, c.pvcInformer, c.pvcRefreshFunc)
 
 	factory.Start(ctx.Done())
 	for name, gvr := range GVRs {

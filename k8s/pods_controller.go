@@ -11,14 +11,23 @@ import (
 	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
-func (c *Controller) GetPodList(ctx context.Context) (pods []coreV1.Pod, err error) {
+func (c *Controller) GetPodList(ctx context.Context) ([]coreV1.Pod, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	items, err := c.podInformer.Lister().List(labels.Everything())
+
+	var items []runtime.Object
+	var err error
+	if c.client.namespace == AllNamespaces {
+		items, err = c.podInformer.Lister().List(labels.Everything())
+	}else{
+		items, err = c.podInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
+	}
 	if err != nil {
 		return nil, err
 	}
+
+	var pods []coreV1.Pod
 	for _, item := range items {
 		unstructPod, ok := item.(runtime.Unstructured)
 		if !ok {
@@ -30,7 +39,7 @@ func (c *Controller) GetPodList(ctx context.Context) (pods []coreV1.Pod, err err
 		}
 		pods = append(pods, *pod)
 	}
-	return
+	return pods, nil
 }
 
 func (c *Controller) GetPodModels(ctx context.Context) (models []model.PodModel, err error) {
@@ -39,12 +48,15 @@ func (c *Controller) GetPodModels(ctx context.Context) (models []model.PodModel,
 		return
 	}
 	nodeMetricsCache := make(map[string]*metricsV1beta1.NodeMetrics)
+	nodeAllocResMap := make(map[string]coreV1.ResourceList)
 	for _, pod := range pods {
+
 		// retrieve metrics for pod
-		podMetrics, err := c.client.GetPodMetrics(ctx, pod.Name)
+		podMetrics, err := c.client.GetPodMetricsByName(ctx, pod)
 		if err != nil {
 			podMetrics = new(metricsV1beta1.PodMetrics)
 		}
+
 		if metrics, ok := nodeMetricsCache[pod.Spec.NodeName]; !ok {
 			metrics, err = c.client.GetNodeMetrics(ctx, pod.Spec.NodeName)
 			if err != nil {
@@ -53,7 +65,22 @@ func (c *Controller) GetPodModels(ctx context.Context) (models []model.PodModel,
 			nodeMetricsCache[pod.Spec.NodeName] = metrics
 		}
 		nodeMetrics := nodeMetricsCache[pod.Spec.NodeName]
+
 		model := model.NewPodModel(&pod, podMetrics, nodeMetrics)
+
+		// retrieve pod's node allocatable resources
+		if alloc, ok := nodeAllocResMap[pod.Spec.NodeName]; !ok {
+			node, err := c.GetNode(ctx, pod.Spec.NodeName)
+			if err != nil {
+				alloc = coreV1.ResourceList{}
+			}else{
+				alloc = node.Status.Allocatable
+			}
+			nodeAllocResMap[pod.Spec.NodeName] = alloc
+		}
+		alloc := nodeAllocResMap[pod.Spec.NodeName]
+		model.NodeAllocatableMemQty = alloc.Memory()
+		model.NodeAllocatableCpuQty = alloc.Cpu()
 		models = append(models, *model)
 	}
 	return

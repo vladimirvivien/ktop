@@ -14,7 +14,7 @@ import (
 )
 
 type clusterSummaryPanel struct {
-	app *application.Application
+	app          *application.Application
 	title        string
 	root         *tview.Flex
 	children     []tview.Primitive
@@ -68,21 +68,33 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 		var cpuGraph, memGraph string
 		var cpuMetrics, memMetrics string
 		if err := client.AssertMetricsAvailable(); err != nil { // metrics not available
-			cpuRatio = ui.GetRatio(float64(summary.RequestedCpuTotal.MilliValue()), float64(summary.AllocatableCpuTotal.MilliValue()))
+			cpuRatio = ui.GetRatio(float64(summary.RequestedPodCpuTotal.MilliValue()), float64(summary.AllocatableNodeCpuTotal.MilliValue()))
 			cpuGraph = ui.BarGraph(graphSize, cpuRatio, colorKeys)
 			cpuMetrics = fmt.Sprintf(
 				"CPU: [white][%s[white]] %dm/%dm (%02.1f%% requested)",
-				cpuGraph, summary.RequestedCpuTotal.MilliValue(), summary.AllocatableCpuTotal.MilliValue(), cpuRatio*100,
+				cpuGraph, summary.RequestedPodCpuTotal.MilliValue(), summary.AllocatableNodeCpuTotal.MilliValue(), cpuRatio*100,
 			)
 
-			memRatio = ui.GetRatio(float64(summary.RequestedMemTotal.MilliValue()), float64(summary.AllocatableMemTotal.MilliValue()))
+			memRatio = ui.GetRatio(float64(summary.RequestedPodMemTotal.MilliValue()), float64(summary.AllocatableNodeMemTotal.MilliValue()))
 			memGraph = ui.BarGraph(graphSize, memRatio, colorKeys)
 			memMetrics = fmt.Sprintf(
 				"Memory: [white][%s[white]] %dGi/%dGi (%02.1f%% requested)",
-				memGraph, summary.RequestedMemTotal.ScaledValue(resource.Giga), summary.AllocatableMemTotal.ScaledValue(resource.Giga), memRatio*100,
+				memGraph, summary.RequestedPodMemTotal.ScaledValue(resource.Giga), summary.AllocatableNodeMemTotal.ScaledValue(resource.Giga), memRatio*100,
 			)
-		}else{
+		} else {
+			cpuRatio = ui.GetRatio(float64(summary.UsageNodeCpuTotal.MilliValue()), float64(summary.AllocatableNodeCpuTotal.MilliValue()))
+			cpuGraph = ui.BarGraph(graphSize, cpuRatio, colorKeys)
+			cpuMetrics = fmt.Sprintf(
+				"CPU: [white][%s[white]] %dm/%dm (%02.1f%% used)",
+				cpuGraph, summary.UsageNodeCpuTotal.MilliValue(), summary.AllocatableNodeCpuTotal.MilliValue(), cpuRatio*100,
+			)
 
+			memRatio = ui.GetRatio(float64(summary.UsageNodeMemTotal.MilliValue()), float64(summary.AllocatableNodeMemTotal.MilliValue()))
+			memGraph = ui.BarGraph(graphSize, memRatio, colorKeys)
+			memMetrics = fmt.Sprintf(
+				"Memory: [white][%s[white]] %dGi/%dGi (%02.1f%% used)",
+				memGraph, summary.UsageNodeMemTotal.ScaledValue(resource.Giga), summary.AllocatableNodeMemTotal.ScaledValue(resource.Giga), memRatio*100,
+			)
 		}
 
 		p.graphTable.SetCell(
@@ -118,76 +130,55 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 		)
 		p.summaryTable.SetCell(
 			0, 2,
-			tview.NewTableCell(fmt.Sprintf("Namespaces: [white]%d[white]", summary.Namespaces)).
+			tview.NewTableCell(fmt.Sprintf("Nmspaces: [white]%d[white]", summary.Namespaces)).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(100),
 		)
+
 		p.summaryTable.SetCell(
 			0, 3,
-			tview.NewTableCell(fmt.Sprintf("Pressures: [white]%d[white]", summary.Pressures)).
+			tview.NewTableCell(fmt.Sprintf("Pods: [white]%d/%d (%d imgs)", summary.PodsRunning, summary.PodsAvailable, summary.ImagesCount)).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(100),
 		)
-		p.summaryTable.SetCell(
-			0, 4,
-			tview.NewTableCell(fmt.Sprintf("Pods: [white]%d[white]", summary.PodsRunning)).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignLeft).
-				SetExpansion(100),
-		)
+
 		p.summaryTable.SetCell(
 			0, 5,
-			tview.NewTableCell(fmt.Sprintf("Containers: [white]%d", summary.ContainersRunning)).
+			tview.NewTableCell(fmt.Sprintf("Deployments: [white]%d/%d", summary.DeploymentsReady, summary.DeploymentsTotal)).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(100),
 		)
+
 		p.summaryTable.SetCell(
 			0, 6,
-			tview.NewTableCell(fmt.Sprintf("Volumes: [white]%d", summary.PVsInUse)).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignLeft).
-				SetExpansion(100),
-		)
-		p.summaryTable.SetCell(
-			0, 7,
-			tview.NewTableCell(fmt.Sprintf("Deployments: [white]%d[white]", summary.DeploymentsReady)).
+			tview.NewTableCell(fmt.Sprintf("Sets: [white]replicas %d, daemons %d, stateful %d", summary.ReplicaSetsReady, summary.DaemonSetsReady, summary.StatefulSetsReady)).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(100),
 		)
 
-		p.summaryTable.SetCell(
-			0, 8,
-			tview.NewTableCell(fmt.Sprintf("Replicasets: [white]%d[white]", summary.ReplicaSetsReady)).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignLeft).
-				SetExpansion(100),
-		)
 		p.summaryTable.SetCell(
 			0, 9,
-			tview.NewTableCell(fmt.Sprintf("Daemonsets: [white]%d[white]", summary.DaemonSetsReady)).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignLeft).
-				SetExpansion(100),
-		)
-		p.summaryTable.SetCell(
-			0, 10,
-			tview.NewTableCell(fmt.Sprintf("Statefulsets: [white]%d[white]", summary.StatefulSetsReady)).
-				SetTextColor(tcell.ColorYellow).
-				SetAlign(tview.AlignLeft).
-				SetExpansion(100),
-		)
-		p.summaryTable.SetCell(
-			0, 11,
-			tview.NewTableCell(fmt.Sprintf("Jobs: [white]%d, [green]cron: [white]%d", summary.JobsCount, summary.CronJobsCount)).
+			tview.NewTableCell(fmt.Sprintf("Jobs: [white]%d (cron: %d)", summary.JobsCount, summary.CronJobsCount)).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(100),
 		)
 
+		p.summaryTable.SetCell(
+			0, 10,
+			tview.NewTableCell(fmt.Sprintf(
+				"[yellow]PVs: [white]%d (%dGi) [yellow]PVCs: [white]%d (%dGi)",
+				summary.PVCCount, summary.PVsTotal.ScaledValue(resource.Giga),
+				summary.PVCCount, summary.PVCsTotal.ScaledValue(resource.Giga),
+			)).
+				SetTextColor(tcell.ColorYellow).
+				SetAlign(tview.AlignLeft).
+				SetExpansion(100),
+		)
 	default:
 		panic(fmt.Sprintf("SummaryPanel.DrawBody: unexpected type %T", data))
 	}

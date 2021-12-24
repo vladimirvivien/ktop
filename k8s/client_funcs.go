@@ -38,10 +38,19 @@ func (c *Controller) GetDeploymentList(ctx context.Context) ([]appsV1.Deployment
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	items, err := c.deploymentInformer.Lister().List(labels.Everything())
+
+	var items []runtime.Object
+	var err error
+	if c.client.namespace == AllNamespaces {
+		items, err = c.deploymentInformer.Lister().List(labels.Everything())
+	}else{
+		items, err = c.deploymentInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
+	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	var deps []appsV1.Deployment
 	for _, item := range items {
 		unstructDep, ok := item.(runtime.Unstructured)
@@ -61,10 +70,19 @@ func (c *Controller) GetDaemonSetList(ctx context.Context) ([]appsV1.DaemonSet, 
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	items, err := c.daemonSetInformer.Lister().List(labels.Everything())
+
+	var items []runtime.Object
+	var err error
+	if c.client.namespace == AllNamespaces {
+		items, err = c.daemonSetInformer.Lister().List(labels.Everything())
+	}else{
+		items, err = c.daemonSetInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
+	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	var daemons []appsV1.DaemonSet
 	for _, item := range items {
 		unstructDaemon, ok := item.(runtime.Unstructured)
@@ -85,10 +103,18 @@ func (c *Controller) GetReplicaSetList(ctx context.Context) ([]appsV1.ReplicaSet
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	items, err := c.replicaSetInformer.Lister().List(labels.Everything())
+
+	var items []runtime.Object
+	var err error
+	if c.client.namespace == AllNamespaces {
+		items, err = c.replicaSetInformer.Lister().List(labels.Everything())
+	}else{
+		items, err = c.replicaSetInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	var replicasets []appsV1.ReplicaSet
 	for _, item := range items {
 		unstructDaemon, ok := item.(runtime.Unstructured)
@@ -108,10 +134,18 @@ func (c *Controller) GetStatefulSetList(ctx context.Context) ([]appsV1.StatefulS
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	items, err := c.statefulSetInformer.Lister().List(labels.Everything())
+
+	var items []runtime.Object
+	var err error
+	if c.client.namespace == AllNamespaces {
+		items, err = c.statefulSetInformer.Lister().List(labels.Everything())
+	}else{
+		items, err = c.statefulSetInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	var statefulsets []appsV1.StatefulSet
 	for _, item := range items {
 		unstructStateful, ok := item.(runtime.Unstructured)
@@ -131,10 +165,17 @@ func (c *Controller) GetJobList(ctx context.Context) ([]batchV1.Job, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	items, err := c.jobInformer.Lister().List(labels.Everything())
+	var items []runtime.Object
+	var err error
+	if c.client.namespace == AllNamespaces {
+		items, err = c.jobInformer.Lister().List(labels.Everything())
+	}else{
+		items, err = c.jobInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
+	}
 	if err != nil {
 		return nil, err
 	}
+
 	var jobs []batchV1.Job
 	for _, item := range items {
 		unstructJob, ok := item.(runtime.Unstructured)
@@ -154,7 +195,13 @@ func (c *Controller) GetCronJobList(ctx context.Context) ([]batchV1.CronJob, err
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	items, err := c.cronJobInformer.Lister().List(labels.Everything())
+	var items []runtime.Object
+	var err error
+	if c.client.namespace == AllNamespaces {
+		items, err = c.cronJobInformer.Lister().List(labels.Everything())
+	}else{
+		items, err = c.cronJobInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -171,4 +218,57 @@ func (c *Controller) GetCronJobList(ctx context.Context) ([]batchV1.CronJob, err
 		cronjobs = append(cronjobs, *job)
 	}
 	return cronjobs, nil
+}
+func (c *Controller) GetPVList(ctx context.Context) ([]coreV1.PersistentVolume, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	items, err := c.pvInformer.Lister().List(labels.Everything())
+	if err != nil {
+		return nil, err
+	}
+	var pvs []coreV1.PersistentVolume
+	for _, item := range items {
+		unstructPV, ok := item.(runtime.Unstructured)
+		if !ok {
+			panic("Controller: GetPVList: unexpected type for deployment")
+		}
+		pv := new(coreV1.PersistentVolume)
+		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructPV.UnstructuredContent(), pv); err != nil {
+			continue
+		}
+		pvs = append(pvs, *pv)
+	}
+	return pvs, nil
+}
+
+func (c *Controller) GetPVCList(ctx context.Context) ([]coreV1.PersistentVolumeClaim, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	var items []runtime.Object
+	var err error
+	if c.client.namespace == AllNamespaces {
+		items, err = c.pvcInformer.Lister().List(labels.Everything())
+	}else{
+		items, err = c.pvcInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var pvcs []coreV1.PersistentVolumeClaim
+	for _, item := range items {
+		unstructPVC, ok := item.(runtime.Unstructured)
+		if !ok {
+			panic("Controller: GetPVCList: unexpected type for deployment")
+		}
+		pvc := new(coreV1.PersistentVolumeClaim)
+		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructPVC.UnstructuredContent(), pvc); err != nil {
+			continue
+		}
+		pvcs = append(pvcs, *pvc)
+	}
+	return pvcs, nil
 }

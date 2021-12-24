@@ -13,7 +13,7 @@ import (
 
 func main() {
 	var ns, kubeCfg, kubeCtx, pg string
-	flag.StringVar(&ns, "namespace", "default", "namespace")
+	flag.StringVar(&ns, "namespace", "", "namespace (defaults to empty for all namespaces)")
 	flag.StringVar(&kubeCtx, "context", "", "kubeconfig context")
 	flag.StringVar(&pg, "page", "overview", "the default UI page to show")
 	flag.Parse()
@@ -21,7 +21,7 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	k8sC, err := k8s.New(ctx, kubeCfg, kubeCtx, ns)
+	k8sC, err := k8s.New(kubeCfg, kubeCtx, ns)
 	if err != nil {
 		fmt.Printf("main: failed to create Kubernetes client: %s\n", err)
 		os.Exit(1)

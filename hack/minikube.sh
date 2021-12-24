@@ -1,6 +1,6 @@
 #!/bin/sh
 
-minikube start --memory=4096 --cpus=2 \
+minikube start --nodes 2 --memory=4096 --cpus=2 \
   --kubernetes-version=v1.23.1 \
   --vm-driver=hyperkit \
   --bootstrapper=kubeadm \

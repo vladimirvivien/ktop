@@ -36,17 +36,20 @@ func New(app *application.Application, title string) *MainPanel {
 
 func (p *MainPanel) Layout(data interface{}) {
 	p.nodePanel = NewNodePanel(p.app, fmt.Sprintf(" %c Nodes ", ui.Icons.Factory))
-	p.nodePanel.DrawHeader([]string{"NAME", "STATUS", "AGE", "VERSION", "INT/EXT IPs", "OS/ARC", "PODS/CONT.", "CPU/MEM", "DISK", "CPU USAGE", "MEM USAGE"})
-	p.children = append(p.children, p.nodePanel.GetRootView())
+	p.nodePanel.DrawHeader([]string{"NAME", "STATUS", "AGE", "VERSION", "INT/EXT IPs", "OS/ARC", "PODS/IMGs", "DISK", "CPU", "MEM"})
 
 	p.clusterSummaryPanel = NewClusterSummaryPanel(p.app, fmt.Sprintf(" %c Cluster Summary ", ui.Icons.Thermometer))
 	p.clusterSummaryPanel.Layout(nil)
 	p.clusterSummaryPanel.DrawHeader(nil)
-	p.children = append(p.children, p.clusterSummaryPanel.GetRootView())
 
 	p.podPanel = NewPodPanel(p.app, fmt.Sprintf(" %c Pods ", ui.Icons.Package))
-	p.podPanel.DrawHeader([]string{"NAMESPACE", "POD", "READY", "STATUS", "RESTARTS", "AGE", "IP", "NODE", "CPU", "MEMORY"})
-	p.children = append(p.children, p.podPanel.GetRootView())
+	p.podPanel.DrawHeader([]string{"NAMESPACE", "POD", "READY", "STATUS", "RESTARTS", "AGE", "VOLS", "IP", "NODE", "CPU", "MEMORY"})
+
+	p.children = []tview.Primitive{
+		p.clusterSummaryPanel.GetRootView(),
+		p.nodePanel.GetRootView(),
+		p.podPanel.GetRootView(),
+	}
 
 	view := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(p.clusterSummaryPanel.GetRootView(), 4, 1, true).

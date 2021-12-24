@@ -8,6 +8,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/buildinfo"
 
 	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/ui"
@@ -82,13 +83,12 @@ func (app *Application) WelcomeBanner() {
 |   <| || (_) | |_) |
 |_|\_\\__\___/| .__/
               |_|`)
-	fmt.Println("Version 0.1.0-alpha.1")
+	fmt.Printf("Version %s (%s)\n", buildinfo.Version, buildinfo.GitSHA)
 }
 
 func (app *Application) setup(ctx context.Context) error {
 	// setup each page panel
 	for _, page := range app.pages {
-		// TODO propagate context to panel run
 		if err := page.Panel.Run(ctx); err != nil {
 			return fmt.Errorf("init failed: page %s: %s", page.Title, err)
 		}
@@ -105,9 +105,10 @@ func (app *Application) setup(ctx context.Context) error {
 		hdr.WriteString(" [white]connected")
 	}
 
+	namespace := app.k8sClient.Namespace()
 	app.panel.DrawHeader(fmt.Sprintf(
 		hdr.String(),
-		ui.Icons.Rocket, app.GetK8sClient().Config().Host, app.k8sClient.Namespace(),
+		ui.Icons.Rocket, app.GetK8sClient().Config().Host, namespace,
 	))
 
 	app.panel.DrawFooter(app.getPageTitles()[app.visibleView])
@@ -136,8 +137,6 @@ func (app *Application) setup(ctx context.Context) error {
 			app.panel.switchToPage(app.getPageTitles()[keyPos])
 		}
 
-		// start app gui
-
 		return event
 	})
 
@@ -158,7 +157,7 @@ func (app *Application) Run(ctx context.Context) error {
 		}
 	}()
 
-	return app.tviewApp.EnableMouse(true).Run()
+	return app.tviewApp.Run()
 }
 
 func (app *Application) Stop() error {

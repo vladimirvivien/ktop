@@ -26,6 +26,7 @@ type NodeModel struct {
 	TimeSinceStart       string
 	InternalIP           string
 	ExternalIP           string
+	PodsCount            int
 	ContainerImagesCount int
 	VolumesInUse         int
 	VolumesAttached      int
@@ -37,30 +38,30 @@ type NodeModel struct {
 	Architecture            string
 	ContainerRuntimeVersion string
 
-	CapacityCPU     resource.Quantity
-	CapacityMem     resource.Quantity
-	CapacityStorage resource.Quantity
-	CapacityPods    resource.Quantity
+	RequestedPodCpuQty *resource.Quantity
+	RequestedPodMemQty *resource.Quantity
 
-	UsageCPU     resource.Quantity
-	UsageMem     resource.Quantity
-	UsageStorage resource.Quantity
-	UsagePods    resource.Quantity
+	AllocatableCpuQty     *resource.Quantity
+	AllocatableMemQty     *resource.Quantity
+	AllocatableStorageQty *resource.Quantity
+
+	UsageCpuQty *resource.Quantity
+	UsageMemQty *resource.Quantity
 }
 
 func NewNodeModel(node *coreV1.Node, metrics *v1beta1.NodeMetrics) *NodeModel {
 	roles := GetNodeControlRoles(node)
 	return &NodeModel{
-		Name:                 node.Name,
-		Roles:                roles,
-		Controller:           IsNodeController(roles),
-		Hostname:             GetNodeHostName(node),
-		Status:               GetNodeReadyStatus(node),
-		Pressures:            GetNodePressures(node),
-		TimeSinceStart:       timeSince(node.CreationTimestamp),
-		CreationTime:         node.CreationTimestamp,
-		InternalIP:           GetNodeIp(node, coreV1.NodeInternalIP),
-		ExternalIP:           GetNodeIp(node, coreV1.NodeExternalIP),
+		Name:           node.Name,
+		Roles:          roles,
+		Controller:     IsNodeController(roles),
+		Hostname:       GetNodeHostName(node),
+		Status:         GetNodeReadyStatus(node),
+		Pressures:      GetNodePressures(node),
+		TimeSinceStart: timeSince(node.CreationTimestamp),
+		CreationTime:   node.CreationTimestamp,
+		InternalIP:     GetNodeIp(node, coreV1.NodeInternalIP),
+		ExternalIP:     GetNodeIp(node, coreV1.NodeExternalIP),
 
 		ContainerImagesCount: len(node.Status.Images),
 		VolumesAttached:      len(node.Status.VolumesAttached),
@@ -73,15 +74,12 @@ func NewNodeModel(node *coreV1.Node, metrics *v1beta1.NodeMetrics) *NodeModel {
 		OSKernel:                node.Status.NodeInfo.KernelVersion,
 		Architecture:            node.Status.NodeInfo.Architecture,
 
-		CapacityCPU:     node.Status.Capacity.Cpu().DeepCopy(),
-		CapacityMem:     node.Status.Capacity.Memory().DeepCopy(),
-		CapacityStorage: node.Status.Capacity.StorageEphemeral().DeepCopy(),
-		CapacityPods:    node.Status.Capacity.Pods().DeepCopy(),
+		AllocatableCpuQty:     node.Status.Allocatable.Cpu(),
+		AllocatableMemQty:     node.Status.Allocatable.Memory(),
+		AllocatableStorageQty: node.Status.Allocatable.StorageEphemeral(),
 
-		UsageCPU:     metrics.Usage.Cpu().DeepCopy(),
-		UsageMem:     metrics.Usage.Memory().DeepCopy(),
-		UsageStorage: metrics.Usage.StorageEphemeral().DeepCopy(),
-		UsagePods:    metrics.Usage.Pods().DeepCopy(),
+		UsageCpuQty: metrics.Usage.Cpu(),
+		UsageMemQty: metrics.Usage.Memory(),
 	}
 }
 
@@ -147,16 +145,6 @@ func GetNodeIp(node *coreV1.Node, addrType coreV1.NodeAddressType) string {
 		}
 	}
 	return "<none>"
-}
-
-func GetNodePodMap(nodes []coreV1.Node, pods []coreV1.Pod) map[string][]string {
-	podMap := make(map[string][]string)
-	for _, node := range nodes {
-		for _, pod := range pods {
-			podMap[node.Name] = append(podMap[node.Name], pod.Name)
-		}
-	}
-	return podMap
 }
 
 func SortNodeModels(nodes []NodeModel) {

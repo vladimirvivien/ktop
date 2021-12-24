@@ -1,0 +1,24 @@
+before:
+  hooks:
+    - go mod tidy
+builds:
+  - id: ktop
+    binary: ktop
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: 386
+    ldflags: -s -w -X github.com/vladimirvivien/ktop/buildinfo.Version=v{{.Version}} -X github.com/vladimirvivien/ktop/buildinfo.GitSHA={{.FullCommit}}
+archives:
+  - id: tar
+    format: tar.gz
+    name_template: '{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm}}v{{ .Arm }}{{ end }}{{ if .Mips }}_{{ .Mips }}{{ end }}'
+checksum:
+  name_template: 'checksums.txt'

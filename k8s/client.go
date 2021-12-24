@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	coreV1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
@@ -15,18 +16,22 @@ import (
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
+const (
+	AllNamespaces = "*"
+)
 type Client struct {
 	namespace        string
+	namespaces       []string
 	config           *restclient.Config
 	dynaClient       dynamic.Interface
 	discoClient      *discovery.DiscoveryClient
 	metricsClient    *metricsclient.Clientset
 	metricsAvailable bool
 	refreshTimeout   time.Duration
-	controller *Controller
+	controller       *Controller
 }
 
-func New(ctx context.Context, kubeconfig, kubectx, namespace string) (*Client, error) {
+func New(kubeconfig, kubectx, namespace string) (*Client, error) {
 	config, err := loadConfig(kubeconfig, kubectx)
 	if err != nil {
 		return nil, err
@@ -45,6 +50,10 @@ func New(ctx context.Context, kubeconfig, kubectx, namespace string) (*Client, e
 	metrics, err := metricsclient.NewForConfig(config)
 	if err != nil {
 		return nil, err
+	}
+
+	if namespace == "" || namespace == "*"{
+		namespace = AllNamespaces
 	}
 
 	client := &Client{
@@ -108,18 +117,31 @@ func (k8s *Client) GetNodeMetrics(ctx context.Context, nodeName string) (*metric
 	return metrics, nil
 }
 
-// GetPodMetrics returns metrics for specified pod
-func (k8s *Client) GetPodMetrics(ctx context.Context, podName string) (*metricsV1beta1.PodMetrics, error) {
+// GetPodMetricsByName returns metrics for specified pod
+func (k8s *Client) GetPodMetricsByName(ctx context.Context, pod coreV1.Pod) (*metricsV1beta1.PodMetrics, error) {
 	if !k8s.metricsAvailable {
 		return nil, fmt.Errorf("metrics api not available")
 	}
 
-	metrics, err := k8s.metricsClient.MetricsV1beta1().PodMetricses(k8s.namespace).Get(ctx, podName, metav1.GetOptions{})
+	metrics, err := k8s.metricsClient.MetricsV1beta1().PodMetricses(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
 
 	return metrics, nil
+}
+
+func (k8s *Client) GetAllPodMetrics(ctx context.Context) ([]metricsV1beta1.PodMetrics, error) {
+	if !k8s.metricsAvailable {
+		return nil, fmt.Errorf("metrics api not available")
+	}
+
+	metricsList, err := k8s.metricsClient.MetricsV1beta1().PodMetricses(k8s.namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+
+	return metricsList.Items, nil
 }
 
 func (k8s *Client) Controller() *Controller {

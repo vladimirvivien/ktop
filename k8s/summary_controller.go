@@ -8,6 +8,7 @@ import (
 	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
 func (c *Controller) setupSummaryHandler(ctx context.Context, handlerFunc RefreshSummaryFunc) {
@@ -44,9 +45,10 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	}
 	summary.Uptime = metav1.NewTime(time.Now())
 	summary.NodesCount = len(nodes)
-	summary.AllocatableMemTotal = new(resource.Quantity)
-	summary.AllocatableCpuTotal = new(resource.Quantity)
-
+	summary.AllocatableNodeMemTotal = resource.NewQuantity(0, resource.DecimalSI)
+	summary.AllocatableNodeCpuTotal = resource.NewQuantity(0, resource.DecimalSI)
+	summary.UsageNodeMemTotal = resource.NewQuantity(0, resource.DecimalSI)
+	summary.UsageNodeCpuTotal = resource.NewQuantity(0, resource.DecimalSI)
 	for _, node := range nodes {
 		if model.GetNodeReadyStatus(&node) == string(coreV1.NodeReady) {
 			summary.NodesReady++
@@ -57,10 +59,17 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 
 		summary.Pressures += len(model.GetNodePressures(&node))
 		summary.ImagesCount += len(node.Status.Images)
-		summary.PVsInUse += len(node.Status.VolumesInUse)
+		summary.VolumesInUse += len(node.Status.VolumesInUse)
 
-		summary.AllocatableMemTotal.Add(*node.Status.Allocatable.Memory())
-		summary.AllocatableCpuTotal.Add(*node.Status.Allocatable.Cpu())
+		summary.AllocatableNodeMemTotal.Add(*node.Status.Allocatable.Memory())
+		summary.AllocatableNodeCpuTotal.Add(*node.Status.Allocatable.Cpu())
+
+		metrics, err := c.client.GetNodeMetrics(ctx, node.Name)
+		if err != nil {
+			metrics = new(metricsV1beta1.NodeMetrics)
+		}
+		summary.UsageNodeMemTotal.Add(*metrics.Usage.Memory())
+		summary.UsageNodeCpuTotal.Add(*metrics.Usage.Cpu())
 	}
 
 	// extract pods summary
@@ -69,20 +78,15 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 		return err
 	}
 	summary.PodsAvailable = len(pods)
-	summary.RequestedMemTotal = resource.NewQuantity(0, resource.DecimalSI)
-	summary.RequestedCpuTotal = resource.NewQuantity(0, resource.DecimalSI)
+	summary.RequestedPodMemTotal = resource.NewQuantity(0, resource.DecimalSI)
+	summary.RequestedPodCpuTotal = resource.NewQuantity(0, resource.DecimalSI)
 	for _, pod := range pods {
 		if pod.Status.Phase == coreV1.PodRunning {
 			summary.PodsRunning++
 		}
-		for _, container := range pod.Status.ContainerStatuses {
-			if container.State.Running != nil {
-				summary.ContainersRunning++
-			}
-		}
-		podCpus, podMems := model.GetPodResourceRequests(&pod)
-		summary.RequestedMemTotal.Add(*podMems)
-		summary.RequestedCpuTotal.Add(*podCpus)
+		containerSummary := model.GetPodContainerSummary(&pod)
+		summary.RequestedPodMemTotal.Add(*containerSummary.RequestedMemQty)
+		summary.RequestedPodCpuTotal.Add(*containerSummary.RequestedCpuQty)
 	}
 
 	// deployments count
@@ -91,7 +95,7 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 		return err
 	}
 	for _, dep := range deps {
-		summary.DeploymentsDesired += int(dep.Status.Replicas)
+		summary.DeploymentsTotal += int(dep.Status.Replicas)
 		summary.DeploymentsReady += int(dep.Status.ReadyReplicas)
 	}
 
@@ -135,6 +139,30 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 		return err
 	}
 	summary.CronJobsCount = len(cronjobs)
+
+	pvs, err := c.GetPVList(ctx)
+	if err != nil {
+		return err
+	}
+	summary.PVCount = len(pvs)
+	summary.PVsTotal = resource.NewQuantity(0, resource.DecimalSI)
+	for _, pv := range pvs {
+		if pv.Status.Phase == coreV1.VolumeBound {
+			summary.PVsTotal.Add(*pv.Spec.Capacity.Storage())
+		}
+	}
+
+	pvcs, err := c.GetPVCList(ctx)
+	if err != nil {
+		return err
+	}
+	summary.PVCCount = len(pvcs)
+	summary.PVCsTotal = resource.NewQuantity(0, resource.DecimalSI)
+	for _, pvc := range pvcs {
+		if pvc.Status.Phase == coreV1.ClaimBound {
+			summary.PVCsTotal.Add(*pvc.Spec.Resources.Requests.Storage())
+		}
+	}
 
 	handlerFunc(ctx, summary)
 	return nil
