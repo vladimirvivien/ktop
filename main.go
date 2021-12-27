@@ -12,10 +12,11 @@ import (
 )
 
 func main() {
-	var ns, kubeCfg, kubeCtx, pg string
-	flag.StringVar(&ns, "namespace", "", "namespace (defaults to empty for all namespaces)")
-	flag.StringVar(&kubeCtx, "context", "", "kubeconfig context")
-	flag.StringVar(&pg, "page", "overview", "the default UI page to show")
+	var ns, kubeCfg, kubeCtx string
+	flag.StringVar(&ns, "namespace", "", "The namespace to use, if set to * or leave empty, uses all namespaces (defaults to empty)")
+	flag.StringVar(&kubeCtx, "context", "", "Name of the cluster context, if empty, uses current context (default empty)")
+	flag.StringVar(&kubeCfg, "kubeconfig", "", "The path for the kubeconfig file, if empty, env $KUBECONFIG or $HOME/.kube/config will be used (default empty)")
+	//flag.StringVar(&pg, "page", "overview", "the default UI page to show")
 	flag.Parse()
 
 	ctx, cancel := context.WithCancel(context.Background())

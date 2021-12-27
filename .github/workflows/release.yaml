@@ -18,7 +18,6 @@ jobs:
         uses: actions/setup-go@master
         with:
           go-version: 1.17.5
-
       -
         name: Binary release
         uses: goreleaser/goreleaser-action@v2
