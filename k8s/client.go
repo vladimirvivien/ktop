@@ -8,8 +8,10 @@ import (
 	coreV1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
 	restclient "k8s.io/client-go/rest"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics"
@@ -25,15 +27,19 @@ type Client struct {
 	namespaces       []string
 	config           *restclient.Config
 	dynaClient       dynamic.Interface
-	discoClient      *discovery.DiscoveryClient
+	discoClient      discovery.CachedDiscoveryInterface
 	metricsClient    *metricsclient.Clientset
 	metricsAvailable bool
 	refreshTimeout   time.Duration
 	controller       *Controller
 }
 
-func New(kubeconfig, kubectx, namespace string) (*Client, error) {
-	config, err := loadConfig(kubeconfig, kubectx)
+func New(flags *genericclioptions.ConfigFlags)(*Client, error) {
+	if flags == nil {
+		return nil, fmt.Errorf("configuration flagset is nil")
+	}
+
+	config, err := flags.ToRESTConfig()
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +49,7 @@ func New(kubeconfig, kubectx, namespace string) (*Client, error) {
 		return nil, err
 	}
 
-	disco, err := discovery.NewDiscoveryClientForConfig(config)
+	disco, err := flags.ToDiscoveryClient()
 	if err != nil {
 		return nil, err
 	}
@@ -53,6 +59,7 @@ func New(kubeconfig, kubectx, namespace string) (*Client, error) {
 		return nil, err
 	}
 
+	var namespace = *flags.Namespace
 	if namespace == "" || namespace == "*"{
 		namespace = AllNamespaces
 	}
