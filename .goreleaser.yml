@@ -1,3 +1,11 @@
+project_name: ktop
+
+release:
+  name_template: "Version {{.Version}}"
+  github:
+    owner: vladimirvivien
+    name: ktop
+
 before:
   hooks:
     - go mod tidy
@@ -11,14 +19,61 @@ builds:
       - linux
     goarch:
       - amd64
+      - arm
       - arm64
     ignore:
       - goos: darwin
-        goarch: 386
+        goarch: arm
     ldflags: -s -w -X github.com/vladimirvivien/ktop/buildinfo.Version=v{{.Version}} -X github.com/vladimirvivien/ktop/buildinfo.GitSHA={{.FullCommit}}
+
+  - id: kubectl-ktop
+    binary: kubectl-ktop
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm
+      - arm64
+    ignore:
+      - goos: darwin
+        goarch: arm
+    ldflags: -s -w -X github.com/vladimirvivien/ktop/buildinfo.Version=v{{.Version}} -X github.com/vladimirvivien/ktop/buildinfo.GitSHA={{.FullCommit}}
+
 archives:
-  - id: tar
-    format: tar.gz
-    name_template: '{{ .Binary }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}{{ if .Arm}}v{{ .Arm }}{{ end }}{{ if .Mips }}_{{ .Mips }}{{ end }}'
+   - id: ktop
+     builds:
+     - ktop
+     name_template: '{{ .Binary }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}{{ if .Arm}}v{{ .Arm }}{{ end }}'
+     wrap_in_directory: false
+     format: tar.gz
+     files:
+     - LICENSE
+
+   - id: kubectl-ktop
+     builds:
+     - kubectl-ktop
+     name_template: '{{ .Binary }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}{{ if .Arm}}v{{ .Arm }}{{ end }}'
+     wrap_in_directory: false
+     format: tar.gz
+     files:
+       - LICENSE
+
 checksum:
   name_template: 'checksums.txt'
+krews:
+-
+  ids:
+    - kubectl-ktop
+  name: ktop
+  homepage: https://github.com/vladimirvivien/ktop
+  description: |
+    This is a kubectl plugin for ktop, a top-like tool for displaying workload
+    metrics for a running Kubernetes cluster.
+  short_description: A top tool for kubernetes to display workload metrics
+  caveats: |
+    * By default, ktop displays metrics for resources in the default namespace. You can override this behavior
+    by providing a --namespace or use -A for all namespaces.
+  skip_upload: true
