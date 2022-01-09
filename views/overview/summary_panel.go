@@ -130,7 +130,7 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 		)
 		p.summaryTable.SetCell(
 			0, 2,
-			tview.NewTableCell(fmt.Sprintf("Nmspaces: [white]%d[white]", summary.Namespaces)).
+			tview.NewTableCell(fmt.Sprintf("Namespaces: [white]%d[white]", summary.Namespaces)).
 				SetTextColor(tcell.ColorYellow).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(100),
