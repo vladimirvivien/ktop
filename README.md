@@ -81,7 +81,7 @@ Flags:
       --as string                      Username to impersonate for the operation. User could be a regular user or a service account in a namespace.
       --as-group stringArray           Group to impersonate for the operation, this flag can be repeated to specify multiple groups.
       --as-uid string                  UID to impersonate for the operation.
-      --cache-dir string               Default cache directory (default "/Users/vivienv/.kube/cache")
+      --cache-dir string               Default cache directory (default "${HOME}/.kube/cache")
       --certificate-authority string   Path to a cert file for the certificate authority
       --client-certificate string      Path to a client certificate file for TLS
       --client-key string              Path to a client key file for TLS
@@ -131,6 +131,38 @@ When there is no Metrics Server present in the cluster, ktop will still work:
 </h1>
 
 Instead of resource utilization, ktop will display resource requests and limits for nodes and pods.
+
+## Known issue
+For ktop to work properly, the user account that is used (from the Kubernetes config) must have access rights to the following API objects, and their metrics: 
+
+* Nodes (and metrics)
+* Pods (and metrics)
+* Deployments,
+* PV, PVCs
+* {Replica|Daemon|Stateful}Sets
+* Jobs
+
+
+When your Kubernetes user account does not have proper access rights,  you will see warning printed on the terminal, similar to the followings:
+
+```
+W0110 10:27:25.315399    1062 reflector.go:324] pkg/mod/k8s.io/client-go@v0.23.1/tools/cache/reflector.go:167: failed to list *unstructured.Unstructured: the server could not find the requested resource
+E0110 10:27:25.315485    1062 reflector.go:138] pkg/mod/k8s.io/client-go@v0.23.1/tools/cache/reflector.go:167: Failed to watch *unstructured.Unstructured: failed to list *unstructured.Unstructured: the server could not find the requested resource
+W0110 10:27:26.719264    1062 reflector.go:324] pkg/mod/k8s.io/client-go@v0.23.1/tools/cache/reflector.go:167: failed to list *unstructured.Unstructured: the server could not find the requested resource
+E0110 10:27:26.719345    1062 reflector.go:138] pkg/mod/k8s.io/client-go@v0.23.1/tools/cache/reflector.go:167: Failed to watch *unstructured.Unstructured: failed to list *unstructured.Unstructured: the server could not find the requested resource
+```
+
+### What to do
+
+`ktop` supports many additional CLI arguments to help you connect properly. You can set the following
+arguments to adjust your connection parameters:
+
+* `--context` - context for cluster
+* `--user` - a user with proper access rights
+* `--as-{uid/group}` - if impersonating a different account
+
+There are many other arguments that may be configured to create a successful connection to the API server.
+See the full list of CLI arguments in the *Running ktop* section above.
 
 ## Roadmap
 

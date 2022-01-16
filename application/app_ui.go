@@ -6,6 +6,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/buildinfo"
 )
 
 var (
@@ -18,7 +19,7 @@ var (
 type appPanel struct {
 	tviewApp *tview.Application
 	title    string
-	header   *tview.TextView
+	header   *tview.Table
 	pages    *tview.Pages
 	footer   *tview.Table
 	modals   []tview.Primitive
@@ -35,7 +36,10 @@ func (p *appPanel) GetTitle() string {
 }
 
 func (p *appPanel) Layout(data interface{}) {
-	p.header = tview.NewTextView().SetDynamicColors(true)
+	p.header = tview.NewTable()
+	p.header.SetBorder(false)
+	p.header.SetBorders(false)
+
 	p.header.SetBorder(true)
 	p.pages = tview.NewPages()
 	p.footer = tview.NewTable()
@@ -76,7 +80,21 @@ func (p *appPanel) DrawHeader(data interface{}) {
 		panic(fmt.Sprintf("application.Drawheader got unexpected type %T", data))
 	}
 
-	fmt.Fprintf(p.header, header)
+	p.header.SetCell(
+		0, 0,
+		tview.NewTableCell(header).
+			SetTextColor(tcell.ColorYellow).
+			SetAlign(tview.AlignLeft).
+			SetExpansion(100),
+	)
+
+	p.header.SetCell(
+		0, 1,
+		tview.NewTableCell(buildinfo.Version).
+			SetTextColor(tcell.ColorWhite).
+			SetAlign(tview.AlignRight).
+			SetExpansion(100),
+	)
 }
 
 func (p *appPanel) DrawBody(data interface{}) {}
@@ -89,9 +107,7 @@ func (p *appPanel) DrawFooter(data interface{}) {
 	p.switchToPage(title)
 }
 
-func (p *appPanel) Clear() {
-
-}
+func (p *appPanel) Clear() {}
 
 func (p *appPanel) GetRootView() tview.Primitive {
 	//return p.pages
