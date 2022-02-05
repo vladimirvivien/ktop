@@ -60,9 +60,9 @@ func (p *MainPanel) Layout(data interface{}) {
 
 }
 
-func (p *MainPanel) DrawHeader(data interface{})  {}
-func (p *MainPanel) DrawBody(data interface{})    {}
-func (p *MainPanel) DrawFooter(param interface{}) {}
+func (p *MainPanel) DrawHeader(_ interface{})  {}
+func (p *MainPanel) DrawBody(_ interface{})    {}
+func (p *MainPanel) DrawFooter(_ interface{}) {}
 func (p *MainPanel) Clear()                       {}
 
 func (p *MainPanel) GetTitle() string {

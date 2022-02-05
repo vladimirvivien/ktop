@@ -83,7 +83,7 @@ func (app *Application) WelcomeBanner() {
 |   <| || (_) | |_) |
 |_|\_\\__\___/| .__/
               |_|`)
-	fmt.Printf("Version %s (%s)\n", buildinfo.Version, buildinfo.GitSHA)
+	fmt.Printf("Version %s \n", buildinfo.Version)
 }
 
 func (app *Application) setup(ctx context.Context) error {

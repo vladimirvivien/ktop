@@ -18,10 +18,11 @@ type podPanel struct {
 	children []tview.Primitive
 	listCols []string
 	list     *tview.Table
+	laidout bool
 }
 
 func NewPodPanel(app *application.Application, title string) ui.Panel {
-	p := &podPanel{app: app, title: title, list: tview.NewTable()}
+	p := &podPanel{app: app, title: title}
 	p.Layout(nil)
 
 	return p
@@ -32,22 +33,26 @@ func (p *podPanel) GetTitle() string {
 }
 
 func (p *podPanel) Layout(_ interface{}) {
-	p.list.SetFixed(1, 0)
-	p.list.SetBorder(false)
-	p.list.SetBorders(false)
-	p.list.SetFocusFunc(func() {
-		p.list.SetSelectable(true,false)
-		p.list.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorYellow).Foreground(tcell.ColorBlue))
-	})
-	p.list.SetBlurFunc(func() {
-		p.list.SetSelectable(false,false)
-	})
+	if !p.laidout {
+		p.list = tview.NewTable()
+		p.list.SetFixed(1, 0)
+		p.list.SetBorder(false)
+		p.list.SetBorders(false)
+		p.list.SetFocusFunc(func() {
+			p.list.SetSelectable(true, false)
+			p.list.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorYellow).Foreground(tcell.ColorBlue))
+		})
+		p.list.SetBlurFunc(func() {
+			p.list.SetSelectable(false, false)
+		})
 
-	p.root = tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.list, 0, 1, true)
-	p.root.SetBorder(true)
-	p.root.SetTitle(p.GetTitle())
-	p.root.SetTitleAlign(tview.AlignLeft)
+		p.root = tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(p.list, 0, 1, true)
+		p.root.SetBorder(true)
+		p.root.SetTitle(p.GetTitle())
+		p.root.SetTitleAlign(tview.AlignLeft)
+		p.laidout = true
+	}
 }
 
 func (p *podPanel) DrawHeader(data interface{}) {
@@ -82,6 +87,9 @@ func (p *podPanel) DrawBody(data interface{}) {
 	var cpuRatio, memRatio ui.Ratio
 	var cpuGraph, memGraph string
 	var cpuMetrics, memMetrics string
+
+	p.root.SetTitle(fmt.Sprintf("%s(%d) ", p.GetTitle(), len(pods)))
+	p.root.SetTitleAlign(tview.AlignLeft)
 
 	for i, pod := range pods {
 		i++ // offset to n+1

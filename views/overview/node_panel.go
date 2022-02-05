@@ -18,10 +18,11 @@ type nodePanel struct {
 	children []tview.Primitive
 	listCols []string
 	list     *tview.Table
+	laidout bool
 }
 
 func NewNodePanel(app *application.Application, title string) ui.Panel {
-	p := &nodePanel{app: app, title: title, list: tview.NewTable()}
+	p := &nodePanel{app: app, title: title}
 	p.Layout(nil)
 	return p
 }
@@ -29,24 +30,26 @@ func (p *nodePanel) GetTitle() string {
 	return p.title
 }
 func (p *nodePanel) Layout(_ interface{}) {
-	p.list.SetFixed(1, 0)
-	p.list.SetBorder(false)
-	p.list.SetBorders(false)
-	p.list.SetFocusFunc(func() {
-		p.list.SetSelectable(true,false)
-		p.list.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorYellow).Foreground(tcell.ColorBlue))
-	})
-	p.list.SetBlurFunc(func() {
-		p.list.SetSelectable(false,false)
-	})
+	if !p.laidout {
+		p.list = tview.NewTable()
+		p.list.SetFixed(1, 0)
+		p.list.SetBorder(false)
+		p.list.SetBorders(false)
+		p.list.SetFocusFunc(func() {
+			p.list.SetSelectable(true, false)
+			p.list.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorYellow).Foreground(tcell.ColorBlue))
+		})
+		p.list.SetBlurFunc(func() {
+			p.list.SetSelectable(false, false)
+		})
 
-	p.root = tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.list, 0, 1, true)
-	p.root.SetBorder(true)
-	p.root.SetTitle(p.GetTitle())
-	p.root.SetTitleAlign(tview.AlignLeft)
-
-
+		p.root = tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(p.list, 0, 1, true)
+		p.root.SetBorder(true)
+		p.root.SetTitle(p.GetTitle())
+		p.root.SetTitleAlign(tview.AlignLeft)
+		p.laidout = true
+	}
 }
 
 func (p *nodePanel) DrawHeader(data interface{}) {
@@ -93,6 +96,9 @@ func (p *nodePanel) DrawBody(data interface{}) {
 	var cpuGraph, memGraph string
 	var cpuMetrics, memMetrics string
 	colorKeys := ui.ColorKeys{0: "green", 50: "yellow", 90: "red"}
+
+	p.root.SetTitle(fmt.Sprintf("%s(%d) ", p.GetTitle(), len(nodes)))
+	p.root.SetTitleAlign(tview.AlignLeft)
 
 	for i, node := range nodes {
 		i++ // offset for header-row
@@ -236,7 +242,8 @@ func (p *nodePanel) DrawBody(data interface{}) {
 	}
 }
 
-func (p *nodePanel) DrawFooter(data interface{}) {}
+func (p *nodePanel) DrawFooter(_ interface{}) {}
+
 func (p *nodePanel) Clear() {
 	p.list.Clear()
 	p.Layout(nil)
