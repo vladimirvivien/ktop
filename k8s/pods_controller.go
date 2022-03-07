@@ -7,39 +7,18 @@ import (
 	"github.com/vladimirvivien/ktop/views/model"
 	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
 	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
-func (c *Controller) GetPodList(ctx context.Context) ([]coreV1.Pod, error) {
+func (c *Controller) GetPodList(ctx context.Context) ([]*coreV1.Pod, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-
-	var items []runtime.Object
-	var err error
-	if c.client.namespace == AllNamespaces {
-		items, err = c.podInformer.Lister().List(labels.Everything())
-	}else{
-		items, err = c.podInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
-	}
+	items, err := c.podInformer.Lister().List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}
-
-	var pods []coreV1.Pod
-	for _, item := range items {
-		unstructPod, ok := item.(runtime.Unstructured)
-		if !ok {
-			panic("Controller: GetPodList: unexpected type encountered")
-		}
-		pod := new(coreV1.Pod)
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructPod.UnstructuredContent(), pod); err != nil {
-			continue
-		}
-		pods = append(pods, *pod)
-	}
-	return pods, nil
+	return items, nil
 }
 
 func (c *Controller) GetPodModels(ctx context.Context) (models []model.PodModel, err error) {
@@ -66,7 +45,7 @@ func (c *Controller) GetPodModels(ctx context.Context) (models []model.PodModel,
 		}
 		nodeMetrics := nodeMetricsCache[pod.Spec.NodeName]
 
-		model := model.NewPodModel(&pod, podMetrics, nodeMetrics)
+		model := model.NewPodModel(pod, podMetrics, nodeMetrics)
 
 		// retrieve pod's node allocatable resources
 		if alloc, ok := nodeAllocResMap[pod.Spec.NodeName]; !ok {

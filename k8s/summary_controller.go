@@ -50,14 +50,14 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	summary.UsageNodeMemTotal = resource.NewQuantity(0, resource.DecimalSI)
 	summary.UsageNodeCpuTotal = resource.NewQuantity(0, resource.DecimalSI)
 	for _, node := range nodes {
-		if model.GetNodeReadyStatus(&node) == string(coreV1.NodeReady) {
+		if model.GetNodeReadyStatus(node) == string(coreV1.NodeReady) {
 			summary.NodesReady++
 		}
 		if node.CreationTimestamp.Before(&summary.Uptime) {
 			summary.Uptime = node.CreationTimestamp
 		}
 
-		summary.Pressures += len(model.GetNodePressures(&node))
+		summary.Pressures += len(model.GetNodePressures(node))
 		summary.ImagesCount += len(node.Status.Images)
 		summary.VolumesInUse += len(node.Status.VolumesInUse)
 
@@ -84,7 +84,7 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 		if pod.Status.Phase == coreV1.PodRunning {
 			summary.PodsRunning++
 		}
-		containerSummary := model.GetPodContainerSummary(&pod)
+		containerSummary := model.GetPodContainerSummary(pod)
 		summary.RequestedPodMemTotal.Add(*containerSummary.RequestedMemQty)
 		summary.RequestedPodCpuTotal.Add(*containerSummary.RequestedCpuQty)
 	}

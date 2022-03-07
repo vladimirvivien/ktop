@@ -77,6 +77,11 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 		fmt.Printf("main: failed to create Kubernetes client: %s\n", err)
 		os.Exit(1)
 	}
+	// Get server version (test server availability before continuing)
+	if _, err := k8sC.GetServerVersion(); err != nil {
+		return fmt.Errorf("ktop: %s", err)
+	}
+
 	fmt.Printf("Connected to: %s\n", k8sC.Config().Host)
 
 	app := application.New(k8sC)
