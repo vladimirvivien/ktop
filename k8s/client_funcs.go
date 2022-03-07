@@ -7,219 +7,98 @@ import (
 	batchV1 "k8s.io/api/batch/v1"
 	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
 )
 
-
-func (c *Controller) GetNamespaceList(ctx context.Context) ([]coreV1.Node, error) {
+func (c *Controller) GetNamespaceList(ctx context.Context) ([]*coreV1.Namespace, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	items, err := c.namespaceInformer.Lister().List(labels.Everything())
+
+	list, err := c.namespaceInformer.Lister().List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}
-	var nodes []coreV1.Node
-	for _, item := range items {
-		unstructNode, ok := item.(runtime.Unstructured)
-		if !ok {
-			panic("Controller: GetDeploymentList: unexpected type for deployment")
-		}
-		node := new(coreV1.Node)
-		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructNode.UnstructuredContent(), node); err != nil {
-			continue
-		}
-		nodes = append(nodes, *node)
-	}
-	return nodes, nil
+
+	return list, nil
 }
 
-func (c *Controller) GetDeploymentList(ctx context.Context) ([]appsV1.Deployment, error) {
+func (c *Controller) GetDeploymentList(ctx context.Context) ([]*appsV1.Deployment, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 
-	var items []runtime.Object
-	var err error
-	if c.client.namespace == AllNamespaces {
-		items, err = c.deploymentInformer.Lister().List(labels.Everything())
-	}else{
-		items, err = c.deploymentInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
-	}
+	items, err := c.deploymentInformer.Lister().List(labels.Everything())
 
 	if err != nil {
 		return nil, err
 	}
 
-	var deps []appsV1.Deployment
-	for _, item := range items {
-		unstructDep, ok := item.(runtime.Unstructured)
-		if !ok {
-			panic("Controller: GetDeploymentList: unexpected type for deployment")
-		}
-		dep := new(appsV1.Deployment)
-		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructDep.UnstructuredContent(), dep); err != nil {
-			continue
-		}
-		deps = append(deps, *dep)
-	}
-	return deps, nil
+	return items, nil
 }
 
-func (c *Controller) GetDaemonSetList(ctx context.Context) ([]appsV1.DaemonSet, error) {
+func (c *Controller) GetDaemonSetList(ctx context.Context) ([]*appsV1.DaemonSet, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 
-	var items []runtime.Object
-	var err error
-	if c.client.namespace == AllNamespaces {
-		items, err = c.daemonSetInformer.Lister().List(labels.Everything())
-	}else{
-		items, err = c.daemonSetInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
-	}
+	items, err := c.daemonSetInformer.Lister().List(labels.Everything())
 
 	if err != nil {
 		return nil, err
 	}
 
-	var daemons []appsV1.DaemonSet
-	for _, item := range items {
-		unstructDaemon, ok := item.(runtime.Unstructured)
-		if !ok {
-			panic("Controller: GetDaemonSetList: unexpected type for deployment")
-		}
-		daemon := new(appsV1.DaemonSet)
-		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructDaemon.UnstructuredContent(), daemon); err != nil {
-			continue
-		}
-		daemons = append(daemons, *daemon)
-	}
-	return daemons, nil
+	return items, nil
 }
 
 
-func (c *Controller) GetReplicaSetList(ctx context.Context) ([]appsV1.ReplicaSet, error) {
+func (c *Controller) GetReplicaSetList(ctx context.Context) ([]*appsV1.ReplicaSet, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 
-	var items []runtime.Object
-	var err error
-	if c.client.namespace == AllNamespaces {
-		items, err = c.replicaSetInformer.Lister().List(labels.Everything())
-	}else{
-		items, err = c.replicaSetInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
-	}
+	items, err := c.replicaSetInformer.Lister().List(labels.Everything())
+
 	if err != nil {
 		return nil, err
 	}
 
-	var replicasets []appsV1.ReplicaSet
-	for _, item := range items {
-		unstructDaemon, ok := item.(runtime.Unstructured)
-		if !ok {
-			panic("Controller: GetReplicaSetList: unexpected type for deployment")
-		}
-		replica := new(appsV1.ReplicaSet)
-		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructDaemon.UnstructuredContent(), replica); err != nil {
-			continue
-		}
-		replicasets = append(replicasets, *replica)
-	}
-	return replicasets, nil
+	return items, nil
 }
 
-func (c *Controller) GetStatefulSetList(ctx context.Context) ([]appsV1.StatefulSet, error) {
+func (c *Controller) GetStatefulSetList(ctx context.Context) ([]*appsV1.StatefulSet, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-
-	var items []runtime.Object
-	var err error
-	if c.client.namespace == AllNamespaces {
-		items, err = c.statefulSetInformer.Lister().List(labels.Everything())
-	}else{
-		items, err = c.statefulSetInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
-	}
+	items, err := c.statefulSetInformer.Lister().List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}
-
-	var statefulsets []appsV1.StatefulSet
-	for _, item := range items {
-		unstructStateful, ok := item.(runtime.Unstructured)
-		if !ok {
-			panic("Controller: GetStatefulSetList: unexpected type for deployment")
-		}
-		stateful := new(appsV1.StatefulSet)
-		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructStateful.UnstructuredContent(), stateful); err != nil {
-			continue
-		}
-		statefulsets = append(statefulsets, *stateful)
-	}
-	return statefulsets, nil
+	return items, nil
 }
 
-func (c *Controller) GetJobList(ctx context.Context) ([]batchV1.Job, error) {
+func (c *Controller) GetJobList(ctx context.Context) ([]*batchV1.Job, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	var items []runtime.Object
-	var err error
-	if c.client.namespace == AllNamespaces {
-		items, err = c.jobInformer.Lister().List(labels.Everything())
-	}else{
-		items, err = c.jobInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
-	}
+	items, err := c.jobInformer.Lister().List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}
-
-	var jobs []batchV1.Job
-	for _, item := range items {
-		unstructJob, ok := item.(runtime.Unstructured)
-		if !ok {
-			panic("Controller: GetJobList: unexpected type for deployment")
-		}
-		job := new(batchV1.Job)
-		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructJob.UnstructuredContent(), job); err != nil {
-			continue
-		}
-		jobs = append(jobs, *job)
-	}
-	return jobs, nil
+	return items, nil
 }
 
-func (c *Controller) GetCronJobList(ctx context.Context) ([]batchV1.CronJob, error) {
+func (c *Controller) GetCronJobList(ctx context.Context) ([]*batchV1.CronJob, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-	var items []runtime.Object
-	var err error
-	if c.client.namespace == AllNamespaces {
-		items, err = c.cronJobInformer.Lister().List(labels.Everything())
-	}else{
-		items, err = c.cronJobInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
-	}
+	items, err := c.cronJobInformer.Lister().List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}
-	var cronjobs []batchV1.CronJob
-	for _, item := range items {
-		unstructJob, ok := item.(runtime.Unstructured)
-		if !ok {
-			panic("Controller: GetCronJobList: unexpected type for deployment")
-		}
-		job := new(batchV1.CronJob)
-		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructJob.UnstructuredContent(), job); err != nil {
-			continue
-		}
-		cronjobs = append(cronjobs, *job)
-	}
-	return cronjobs, nil
+	return items, nil
 }
-func (c *Controller) GetPVList(ctx context.Context) ([]coreV1.PersistentVolume, error) {
+
+func (c *Controller) GetPVList(ctx context.Context) ([]*coreV1.PersistentVolume, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -227,48 +106,16 @@ func (c *Controller) GetPVList(ctx context.Context) ([]coreV1.PersistentVolume, 
 	if err != nil {
 		return nil, err
 	}
-	var pvs []coreV1.PersistentVolume
-	for _, item := range items {
-		unstructPV, ok := item.(runtime.Unstructured)
-		if !ok {
-			panic("Controller: GetPVList: unexpected type for deployment")
-		}
-		pv := new(coreV1.PersistentVolume)
-		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructPV.UnstructuredContent(), pv); err != nil {
-			continue
-		}
-		pvs = append(pvs, *pv)
-	}
-	return pvs, nil
+	return items, nil
 }
 
-func (c *Controller) GetPVCList(ctx context.Context) ([]coreV1.PersistentVolumeClaim, error) {
+func (c *Controller) GetPVCList(ctx context.Context) ([]*coreV1.PersistentVolumeClaim, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
-
-	var items []runtime.Object
-	var err error
-	if c.client.namespace == AllNamespaces {
-		items, err = c.pvcInformer.Lister().List(labels.Everything())
-	}else{
-		items, err = c.pvcInformer.Lister().ByNamespace(c.client.namespace).List(labels.Everything())
-	}
+	items, err := c.pvcInformer.Lister().List(labels.Everything())
 	if err != nil {
 		return nil, err
 	}
-
-	var pvcs []coreV1.PersistentVolumeClaim
-	for _, item := range items {
-		unstructPVC, ok := item.(runtime.Unstructured)
-		if !ok {
-			panic("Controller: GetPVCList: unexpected type for deployment")
-		}
-		pvc := new(coreV1.PersistentVolumeClaim)
-		if err = runtime.DefaultUnstructuredConverter.FromUnstructured(unstructPVC.UnstructuredContent(), pvc); err != nil {
-			continue
-		}
-		pvcs = append(pvcs, *pvc)
-	}
-	return pvcs, nil
+	return items, nil
 }

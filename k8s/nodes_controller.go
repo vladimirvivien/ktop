@@ -8,30 +8,21 @@ import (
 	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/runtime"
 	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
-func (c *Controller) GetNode(ctx context.Context, nodeName string) (coreV1.Node, error) {
+func (c *Controller) GetNode(ctx context.Context, nodeName string) (*coreV1.Node, error) {
 	if ctx.Err() != nil {
-		return coreV1.Node{}, ctx.Err()
+		return nil, ctx.Err()
 	}
-	obj, err := c.nodeInformer.Lister().Get(nodeName)
+	node, err := c.nodeInformer.Lister().Get(nodeName)
 	if err != nil {
-		return coreV1.Node{}, err
+		return nil, err
 	}
-	unstruct, ok := obj.(runtime.Unstructured)
-	if !ok {
-		panic("Controller: GetNodeList: unexpected type encountered")
-	}
-	var node = new(coreV1.Node)
-	if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstruct.UnstructuredContent(), node); err != nil {
-		return coreV1.Node{}, err
-	}
-	return *node, nil
+	return node, nil
 }
 
-func (c *Controller) GetNodeList(ctx context.Context) (nodes []coreV1.Node, err error) {
+func (c *Controller) GetNodeList(ctx context.Context) ([]*coreV1.Node, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
@@ -40,18 +31,7 @@ func (c *Controller) GetNodeList(ctx context.Context) (nodes []coreV1.Node, err 
 	if err != nil {
 		return nil, err
 	}
-	for _, item := range items {
-		unstructNode, ok := item.(runtime.Unstructured)
-		if !ok {
-			panic("Controller: GetNodeList: unexpected type encountered")
-		}
-		node := new(coreV1.Node)
-		if err := runtime.DefaultUnstructuredConverter.FromUnstructured(unstructNode.UnstructuredContent(), node); err != nil {
-			continue
-		}
-		nodes = append(nodes, *node)
-	}
-	return
+	return items, nil
 }
 
 func (c *Controller) GetNodeModels(ctx context.Context) (models []model.NodeModel, err error) {
@@ -73,12 +53,12 @@ func (c *Controller) GetNodeModels(ctx context.Context) (models []model.NodeMode
 		}
 		nodePods := getPodNodes(node.Name, pods)
 		podsCount := len(nodePods)
-		nodeModel := model.NewNodeModel(&node, metrics)
+		nodeModel := model.NewNodeModel(node, metrics)
 		nodeModel.PodsCount = podsCount
 		nodeModel.RequestedPodMemQty = resource.NewQuantity(0, resource.DecimalSI)
 		nodeModel.RequestedPodCpuQty = resource.NewQuantity(0, resource.DecimalSI)
 		for _, pod := range nodePods {
-			summary := model.GetPodContainerSummary(&pod)
+			summary := model.GetPodContainerSummary(pod)
 			nodeModel.RequestedPodMemQty.Add(*summary.RequestedMemQty)
 			nodeModel.RequestedPodCpuQty.Add(*summary.RequestedCpuQty)
 		}
@@ -88,8 +68,8 @@ func (c *Controller) GetNodeModels(ctx context.Context) (models []model.NodeMode
 	return
 }
 
-func getPodNodes(nodeName string, pods []coreV1.Pod) []coreV1.Pod {
-	var result []coreV1.Pod
+func getPodNodes(nodeName string, pods []*coreV1.Pod) []*coreV1.Pod {
+	var result []*coreV1.Pod
 
 	for _, pod := range pods {
 		if pod.Spec.NodeName == nodeName {

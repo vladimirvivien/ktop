@@ -11,6 +11,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
 	restclient "k8s.io/client-go/rest"
@@ -22,24 +23,30 @@ import (
 const (
 	AllNamespaces = "*"
 )
+
 type Client struct {
-	namespace        string
-	namespaces       []string
-	config           *restclient.Config
-	dynaClient       dynamic.Interface
-	discoClient      discovery.CachedDiscoveryInterface
-	metricsClient    *metricsclient.Clientset
-	metricsAvailable bool
-	refreshTimeout   time.Duration
-	controller       *Controller
+	namespace         string
+	config            *restclient.Config
+	kubeClient        kubernetes.Interface
+	dynaClient        dynamic.Interface
+	discoClient       discovery.CachedDiscoveryInterface
+	metricsClient     *metricsclient.Clientset
+	metricsAvailCount int
+	refreshTimeout    time.Duration
+	controller        *Controller
 }
 
-func New(flags *genericclioptions.ConfigFlags)(*Client, error) {
+func New(flags *genericclioptions.ConfigFlags) (*Client, error) {
 	if flags == nil {
 		return nil, fmt.Errorf("configuration flagset is nil")
 	}
 
 	config, err := flags.ToRESTConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	kubeClient, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return nil, err
 	}
@@ -60,13 +67,14 @@ func New(flags *genericclioptions.ConfigFlags)(*Client, error) {
 	}
 
 	var namespace = *flags.Namespace
-	if namespace == "" || namespace == "*"{
+	if namespace == "" || namespace == "*" {
 		namespace = AllNamespaces
 	}
 
 	client := &Client{
 		namespace:     namespace,
 		config:        config,
+		kubeClient: kubeClient,
 		dynaClient:    dyna,
 		discoClient:   disco,
 		metricsClient: metrics,
@@ -91,7 +99,26 @@ func (k8s *Client) Config() *restclient.Config {
 	return k8s.config
 }
 
+func (k8s *Client) GetServerVersion() (string, error){
+	version, err := k8s.discoClient.ServerVersion()
+	if err != nil {
+		return "", fmt.Errorf("failed to connect to server: %s", err)
+	}
+	return version.String(), nil
+}
+
+// AssertMetricsAvailable checks for available metrics server every 10th invocation.
+// Otherwise, it returns the last known registration state of metrics server.
 func (k8s *Client) AssertMetricsAvailable() error {
+	if k8s.metricsAvailCount != 0 {
+		if k8s.metricsAvailCount%10 != 0 {
+			k8s.metricsAvailCount++
+		} else {
+			k8s.metricsAvailCount = 0
+		}
+		return nil
+	}
+
 	groups, err := k8s.discoClient.ServerGroups()
 	if err != nil {
 		return err
@@ -104,7 +131,6 @@ func (k8s *Client) AssertMetricsAvailable() error {
 		}
 	}
 
-	k8s.metricsAvailable = avail
 	if !avail {
 		return fmt.Errorf("metrics api not available")
 	}
@@ -113,8 +139,8 @@ func (k8s *Client) AssertMetricsAvailable() error {
 
 // GetNodeMetrics returns metrics for specified node
 func (k8s *Client) GetNodeMetrics(ctx context.Context, nodeName string) (*metricsV1beta1.NodeMetrics, error) {
-	if !k8s.metricsAvailable {
-		return nil, fmt.Errorf("metrics api not available")
+	if err := k8s.AssertMetricsAvailable(); err != nil {
+		return nil, fmt.Errorf("node metrics: %s", err)
 	}
 
 	metrics, err := k8s.metricsClient.MetricsV1beta1().NodeMetricses().Get(ctx, nodeName, metav1.GetOptions{})
@@ -126,9 +152,9 @@ func (k8s *Client) GetNodeMetrics(ctx context.Context, nodeName string) (*metric
 }
 
 // GetPodMetricsByName returns metrics for specified pod
-func (k8s *Client) GetPodMetricsByName(ctx context.Context, pod coreV1.Pod) (*metricsV1beta1.PodMetrics, error) {
-	if !k8s.metricsAvailable {
-		return nil, fmt.Errorf("metrics api not available")
+func (k8s *Client) GetPodMetricsByName(ctx context.Context, pod *coreV1.Pod) (*metricsV1beta1.PodMetrics, error) {
+	if err := k8s.AssertMetricsAvailable(); err != nil {
+		return nil, fmt.Errorf("pod metrics by name: %s", err)
 	}
 
 	metrics, err := k8s.metricsClient.MetricsV1beta1().PodMetricses(pod.Namespace).Get(ctx, pod.Name, metav1.GetOptions{})
@@ -140,8 +166,8 @@ func (k8s *Client) GetPodMetricsByName(ctx context.Context, pod coreV1.Pod) (*me
 }
 
 func (k8s *Client) GetAllPodMetrics(ctx context.Context) ([]metricsV1beta1.PodMetrics, error) {
-	if !k8s.metricsAvailable {
-		return nil, fmt.Errorf("metrics api not available")
+	if err := k8s.AssertMetricsAvailable(); err != nil {
+		return nil, fmt.Errorf("pod metrics: %s", err)
 	}
 
 	metricsList, err := k8s.metricsClient.MetricsV1beta1().PodMetricses(k8s.namespace).List(ctx, metav1.ListOptions{})
