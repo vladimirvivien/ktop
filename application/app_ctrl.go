@@ -38,11 +38,11 @@ func New(k8sC *k8s.Client) *Application {
 	app := &Application{
 		k8sClient: k8sC,
 		namespace: k8sC.Namespace(),
-		tviewApp: tapp,
-		panel:    newPanel(tapp),
-		refreshQ: make(chan struct{}, 1),
-		pageIdx:  -1,
-		tabIdx:   -1,
+		tviewApp:  tapp,
+		panel:     newPanel(tapp),
+		refreshQ:  make(chan struct{}, 1),
+		pageIdx:   -1,
+		tabIdx:    -1,
 	}
 	return app
 }
@@ -55,7 +55,7 @@ func (app *Application) AddPage(panel ui.PanelController) {
 	app.pages = append(app.pages, AppPage{Title: panel.GetTitle(), Panel: panel})
 }
 
-func (app *Application)ShowModal(view tview.Primitive) {
+func (app *Application) ShowModal(view tview.Primitive) {
 	app.panel.showModalView(view)
 }
 
@@ -98,7 +98,7 @@ func (app *Application) setup(ctx context.Context) error {
 	app.panel.Layout(app.pages)
 
 	var hdr strings.Builder
-	hdr.WriteString("%c [green]API server: [white]%s [green]namespace: [white]%s [green] metrics:")
+	hdr.WriteString("%c [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green] metrics:")
 	if err := app.GetK8sClient().AssertMetricsAvailable(); err != nil {
 		hdr.WriteString(" [red]not connected")
 	} else {
@@ -106,9 +106,13 @@ func (app *Application) setup(ctx context.Context) error {
 	}
 
 	namespace := app.k8sClient.Namespace()
+	if namespace == k8s.AllNamespaces {
+		namespace = "[orange](all)"
+	}
+	client := app.GetK8sClient()
 	app.panel.DrawHeader(fmt.Sprintf(
 		hdr.String(),
-		ui.Icons.Rocket, app.GetK8sClient().Config().Host, namespace,
+		ui.Icons.Rocket, client.RESTConfig().Host, client.GetServerVersion(), client.ClusterContext(), client.Username(), namespace,
 	))
 
 	app.panel.DrawFooter(app.getPageTitles()[app.visibleView])

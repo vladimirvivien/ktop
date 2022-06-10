@@ -57,13 +57,12 @@ func (p *MainPanel) Layout(data interface{}) {
 		AddItem(p.podPanel.GetRootView(), 0, 1, true)
 
 	p.root = view
-
 }
 
-func (p *MainPanel) DrawHeader(_ interface{})  {}
-func (p *MainPanel) DrawBody(_ interface{})    {}
+func (p *MainPanel) DrawHeader(_ interface{}) {}
+func (p *MainPanel) DrawBody(_ interface{})   {}
 func (p *MainPanel) DrawFooter(_ interface{}) {}
-func (p *MainPanel) Clear()                       {}
+func (p *MainPanel) Clear()                   {}
 
 func (p *MainPanel) GetTitle() string {
 	return p.title

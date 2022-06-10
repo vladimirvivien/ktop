@@ -3,11 +3,16 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	appsV1 "k8s.io/api/apps/v1"
+	authzV1 "k8s.io/api/authorization/v1"
+	batchV1 "k8s.io/api/batch/v1"
 	coreV1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/version"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
@@ -15,18 +20,43 @@ import (
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	_ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
 	restclient "k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd/api"
 	metricsapi "k8s.io/metrics/pkg/apis/metrics"
 	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
 const (
-	AllNamespaces = "*"
+	AllNamespaces = ""
+)
+
+var (
+	// GVRs used
+	GVRs = map[string]schema.GroupVersionResource{
+		"nodes":                  {Group: "", Version: "v1", Resource: "nodes"},
+		"namespaces":             {Group: "", Version: "v1", Resource: "namespaces"},
+		"pods":                   {Group: "", Version: "v1", Resource: "pods"},
+		"persistentvolumes":      {Group: "", Version: "v1", Resource: "persistentvolumes"},
+		"persistentvolumeclaims": {Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
+		"deployments":            {Group: appsV1.GroupName, Version: "v1", Resource: "deployments"},
+		"daemonsets":             {Group: appsV1.GroupName, Version: "v1", Resource: "daemonsets"},
+		"replicasets":            {Group: appsV1.GroupName, Version: "v1", Resource: "replicasets"},
+		"statefulsets":           {Group: appsV1.GroupName, Version: "v1", Resource: "statefulsets"},
+		"jobs":                   {Group: batchV1.GroupName, Version: "v1", Resource: "jobs"},
+		"cronjobs":               {Group: batchV1.GroupName, Version: "v1", Resource: "cronjobs"},
+	}
+
+	authzdTable = make(map[string]bool)
 )
 
 type Client struct {
+	sync.RWMutex
+	clusterVersion    *version.Info
 	namespace         string
 	config            *restclient.Config
+	apiConfig         api.Config
+	clusterContext    string
+	username          string
 	kubeClient        kubernetes.Interface
 	dynaClient        dynamic.Interface
 	discoClient       discovery.CachedDiscoveryInterface
@@ -51,11 +81,6 @@ func New(flags *genericclioptions.ConfigFlags) (*Client, error) {
 		return nil, err
 	}
 
-	dyna, err := dynamic.NewForConfig(config)
-	if err != nil {
-		return nil, err
-	}
-
 	disco, err := flags.ToDiscoveryClient()
 	if err != nil {
 		return nil, err
@@ -67,44 +92,57 @@ func New(flags *genericclioptions.ConfigFlags) (*Client, error) {
 	}
 
 	var namespace = *flags.Namespace
-	if namespace == "" || namespace == "*" {
-		namespace = AllNamespaces
+
+	apiCfg, err := flags.ToRawKubeConfigLoader().RawConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	username := "<empty>"
+	currCtx, ok := apiCfg.Contexts[apiCfg.CurrentContext]
+	if ok {
+		username = currCtx.AuthInfo
+	}
+
+	// get api server version
+	version, err := disco.ServerVersion()
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to server to get version: %s", err)
 	}
 
 	client := &Client{
-		namespace:     namespace,
-		config:        config,
-		kubeClient: kubeClient,
-		dynaClient:    dyna,
-		discoClient:   disco,
-		metricsClient: metrics,
+		clusterVersion: version,
+		namespace:      namespace,
+		config:         config,
+		apiConfig:      apiCfg,
+		clusterContext: apiCfg.CurrentContext,
+		username:       username,
+		kubeClient:     kubeClient,
+		discoClient:    disco,
+		metricsClient:  metrics,
 	}
 	client.controller = newController(client)
 	return client, nil
-}
-
-func (k8s *Client) ResourceInterface(resource schema.GroupVersionResource) dynamic.ResourceInterface {
-	return k8s.dynaClient.Resource(resource)
-}
-
-func (k8s *Client) NamespacedResourceInterface(resource schema.GroupVersionResource) dynamic.ResourceInterface {
-	return k8s.dynaClient.Resource(resource).Namespace(k8s.namespace)
 }
 
 func (k8s *Client) Namespace() string {
 	return k8s.namespace
 }
 
-func (k8s *Client) Config() *restclient.Config {
+func (k8s *Client) RESTConfig() *restclient.Config {
 	return k8s.config
 }
 
-func (k8s *Client) GetServerVersion() (string, error){
-	version, err := k8s.discoClient.ServerVersion()
-	if err != nil {
-		return "", fmt.Errorf("failed to connect to server: %s", err)
-	}
-	return version.String(), nil
+func (k8s *Client) ClusterContext() string {
+	return k8s.clusterContext
+}
+
+func (k8s *Client) Username() string {
+	return k8s.username
+}
+
+func (k8s *Client) GetServerVersion() string {
+	return k8s.clusterVersion.String()
 }
 
 // AssertMetricsAvailable checks for available metrics server every 10th invocation.
@@ -180,4 +218,67 @@ func (k8s *Client) GetAllPodMetrics(ctx context.Context) ([]metricsV1beta1.PodMe
 
 func (k8s *Client) Controller() *Controller {
 	return k8s.controller
+}
+
+// IsAuthz checks access authorization using SelfSubjectAccessReview
+func (k8s *Client) IsAuthz(ctx context.Context, resource string, verbs []string) (bool, error) {
+	k8s.Lock()
+	defer k8s.Unlock()
+
+	gvr, ok := GVRs[resource]
+	if !ok {
+		return false, fmt.Errorf("unsupported resource %s", resource)
+	}
+
+	makeAccessReview := func(grv schema.GroupVersionResource, verb string) *authzV1.SelfSubjectAccessReview {
+		return &authzV1.SelfSubjectAccessReview{
+			Spec: authzV1.SelfSubjectAccessReviewSpec{
+				ResourceAttributes: &authzV1.ResourceAttributes{
+					Namespace: k8s.Namespace(),
+					Group:     grv.Group,
+					Version:   grv.Version,
+					Resource:  grv.Resource,
+					Verb:      verb,
+				},
+			},
+		}
+	}
+
+	arClient := k8s.kubeClient.AuthorizationV1().SelfSubjectAccessReviews()
+	result := true
+	for _, verb := range verbs {
+		key := fmt.Sprintf("%s/%s/%s", gvr.String(), k8s.Namespace(), verb)
+		if authzd, ok := authzdTable[key]; ok {
+			result = result && authzd
+			continue
+		}
+		ar := makeAccessReview(gvr, verb)
+		arResult, err := arClient.Create(ctx, ar, metav1.CreateOptions{})
+		if err != nil {
+			delete(authzdTable, key)
+			return false, err
+		}
+		allowed := arResult.Status.Allowed
+		authzdTable[key] = allowed
+		result = result && allowed
+	}
+
+	return result, nil
+}
+
+// AssertCoreAuthz asserts that user/context can access node and pods
+func (k8s *Client) AssertCoreAuthz(ctx context.Context) error {
+	resources := []string{"namespaces", "nodes", "pods"}
+	accessible := true
+	for _, res := range resources {
+		authzd, err := k8s.IsAuthz(ctx, res, []string{"get", "list"})
+		if err != nil {
+			return err
+		}
+		accessible = accessible && authzd
+	}
+	if !accessible {
+		return fmt.Errorf("user missing required authorizations")
+	}
+	return nil
 }

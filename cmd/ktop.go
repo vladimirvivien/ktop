@@ -14,7 +14,7 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
-var(
+var (
 	examples = `
 # Start ktop using default configuration for the "default" namespace
 %[1]s
@@ -31,12 +31,12 @@ var(
 )
 
 type ktopCmdOptions struct {
-	namespace string
+	namespace     string
 	allNamespaces bool
-	context string
-	kubeconfig string
-	kubeFlags *genericclioptions.ConfigFlags
-	page string // future use
+	context       string
+	kubeconfig    string
+	kubeFlags     *genericclioptions.ConfigFlags
+	page          string // future use
 }
 
 // NewKtopCmd returns a command for ktop
@@ -74,19 +74,17 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 
 	k8sC, err := k8s.New(o.kubeFlags)
 	if err != nil {
-		fmt.Printf("main: failed to create Kubernetes client: %s\n", err)
-		os.Exit(1)
+		return fmt.Errorf("ktop: failed to create Kubernetes client: %s", err)
 	}
-	// Get server version (test server availability before continuing)
-	if _, err := k8sC.GetServerVersion(); err != nil {
-		return fmt.Errorf("ktop: %s", err)
-	}
-
-	fmt.Printf("Connected to: %s\n", k8sC.Config().Host)
+	fmt.Printf("Connected to: %s\n", k8sC.RESTConfig().Host)
 
 	app := application.New(k8sC)
 	app.WelcomeBanner()
 	app.AddPage(overview.New(app, "Overview"))
+
+	if err := k8sC.AssertCoreAuthz(ctx); err != nil {
+		return fmt.Errorf("ktop: %s", err)
+	}
 
 	// launch application
 	appErr := make(chan error)
