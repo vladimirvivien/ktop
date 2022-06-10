@@ -63,6 +63,8 @@ archives:
 
 checksum:
   name_template: 'checksums.txt'
+
+# kubectl krew plugin
 krews:
 -
   ids:
@@ -77,3 +79,19 @@ krews:
     * By default, ktop displays metrics for resources in the default namespace. You can override this behavior
     by providing a --namespace or use -A for all namespaces.
   skip_upload: true
+
+# Homebrew
+brews:
+  - name: ktop
+    ids:
+    - ktop
+    tap:
+      owner: vladimirvivien
+      name: homebrew-oss-tools
+    commit_author:
+      name: vladimirvivien
+      email: vladimir.vivien@gmail.com
+    homepage: https://github.com/vladimirvivien/ktop
+    description: A top-like tool to display kubernetes workload metrics
+    license: "Apache-2.0 license"
+    skip_upload: auto
