@@ -3,34 +3,14 @@ package k8s
 import (
 	"context"
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/vladimirvivien/ktop/views/model"
-	appsV1 "k8s.io/api/apps/v1"
-	batchV1 "k8s.io/api/batch/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/informers"
 	appsV1Informers "k8s.io/client-go/informers/apps/v1"
 	batchV1Informers "k8s.io/client-go/informers/batch/v1"
 	coreV1Informers "k8s.io/client-go/informers/core/v1"
 	"k8s.io/client-go/tools/cache"
-)
-
-var (
-	GVRs = map[string]schema.GroupVersionResource{
-		"nodes":                  {Group: "", Version: "v1", Resource: "nodes"},
-		"namespaces":             {Group: "", Version: "v1", Resource: "namespaces"},
-		"pods":                   {Group: "", Version: "v1", Resource: "pods"},
-		"persistentvolumes":      {Group: "", Version: "v1", Resource: "persistentvolumes"},
-		"persistentvolumeclaims": {Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
-		"deployments":            {Group: appsV1.GroupName, Version: "v1", Resource: "deployments"},
-		"daemonsets":             {Group: appsV1.GroupName, Version: "v1", Resource: "daemonsets"},
-		"replicasets":            {Group: appsV1.GroupName, Version: "v1", Resource: "replicasets"},
-		"statefulsets":           {Group: appsV1.GroupName, Version: "v1", Resource: "statefulsets"},
-		"jobs":                   {Group: batchV1.GroupName, Version: "v1", Resource: "jobs"},
-		"cronjobs":               {Group: batchV1.GroupName, Version: "v1", Resource: "cronjobs"},
-	}
 )
 
 type RefreshNodesFunc func(ctx context.Context, items []model.NodeModel) error
@@ -128,22 +108,31 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 
 	factory.Start(ctx.Done())
 
-	ok := cache.WaitForCacheSync(ctx.Done(),
+	// wait immediately for core resources to sync
+	if ok := cache.WaitForCacheSync(ctx.Done(),
 		namespaceHasSynced,
 		nodeHasSynced,
 		podHasSynced,
-		pvHasSynced,
-		pvcHasSynced,
-		deploymentHasSynced,
-		daemonsetHasSynced,
-		replicasetHasSynced,
-		statefulsetHasSynced,
-		jobHasSynced,
-		cronJobHasSynced,
-	)
-	if !ok {
-		return fmt.Errorf("resource failed to sync: %s")
+	); !ok {
+		panic("core resources failed to sync [namespaces, nodes, pods]")
 	}
+
+	// defer waiting for non-core resources to sync
+	go func() {
+		ok := cache.WaitForCacheSync(ctx.Done(),
+			pvHasSynced,
+			pvcHasSynced,
+			deploymentHasSynced,
+			daemonsetHasSynced,
+			replicasetHasSynced,
+			statefulsetHasSynced,
+			jobHasSynced,
+			cronJobHasSynced,
+		)
+		if !ok {
+			panic("resource failed to sync")
+		}
+	}()
 
 	c.setupSummaryHandler(ctx, c.summaryRefreshFunc)
 	c.setupNodeHandler(ctx, c.nodeRefreshFunc)
