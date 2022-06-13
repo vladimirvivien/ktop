@@ -31,9 +31,19 @@ Once installed, start the ktop plugin with
 kubectl ktop
 ```
 
+### Homebrew installation
+`ktop` is also available via the `brew` package manager. 
+
+#### OSX / Linux
+
+```
+brew tap vladimirvivien/oss-tools
+brew install ktop
+```
+
 ### Download binary
 
-Another easy way to get started with ktop is to download the pre-built binary (for your system):
+Another easy way to get started with ktop is to download the pre-built binary directly (for your system):
 
 > https://github.com/vladimirvivien/ktop/releases/latest
 
