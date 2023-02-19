@@ -41,13 +41,14 @@ brew tap vladimirvivien/oss-tools
 brew install ktop
 ```
 
-### Download binary
+### Using a container
+The binary is relased as an OCI container at `ghcr.io/vladimirvivien/ktop`.
+If you have a container runtime installed (Docker for instance), you launch ktop as shown below:
 
-Another easy way to get started with ktop is to download the pre-built binary directly (for your system):
-
-> https://github.com/vladimirvivien/ktop/releases/latest
-
-Then, extract the ktop binary and copy it to your system's execution path.
+``
+export KUBECONFIG=/home/user/.kube/config
+docker run --network=host --rm --platform="linux/arm64" -it -v $KUBECONFIG:/config -e KUBECONFIG=/config -e TERM=xterm-256color ghcr.io/vladimirvivien/ktop:latest
+```
 
 ### Using `go install`
 
@@ -58,6 +59,15 @@ go install github.com/vladimirvivien/ktop@latest
 ```
 
 This should place the ktop binary in your configured `$GOBIN` path or place it in its default location, `$HOME/go/bin`.
+
+### Download binary
+
+Another easy way to get started with ktop is to download the pre-built binary directly (for your system):
+
+> https://github.com/vladimirvivien/ktop/releases/latest
+
+Then, extract the ktop binary and copy it to your system's execution path.
+
 
 ### Build from source
 
