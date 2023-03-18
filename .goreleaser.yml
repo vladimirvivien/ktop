@@ -21,9 +21,16 @@ builds:
       - amd64
       - arm
       - arm64
+      - riscv64
+    goarm:
+      - 7
     ignore:
       - goos: darwin
         goarch: arm
+      - goos: darwin
+        goarch: riscv64
+    flags:
+      - -trimpath
     ldflags: -s -w -X github.com/vladimirvivien/ktop/buildinfo.Version=v{{.Version}} -X github.com/vladimirvivien/ktop/buildinfo.GitSHA={{.FullCommit}}
 
   - id: kubectl-ktop
@@ -37,9 +44,16 @@ builds:
       - amd64
       - arm
       - arm64
+      - riscv64
+    goarm:
+      - 7
     ignore:
       - goos: darwin
         goarch: arm
+      - goos: darwin
+        goarch: riscv64
+    flags:
+      - -trimpath
     ldflags: -s -w -X github.com/vladimirvivien/ktop/buildinfo.Version=v{{.Version}} -X github.com/vladimirvivien/ktop/buildinfo.GitSHA={{.FullCommit}}
 
 archives:
@@ -95,3 +109,20 @@ brews:
     description: A top-like tool to display kubernetes workload metrics
     license: "Apache-2.0 license"
     skip_upload: auto
+
+# ko-generated images
+
+kos:
+  - id: ko-ktop
+    build: ktop
+    repository: ghcr.io/vladimirvivien/ktop
+    tags:
+    - '{{.Version}}'
+    - latest
+    bare: true
+    preserve_import_paths: false
+    platforms: 
+    - linux/amd64
+    - linux/arm64
+    - linux/arm/v7
+    - linux/riscv64
