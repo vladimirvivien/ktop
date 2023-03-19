@@ -45,7 +45,7 @@ brew install ktop
 The binary is relased as an OCI container at `ghcr.io/vladimirvivien/ktop`.
 If you have a container runtime installed (Docker for instance), you launch ktop as shown below:
 
-``
+```
 export KUBECONFIG=/home/user/.kube/config
 docker run --network=host --rm --platform="linux/arm64" -it -v $KUBECONFIG:/config -e KUBECONFIG=/config -e TERM=xterm-256color ghcr.io/vladimirvivien/ktop:latest
 ```

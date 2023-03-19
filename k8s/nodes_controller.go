@@ -52,7 +52,7 @@ func (c *Controller) GetNodeModels(ctx context.Context) (models []model.NodeMode
 	}
 
 	for _, node := range nodes {
-		metrics, err := c.client.GetNodeMetrics(ctx, node.Name)
+		metrics, err := c.GetNodeMetrics(ctx, node.Name)
 		if err != nil {
 			metrics = new(metricsV1beta1.NodeMetrics)
 		}
