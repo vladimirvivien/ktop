@@ -30,14 +30,15 @@ func (c *Controller) GetPodModels(ctx context.Context) (models []model.PodModel,
 	nodeAllocResMap := make(map[string]coreV1.ResourceList)
 	for _, pod := range pods {
 
-		// retrieve metrics for pod
-		podMetrics, err := c.client.GetPodMetricsByName(ctx, pod)
+		// retrieve metrics per pod
+		podMetrics, err := c.GetPodMetricsByName(ctx, pod)
 		if err != nil {
 			podMetrics = new(metricsV1beta1.PodMetrics)
 		}
 
+		// retrieve and cache node metrics for related pod-node
 		if metrics, ok := nodeMetricsCache[pod.Spec.NodeName]; !ok {
-			metrics, err = c.client.GetNodeMetrics(ctx, pod.Spec.NodeName)
+			metrics, err = c.GetNodeMetrics(ctx, pod.Spec.NodeName)
 			if err != nil {
 				metrics = new(metricsV1beta1.NodeMetrics)
 			}
@@ -52,7 +53,7 @@ func (c *Controller) GetPodModels(ctx context.Context) (models []model.PodModel,
 			node, err := c.GetNode(ctx, pod.Spec.NodeName)
 			if err != nil {
 				alloc = coreV1.ResourceList{}
-			}else{
+			} else {
 				alloc = node.Status.Allocatable
 			}
 			nodeAllocResMap[pod.Spec.NodeName] = alloc

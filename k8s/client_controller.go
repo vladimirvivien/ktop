@@ -20,12 +20,13 @@ type RefreshSummaryFunc func(ctx context.Context, items model.ClusterSummary) er
 type Controller struct {
 	client *Client
 
-	informer          informers.SharedInformerFactory
-	namespaceInformer coreV1Informers.NamespaceInformer
-	nodeInformer      coreV1Informers.NodeInformer
-	podInformer       coreV1Informers.PodInformer
-	pvInformer        coreV1Informers.PersistentVolumeInformer
-	pvcInformer       coreV1Informers.PersistentVolumeClaimInformer
+	nodeMetricsInformer *NodeMetricsInformer
+	podMetricsInformer  *PodMetricsInformer
+	namespaceInformer   coreV1Informers.NamespaceInformer
+	nodeInformer        coreV1Informers.NodeInformer
+	podInformer         coreV1Informers.PodInformer
+	pvInformer          coreV1Informers.PersistentVolumeInformer
+	pvcInformer         coreV1Informers.PersistentVolumeClaimInformer
 
 	jobInformer     batchV1Informers.JobInformer
 	cronJobInformer batchV1Informers.CronJobInformer
@@ -64,6 +65,19 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 		return errors.New("context cannot be nil")
 	}
 
+	// initialize
+
+	var nodeMetricsInformerHasSynced func() bool
+	var podMetricsInformerHasSynced func() bool
+	if err := c.client.AssertMetricsAvailable(); err == nil {
+		c.nodeMetricsInformer = NewNodeMetricsInformer(c.client.metricsClient, resync)
+		nodeMetricsInformerHasSynced = c.nodeMetricsInformer.Informer().HasSynced
+
+		c.podMetricsInformer = NewPodMetricsInformer(c.client.metricsClient, resync, c.client.namespace)
+		podMetricsInformerHasSynced = c.podMetricsInformer.informer.HasSynced
+	}
+
+	// initialize informer factories
 	var factory informers.SharedInformerFactory
 	if c.client.namespace == AllNamespaces {
 		factory = informers.NewSharedInformerFactory(c.client.kubeClient, resync)
@@ -109,6 +123,14 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	factory.Start(ctx.Done())
 
 	// wait immediately for core resources to sync
+	// start with metrics
+	if err := c.client.AssertMetricsAvailable(); err == nil {
+		if ok := cache.WaitForCacheSync(ctx.Done(), nodeMetricsInformerHasSynced, podMetricsInformerHasSynced); !ok {
+			panic("metrics resources failed to sync [nodes, pods, containers]")
+		}
+	}
+
+	// wait for core resources to sync
 	if ok := cache.WaitForCacheSync(ctx.Done(),
 		namespaceHasSynced,
 		nodeHasSynced,
