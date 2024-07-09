@@ -1,3 +1,4 @@
+version: 2
 project_name: ktop
 
 release:
@@ -99,7 +100,7 @@ brews:
   - name: ktop
     ids:
     - ktop
-    tap:
+    repository:
       owner: vladimirvivien
       name: homebrew-oss-tools
     commit_author:
