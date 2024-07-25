@@ -11,17 +11,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: 'stable'
     - name: Binary release
-      uses: goreleaser/goreleaser-action@v4
+      uses: goreleaser/goreleaser-action@v6
       with:
         version: latest
         args: release --clean
       env:
         GITHUB_TOKEN: ${{ secrets.RELEASER_SECRET }}
     - name: Update new version in krew-index
-      uses: rajatjindal/krew-release-bot@v0.0.43
+      uses: rajatjindal/krew-release-bot@v0.0.46
