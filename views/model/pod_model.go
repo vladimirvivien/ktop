@@ -158,14 +158,14 @@ func GetPodContainerSummary(pod *v1.Pod) PodContainerSummary {
 
 	for _, container := range pod.Spec.InitContainers {
 		mems.Add(*container.Resources.Requests.Memory())
-		mems.Add(*container.Resources.Requests.Cpu())
+		cpus.Add(*container.Resources.Requests.Cpu())
 		ports += len(container.Ports)
 		mounts += len(container.VolumeMounts)
 	}
 
 	if pod.Spec.Overhead != nil {
 		mems.Add(*pod.Spec.Overhead.Memory())
-		mems.Add(*pod.Spec.Overhead.Cpu())
+		cpus.Add(*pod.Spec.Overhead.Cpu())
 	}
 
 	return PodContainerSummary{
