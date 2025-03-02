@@ -111,11 +111,14 @@ Flags:
       --insecure-skip-tls-verify       If true, the server's certificate will not be checked for validity. This will make your HTTPS connections insecure
       --kubeconfig string              Path to the kubeconfig file to use for CLI requests.
   -n, --namespace string               If present, the namespace scope for this CLI request
+      --node-columns string            Comma-separated list of node columns to display (e.g. 'NAME,CPU,MEM')
+      --pod-columns string             Comma-separated list of pod columns to display (e.g. 'NAMESPACE,POD,STATUS')
       --request-timeout string         The length of time to wait before giving up on a single server request. Non-zero values should contain a corresponding time unit (e.g. 1s, 2m, 3h). A value of zero means don't timeout requests. (default "0")
   -s, --server string                  The address and port of the Kubernetes API server
+      --show-all-columns               If true, show all columns (default true)
       --tls-server-name string         Server name to use for server certificate validation. If it is not provided, the hostname used to contact the server is used
       --token string                   Bearer token for authentication to the API server
-      --user string                    The name of the kubeconfig user to use```
+      --user string                    The name of the kubeconfig user to use
 ```
 
 For instance, the following will show cluster information for workload resources associated with namespace `my-app` in context `web-cluster` using the default kubconfig file path:
@@ -123,6 +126,53 @@ For instance, the following will show cluster information for workload resources
 ```
 ktop --namespace my-app --context web-cluster
 ```
+
+### Column Filtering
+
+You can customize which columns are displayed in the nodes and pods tables. This is useful when you want to focus on specific metrics or when working with limited screen space.
+
+To show only specific node columns:
+
+```
+ktop --node-columns NAME,CPU,MEM
+```
+
+To show only specific pod columns:
+
+```
+ktop --pod-columns NAMESPACE,POD,CPU,MEMORY
+```
+
+You can combine both filters:
+
+```
+ktop --node-columns NAME,CPU,MEM --pod-columns NAMESPACE,POD,STATUS
+```
+
+Available node columns:
+- NAME
+- STATUS
+- AGE
+- VERSION
+- INT/EXT IPs
+- OS/ARC
+- PODS/IMGs
+- DISK
+- CPU
+- MEM
+
+Available pod columns:
+- NAMESPACE
+- POD
+- READY
+- STATUS
+- RESTARTS
+- AGE
+- VOLS
+- IP
+- NODE
+- CPU
+- MEMORY
 
 ## ktop metrics
 
