@@ -22,6 +22,8 @@ type PodModel struct {
 
 	PodRequestedCpuQty *resource.Quantity
 	PodRequestedMemQty *resource.Quantity
+	PodLimitCpuQty     *resource.Quantity
+	PodLimitMemQty     *resource.Quantity
 	PodUsageCpuQty     *resource.Quantity
 	PodUsageMemQty     *resource.Quantity
 
@@ -40,6 +42,8 @@ type PodModel struct {
 type PodContainerSummary struct {
 	RequestedMemQty *resource.Quantity
 	RequestedCpuQty *resource.Quantity
+	LimitMemQty     *resource.Quantity
+	LimitCpuQty     *resource.Quantity
 	VolMounts       int
 	Ports           int
 }
@@ -83,6 +87,8 @@ func NewPodModel(pod *v1.Pod, podMetrics *metricsV1beta1.PodMetrics, nodeMetrics
 		VolMounts:          containerSummary.VolMounts,
 		PodRequestedMemQty: containerSummary.RequestedMemQty,
 		PodRequestedCpuQty: containerSummary.RequestedCpuQty,
+		PodLimitMemQty:     containerSummary.LimitMemQty,
+		PodLimitCpuQty:     containerSummary.LimitCpuQty,
 		NodeUsageCpuQty:    nodeMetrics.Usage.Cpu(),
 		NodeUsageMemQty:    nodeMetrics.Usage.Memory(),
 		PodUsageCpuQty:     totalCpu,
@@ -145,32 +151,71 @@ func timeSince(ts metav1.Time) string {
 }
 
 func GetPodContainerSummary(pod *v1.Pod) PodContainerSummary {
-	mems := resource.NewQuantity(0, resource.DecimalSI)
-	cpus := resource.NewQuantity(0, resource.DecimalSI)
+	requestedMems := resource.NewQuantity(0, resource.DecimalSI)
+	requestedCpus := resource.NewQuantity(0, resource.DecimalSI)
+	limitMems := resource.NewQuantity(0, resource.DecimalSI)
+	limitCpus := resource.NewQuantity(0, resource.DecimalSI)
 	var ports int
 	var mounts int
+	
 	for _, container := range pod.Spec.Containers {
-		mems.Add(*container.Resources.Requests.Memory())
-		cpus.Add(*container.Resources.Requests.Cpu())
+		// Handle requests
+		if reqMem := container.Resources.Requests.Memory(); reqMem != nil {
+			requestedMems.Add(*reqMem)
+		}
+		if reqCpu := container.Resources.Requests.Cpu(); reqCpu != nil {
+			requestedCpus.Add(*reqCpu)
+		}
+		
+		// Handle limits
+		if limMem := container.Resources.Limits.Memory(); limMem != nil {
+			limitMems.Add(*limMem)
+		}
+		if limCpu := container.Resources.Limits.Cpu(); limCpu != nil {
+			limitCpus.Add(*limCpu)
+		}
+		
 		ports += len(container.Ports)
 		mounts += len(container.VolumeMounts)
 	}
 
 	for _, container := range pod.Spec.InitContainers {
-		mems.Add(*container.Resources.Requests.Memory())
-		cpus.Add(*container.Resources.Requests.Cpu())
+		// Handle requests
+		if reqMem := container.Resources.Requests.Memory(); reqMem != nil {
+			requestedMems.Add(*reqMem)
+		}
+		if reqCpu := container.Resources.Requests.Cpu(); reqCpu != nil {
+			requestedCpus.Add(*reqCpu)
+		}
+		
+		// Handle limits
+		if limMem := container.Resources.Limits.Memory(); limMem != nil {
+			limitMems.Add(*limMem)
+		}
+		if limCpu := container.Resources.Limits.Cpu(); limCpu != nil {
+			limitCpus.Add(*limCpu)
+		}
+		
 		ports += len(container.Ports)
 		mounts += len(container.VolumeMounts)
 	}
 
 	if pod.Spec.Overhead != nil {
-		mems.Add(*pod.Spec.Overhead.Memory())
-		cpus.Add(*pod.Spec.Overhead.Cpu())
+		if ovhMem := pod.Spec.Overhead.Memory(); ovhMem != nil {
+			requestedMems.Add(*ovhMem)
+			limitMems.Add(*ovhMem)
+		}
+		if ovhCpu := pod.Spec.Overhead.Cpu(); ovhCpu != nil {
+			requestedCpus.Add(*ovhCpu)
+			limitCpus.Add(*ovhCpu)
+		}
 	}
 
 	return PodContainerSummary{
-		RequestedMemQty: mems,
-		RequestedCpuQty: cpus,
+		RequestedMemQty: requestedMems,
+		RequestedCpuQty: requestedCpus,
+		LimitMemQty:     limitMems,
+		LimitCpuQty:     limitCpus,
 		VolMounts:       mounts,
 		Ports:           ports,
 	}
