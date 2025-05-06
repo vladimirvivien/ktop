@@ -3,6 +3,7 @@ package overview
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rivo/tview"
@@ -21,29 +22,59 @@ type MainPanel struct {
 	nodePanel           ui.Panel
 	podPanel            ui.Panel
 	clusterSummaryPanel ui.Panel
+	showAllColumns      bool
+	nodeColumns         []string
+	podColumns          []string
 }
 
 func New(app *application.Application, title string) *MainPanel {
+	return NewWithColumnOptions(app, title, true, nil, nil)
+}
+
+func NewWithColumnOptions(app *application.Application, title string, showAllColumns bool, nodeColumns, podColumns []string) *MainPanel {
 	ctrl := &MainPanel{
-		app:           app,
-		title:         title,
-		refresh:       app.Refresh,
-		selPanelIndex: -1,
+		app:            app,
+		title:          title,
+		refresh:        app.Refresh,
+		selPanelIndex:  -1,
+		showAllColumns: showAllColumns,
+		nodeColumns:    nodeColumns,
+		podColumns:     podColumns,
 	}
 
 	return ctrl
 }
 
 func (p *MainPanel) Layout(data interface{}) {
+	// Define the default columns
+	allNodeColumns := []string{"NAME", "STATUS", "AGE", "VERSION", "INT/EXT IPs", "OS/ARC", "PODS/IMGs", "DISK", "CPU", "MEM"}
+	allPodColumns := []string{"NAMESPACE", "POD", "READY", "STATUS", "RESTARTS", "AGE", "VOLS", "IP", "NODE", "CPU", "MEMORY"}
+	
+	// Use filtered columns if specified
+	nodeColumnsToDisplay := allNodeColumns
+	podColumnsToDisplay := allPodColumns
+	
+	if !p.showAllColumns {
+		if len(p.nodeColumns) > 0 {
+			// Filter node columns
+			nodeColumnsToDisplay = filterColumns(allNodeColumns, p.nodeColumns)
+		}
+		
+		if len(p.podColumns) > 0 {
+			// Filter pod columns
+			podColumnsToDisplay = filterColumns(allPodColumns, p.podColumns)
+		}
+	}
+	
 	p.nodePanel = NewNodePanel(p.app, fmt.Sprintf(" %c Nodes ", ui.Icons.Factory))
-	p.nodePanel.DrawHeader([]string{"NAME", "STATUS", "AGE", "VERSION", "INT/EXT IPs", "OS/ARC", "PODS/IMGs", "DISK", "CPU", "MEM"})
+	p.nodePanel.DrawHeader(nodeColumnsToDisplay)
 
 	p.clusterSummaryPanel = NewClusterSummaryPanel(p.app, fmt.Sprintf(" %c Cluster Summary ", ui.Icons.Thermometer))
 	p.clusterSummaryPanel.Layout(nil)
 	p.clusterSummaryPanel.DrawHeader(nil)
 
 	p.podPanel = NewPodPanel(p.app, fmt.Sprintf(" %c Pods ", ui.Icons.Package))
-	p.podPanel.DrawHeader([]string{"NAMESPACE", "POD", "READY", "STATUS", "RESTARTS", "AGE", "VOLS", "IP", "NODE", "CPU", "MEMORY"})
+	p.podPanel.DrawHeader(podColumnsToDisplay)
 
 	p.children = []tview.Primitive{
 		p.clusterSummaryPanel.GetRootView(),
@@ -122,4 +153,29 @@ func (p *MainPanel) refreshWorkloadSummary(ctx context.Context, summary model.Cl
 		p.refresh()
 	}
 	return nil
+}
+
+// filterColumns filters the allColumns based on the user-provided filterCols
+// It returns a slice of columns that match the case-insensitive filter
+func filterColumns(allColumns []string, filterCols []string) []string {
+	if len(filterCols) == 0 {
+		return allColumns
+	}
+	
+	result := []string{}
+	for _, col := range allColumns {
+		for _, filterCol := range filterCols {
+			if strings.EqualFold(col, filterCol) {
+				result = append(result, col)
+				break
+			}
+		}
+	}
+	
+	// If no matches found, return at least the first column (usually NAME)
+	if len(result) == 0 && len(allColumns) > 0 {
+		return []string{allColumns[0]}
+	}
+	
+	return result
 }

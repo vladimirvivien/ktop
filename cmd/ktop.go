@@ -31,12 +31,15 @@ var (
 )
 
 type ktopCmdOptions struct {
-	namespace     string
-	allNamespaces bool
-	context       string
-	kubeconfig    string
-	kubeFlags     *genericclioptions.ConfigFlags
-	page          string // future use
+	namespace         string
+	allNamespaces     bool
+	context           string
+	kubeconfig        string
+	kubeFlags         *genericclioptions.ConfigFlags
+	page              string // future use
+	nodeColumns       string // comma-separated list of node columns to display
+	podColumns        string // comma-separated list of pod columns to display
+	showAllColumns    bool   // show all columns
 }
 
 // NewKtopCmd returns a command for ktop
@@ -60,6 +63,9 @@ func NewKtopCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().BoolVarP(&o.allNamespaces, "all-namespaces", "A", false, "If true, display metrics for all accessible namespaces")
+	cmd.Flags().StringVar(&o.nodeColumns, "node-columns", "", "Comma-separated list of node columns to display (e.g. 'NAME,CPU,MEM')")
+	cmd.Flags().StringVar(&o.podColumns, "pod-columns", "", "Comma-separated list of pod columns to display (e.g. 'NAMESPACE,POD,STATUS')")
+	cmd.Flags().BoolVar(&o.showAllColumns, "show-all-columns", true, "If true, show all columns (default)")
 	o.kubeFlags.AddFlags(cmd.Flags())
 	return cmd
 }
@@ -80,7 +86,22 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 
 	app := application.New(k8sC)
 	app.WelcomeBanner()
-	app.AddPage(overview.New(app, "Overview"))
+	
+	// Process column options
+	nodeColumns := []string{}
+	if o.nodeColumns != "" {
+		nodeColumns = strings.Split(o.nodeColumns, ",")
+		o.showAllColumns = false
+	}
+	
+	podColumns := []string{}
+	if o.podColumns != "" {
+		podColumns = strings.Split(o.podColumns, ",")
+		o.showAllColumns = false
+	}
+	
+	// Create a new overview page with column options
+	app.AddPage(overview.NewWithColumnOptions(app, "Overview", o.showAllColumns, nodeColumns, podColumns))
 
 	if err := k8sC.AssertCoreAuthz(ctx); err != nil {
 		return fmt.Errorf("ktop: %s", err)
