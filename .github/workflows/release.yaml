@@ -24,4 +24,4 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.RELEASER_SECRET }}
     - name: Update new version in krew-index
-      uses: rajatjindal/krew-release-bot@v0.0.46
+      uses: rajatjindal/krew-release-bot@v0.0.47
