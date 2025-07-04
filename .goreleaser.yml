@@ -60,20 +60,20 @@ builds:
 
 archives:
    - id: ktop
-     builds:
+     ids:
      - ktop
      name_template: '{{ .Binary }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}{{ if .Arm}}v{{ .Arm }}{{ end }}'
      wrap_in_directory: false
-     format: tar.gz
+     formats: tar.gz
      files:
      - LICENSE
 
    - id: kubectl-ktop
-     builds:
+     ids:
      - kubectl-ktop
      name_template: '{{ .Binary }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}{{ if .Arm}}v{{ .Arm }}{{ end }}'
      wrap_in_directory: false
-     format: tar.gz
+     formats: tar.gz
      files:
        - LICENSE
 
@@ -97,17 +97,19 @@ krews:
   skip_upload: true
 
 # Homebrew
-brews:
+homebrew_casks:
   - name: ktop
     ids:
     - ktop
+    binary: ktop
+    directory: Casks
     repository:
       owner: vladimirvivien
       name: homebrew-oss-tools
       branch: main
     commit_author:
       name: vladimirvivien
-      email: vladimir.vivien@gmail.com
+      email: 309126+vladimirvivien@users.noreply.github.com
     homepage: https://github.com/vladimirvivien/ktop
     description: A top-like tool to display kubernetes workload metrics
     license: "Apache-2.0 license"
@@ -118,7 +120,8 @@ brews:
 kos:
   - id: ko-ktop
     build: ktop
-    repository: ghcr.io/vladimirvivien/ktop
+    repositories: 
+    - ghcr.io/vladimirvivien/ktop
     tags:
     - '{{.Version}}'
     - latest
