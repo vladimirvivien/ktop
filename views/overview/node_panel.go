@@ -18,7 +18,8 @@ type nodePanel struct {
 	children []tview.Primitive
 	listCols []string
 	list     *tview.Table
-	laidout bool
+	laidout  bool
+	colMap   map[string]int // Maps column name to position index
 }
 
 func NewNodePanel(app *application.Application, title string) ui.Panel {
@@ -58,7 +59,10 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 		panic(fmt.Sprintf("nodePanel.DrawHeader got unexpected data type %T", data))
 	}
 
-	// legend column
+	// Initialize a new column map
+	p.colMap = make(map[string]int)
+	
+	// Reserve index 0 for the legend column
 	p.list.SetCell(0, 0,
 		tview.NewTableCell("").
 			SetTextColor(tcell.ColorWhite).
@@ -70,6 +74,8 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 	)
 
 	p.listCols = cols
+	
+	// Set column headers and build column map
 	for i, col := range p.listCols {
 		pos := i + 1
 		p.list.SetCell(0, pos,
@@ -80,8 +86,10 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 				SetExpansion(100).
 				SetSelectable(false),
 		)
+		
+		// Map column name to its position
+		p.colMap[col] = pos
 	}
-
 }
 
 func (p *nodePanel) DrawBody(data interface{}) {
@@ -100,16 +108,17 @@ func (p *nodePanel) DrawBody(data interface{}) {
 	p.root.SetTitle(fmt.Sprintf("%s(%d) ", p.GetTitle(), len(nodes)))
 	p.root.SetTitleAlign(tview.AlignLeft)
 
-	for i, node := range nodes {
-		i++ // offset for header-row
+	for rowIdx, node := range nodes {
+		rowIdx++ // offset for header-row
+		
+		// Always render the legend column
 		controlLegend := ""
 		if node.Controller {
 			controlLegend = fmt.Sprintf("%c", ui.Icons.TrafficLight)
 		}
-
-		// legend
+		
 		p.list.SetCell(
-			i, 0,
+			rowIdx, 0,
 			&tview.TableCell{
 				Text:          controlLegend,
 				Color:         tcell.ColorOrangeRed,
@@ -117,128 +126,150 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				NotSelectable: true,
 			},
 		)
-
-		// name
-		p.list.SetCell(
-			i, 1,
-			&tview.TableCell{
-				Text:  node.Name,
-				Color: tcell.ColorYellow,
-				Align: tview.AlignLeft,
-			},
-		)
-
-		p.list.SetCell(
-			i, 2,
-			&tview.TableCell{
-				Text:  node.Status,
-				Color: tcell.ColorYellow,
-				Align: tview.AlignLeft,
-			},
-		)
-
-		p.list.SetCell(
-			i, 3,
-			&tview.TableCell{
-				Text:  node.TimeSinceStart,
-				Color: tcell.ColorYellow,
-				Align: tview.AlignLeft,
-			},
-		)
-
-		p.list.SetCell(
-			i, 4,
-			&tview.TableCell{
-				Text:  node.KubeletVersion,
-				Color: tcell.ColorYellow,
-				Align: tview.AlignLeft,
-			},
-		)
-
-		p.list.SetCell(
-			i, 5,
-			&tview.TableCell{
-				Text:  fmt.Sprintf("%s/%s", node.InternalIP, node.ExternalIP),
-				Color: tcell.ColorYellow,
-				Align: tview.AlignLeft,
-			},
-		)
-
-		p.list.SetCell(
-			i, 6,
-			&tview.TableCell{
-				Text:  fmt.Sprintf("%s/%s", node.OSImage, node.Architecture),
-				Color: tcell.ColorYellow,
-				Align: tview.AlignLeft,
-			},
-		)
-
-		p.list.SetCell(
-			i, 7,
-			&tview.TableCell{
-				Text:  fmt.Sprintf("%d/%d", node.PodsCount, node.ContainerImagesCount),
-				Color: tcell.ColorYellow,
-				Align: tview.AlignLeft,
-			},
-		)
-
-		// Disk
-		p.list.SetCell(
-			i, 8,
-			&tview.TableCell{
-				Text:  fmt.Sprintf("%dGi", node.AllocatableStorageQty.ScaledValue(resource.Giga)),
-				Color: tcell.ColorYellow,
-				Align: tview.AlignLeft,
-			},
-		)
-
-		if metricsDiabled {
-			cpuRatio = ui.GetRatio(float64(node.RequestedPodCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
-			cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
-			cpuMetrics = fmt.Sprintf(
-				"[white][%s[white]] %dm/%dm (%1.0f%%)",
-				cpuGraph, node.RequestedPodCpuQty.MilliValue(), node.AllocatableCpuQty.MilliValue(), cpuRatio*100,
-			)
-
-			memRatio = ui.GetRatio(float64(node.RequestedPodMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
-			memGraph = ui.BarGraph(10, memRatio, colorKeys)
-			memMetrics = fmt.Sprintf(
-				"[white][%s[white]] %dGi/%dGi (%1.0f%%)",
-				memGraph, node.RequestedPodMemQty.ScaledValue(resource.Giga), node.AllocatableMemQty.ScaledValue(resource.Giga), memRatio*100,
-			)
-		} else {
-			cpuRatio = ui.GetRatio(float64(node.UsageCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
-			cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
-			cpuMetrics = fmt.Sprintf(
-				"[white][%s[white]] %dm/%dm (%1.0f%%)",
-				cpuGraph, node.UsageCpuQty.MilliValue(), node.AllocatableCpuQty.MilliValue(), cpuRatio*100,
-			)
-
-			memRatio = ui.GetRatio(float64(node.UsageMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
-			memGraph = ui.BarGraph(10, memRatio, colorKeys)
-			memMetrics = fmt.Sprintf(
-				"[white][%s[white]] %dGi/%dGi (%1.0f%%)",
-				memGraph, node.UsageMemQty.ScaledValue(resource.Giga), node.AllocatableMemQty.ScaledValue(resource.Giga), memRatio*100,
-			)
+		
+		// Render each column that is included in the filtered view
+		for _, colName := range p.listCols {
+			colIdx, exists := p.colMap[colName]
+			if !exists {
+				continue
+			}
+			
+			switch colName {
+			case "NAME":
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:  node.Name,
+						Color: tcell.ColorYellow,
+						Align: tview.AlignLeft,
+					},
+				)
+				
+			case "STATUS":
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:  node.Status,
+						Color: tcell.ColorYellow,
+						Align: tview.AlignLeft,
+					},
+				)
+				
+			case "AGE":
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:  node.TimeSinceStart,
+						Color: tcell.ColorYellow,
+						Align: tview.AlignLeft,
+					},
+				)
+				
+			case "VERSION":
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:  node.KubeletVersion,
+						Color: tcell.ColorYellow,
+						Align: tview.AlignLeft,
+					},
+				)
+				
+			case "INT/EXT IPs":
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:  fmt.Sprintf("%s/%s", node.InternalIP, node.ExternalIP),
+						Color: tcell.ColorYellow,
+						Align: tview.AlignLeft,
+					},
+				)
+				
+			case "OS/ARC":
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:  fmt.Sprintf("%s/%s", node.OSImage, node.Architecture),
+						Color: tcell.ColorYellow,
+						Align: tview.AlignLeft,
+					},
+				)
+				
+			case "PODS/IMGs":
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:  fmt.Sprintf("%d/%d", node.PodsCount, node.ContainerImagesCount),
+						Color: tcell.ColorYellow,
+						Align: tview.AlignLeft,
+					},
+				)
+				
+			case "DISK":
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:  fmt.Sprintf("%dGi", node.AllocatableStorageQty.ScaledValue(resource.Giga)),
+						Color: tcell.ColorYellow,
+						Align: tview.AlignLeft,
+					},
+				)
+				
+			case "CPU":
+				// Calculate CPU metrics
+				if metricsDiabled {
+					cpuRatio = ui.GetRatio(float64(node.RequestedPodCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
+					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
+					cpuMetrics = fmt.Sprintf(
+						"[white][%s[white]] %dm/%dm (%1.0f%%)",
+						cpuGraph, node.RequestedPodCpuQty.MilliValue(), node.AllocatableCpuQty.MilliValue(), cpuRatio*100,
+					)
+				} else {
+					cpuRatio = ui.GetRatio(float64(node.UsageCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
+					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
+					cpuMetrics = fmt.Sprintf(
+						"[white][%s[white]] %dm/%dm (%1.0f%%)",
+						cpuGraph, node.UsageCpuQty.MilliValue(), node.AllocatableCpuQty.MilliValue(), cpuRatio*100,
+					)
+				}
+				
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:  cpuMetrics,
+						Color: tcell.ColorYellow,
+						Align: tview.AlignLeft,
+					},
+				)
+				
+			case "MEM":
+				// Calculate memory metrics
+				if metricsDiabled {
+					memRatio = ui.GetRatio(float64(node.RequestedPodMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
+					memGraph = ui.BarGraph(10, memRatio, colorKeys)
+					memMetrics = fmt.Sprintf(
+						"[white][%s[white]] %dGi/%dGi (%1.0f%%)",
+						memGraph, node.RequestedPodMemQty.ScaledValue(resource.Giga), node.AllocatableMemQty.ScaledValue(resource.Giga), memRatio*100,
+					)
+				} else {
+					memRatio = ui.GetRatio(float64(node.UsageMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
+					memGraph = ui.BarGraph(10, memRatio, colorKeys)
+					memMetrics = fmt.Sprintf(
+						"[white][%s[white]] %dGi/%dGi (%1.0f%%)",
+						memGraph, node.UsageMemQty.ScaledValue(resource.Giga), node.AllocatableMemQty.ScaledValue(resource.Giga), memRatio*100,
+					)
+				}
+				
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:  memMetrics,
+						Color: tcell.ColorYellow,
+						Align: tview.AlignLeft,
+					},
+				)
+			}
 		}
-
-		p.list.SetCell(
-			i, 9,
-			&tview.TableCell{
-				Text:  cpuMetrics,
-				Color: tcell.ColorYellow,
-				Align: tview.AlignLeft,
-			},
-		)
-
-		p.list.SetCell(
-			i, 10,
-			&tview.TableCell{
-				Text:  memMetrics,
-				Color: tcell.ColorYellow,
-				Align: tview.AlignLeft,
-			},
-		)
 	}
 }
 
