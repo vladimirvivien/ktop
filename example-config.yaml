@@ -1,0 +1,69 @@
+# Example ktop metrics configuration file
+# Place this file at $HOME/.ktop/config.yaml or specify with --config-file
+
+# Metrics source configuration
+source:
+  # Type of metrics source: "prometheus", "metrics-server", "hybrid", "auto"
+  # - prometheus: Use only Prometheus metrics
+  # - metrics-server: Use only Kubernetes metrics server
+  # - hybrid: Use both sources with manual selection
+  # - auto: Automatically select best available source
+  type: auto
+  
+  # Enable fallback to alternative source if primary fails
+  fallback_enabled: true
+  
+  # Timeout for fallback operations
+  fallback_timeout: 5s
+
+# Prometheus configuration
+prometheus:
+  # Enable Prometheus metrics collection
+  enabled: true
+  
+  # How often to scrape metrics from Kubernetes components
+  scrape_interval: 15s
+  
+  # How long to retain metrics in memory
+  retention_time: 1h
+  
+  # Maximum number of metric samples to store
+  max_samples: 10000
+  
+  # Kubernetes components to scrape metrics from
+  # Available: kubelet, cadvisor, apiserver, etcd, scheduler, controllermanager
+  components:
+    - kubelet
+    - cadvisor
+    - apiserver
+
+# Display configuration
+display:
+  # Show enhanced columns (network, load, trends) when available
+  enhanced_columns: false
+  
+  # Show trend indicators for resource usage
+  show_trends: false
+  
+  # Show health status of metrics sources
+  show_health: true
+  
+  # Time range for trend calculation
+  time_range: 15m
+  
+  # How often to refresh the display
+  refresh_interval: 5s
+
+# Advanced configuration
+advanced:
+  # Enable debug mode for troubleshooting
+  debug: false
+  
+  # Log level: debug, info, warn, error
+  log_level: info
+  
+  # Maximum concurrent metric collection operations
+  max_concurrency: 10
+  
+  # Size of metrics cache
+  cache_size: 1000
