@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -86,23 +87,31 @@ func (app *Application) WelcomeBanner() {
 	fmt.Printf("Version %s \n", buildinfo.Version)
 }
 
-func (app *Application) setup(ctx context.Context) error {
-	// setup each page panel
-	for _, page := range app.pages {
-		if err := page.Panel.Run(ctx); err != nil {
-			return fmt.Errorf("init failed: page %s: %s", page.Title, err)
-		}
-	}
-
-	// continue setup rest of UI
-	app.panel.Layout(app.pages)
-
+func (app *Application) refreshHeader() {
 	var hdr strings.Builder
-	hdr.WriteString("%c [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green] metrics:")
-	if err := app.GetK8sClient().AssertMetricsAvailable(); err != nil {
-		hdr.WriteString(" [red]not connected")
+	hdr.WriteString("%c [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green] source:")
+	
+	// Get the metrics controller to determine the actual source
+	metricsController := app.GetK8sClient().GetMetricsController()
+	if metricsController != nil {
+		sourceInfo := metricsController.GetSourceInfo()
+		// Color based on state
+		var sourceColor string
+		switch sourceInfo.State {
+		case k8s.SourceStateHealthy:
+			sourceColor = "green"
+		case k8s.SourceStateCollecting, k8s.SourceStateInitializing:
+			sourceColor = "orange"
+		case k8s.SourceStateUnhealthy:
+			sourceColor = "red"
+		default:
+			sourceColor = "white"
+		}
+		hdr.WriteString(fmt.Sprintf(" [%s]%s", sourceColor, sourceInfo.Type))
+	} else if err := app.GetK8sClient().AssertMetricsAvailable(); err != nil {
+		hdr.WriteString(" [red]metrics-server (disconnected)")
 	} else {
-		hdr.WriteString(" [white]connected")
+		hdr.WriteString(" [white]metrics-server")
 	}
 
 	namespace := app.k8sClient.Namespace()
@@ -114,6 +123,21 @@ func (app *Application) setup(ctx context.Context) error {
 		hdr.String(),
 		ui.Icons.Rocket, client.RESTConfig().Host, client.GetServerVersion(), client.ClusterContext(), client.Username(), namespace,
 	))
+}
+
+func (app *Application) setup(ctx context.Context) error {
+	// setup each page panel
+	for _, page := range app.pages {
+		if err := page.Panel.Run(ctx); err != nil {
+			return fmt.Errorf("init failed: page %s: %s", page.Title, err)
+		}
+	}
+
+	// continue setup rest of UI
+	app.panel.Layout(app.pages)
+
+	// Draw initial header
+	app.refreshHeader()
 
 	app.panel.DrawFooter(app.getPageTitles()[app.visibleView])
 
@@ -158,6 +182,22 @@ func (app *Application) Run(ctx context.Context) error {
 	go func() {
 		for range app.refreshQ {
 			app.tviewApp.Draw()
+		}
+	}()
+
+	// Periodically refresh header to update metrics source color
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				app.refreshHeader()
+				app.Refresh()
+			}
 		}
 	}()
 
