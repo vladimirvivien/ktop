@@ -60,6 +60,10 @@ type Client struct {
 	metricsAvailCount int
 	refreshTimeout    time.Duration
 	controller        *Controller
+	
+	// Hybrid metrics support
+	metricsController MetricsSource
+	metricsConfig     interface{}
 }
 
 func New(flags *genericclioptions.ConfigFlags) (*Client, error) {
@@ -177,6 +181,34 @@ func (k8s *Client) AssertMetricsAvailable() error {
 
 func (k8s *Client) Controller() *Controller {
 	return k8s.controller
+}
+
+// SetMetricsController sets the metrics controller for hybrid metrics support
+func (k8s *Client) SetMetricsController(controller MetricsSource) {
+	k8s.Lock()
+	defer k8s.Unlock()
+	k8s.metricsController = controller
+}
+
+// GetMetricsController returns the metrics controller
+func (k8s *Client) GetMetricsController() MetricsSource {
+	k8s.RLock()
+	defer k8s.RUnlock()
+	return k8s.metricsController
+}
+
+// SetMetricsConfig sets the metrics configuration
+func (k8s *Client) SetMetricsConfig(config interface{}) {
+	k8s.Lock()
+	defer k8s.Unlock()
+	k8s.metricsConfig = config
+}
+
+// GetMetricsConfig returns the metrics configuration
+func (k8s *Client) GetMetricsConfig() interface{} {
+	k8s.RLock()
+	defer k8s.RUnlock()
+	return k8s.metricsConfig
 }
 
 // IsAuthz checks access authorization using SelfSubjectAccessReview
