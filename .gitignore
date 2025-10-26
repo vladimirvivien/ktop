@@ -6,3 +6,6 @@ ktop
 .build
 .DS_Store
 dist
+
+.claude/*
+CLAUDE.md
