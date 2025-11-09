@@ -127,6 +127,122 @@ For instance, the following will show cluster information for workload resources
 ktop --namespace my-app --context web-cluster
 ```
 
+## Metrics Source Selection
+
+ktop supports two metrics sources for gathering cluster resource metrics:
+
+1. **Metrics Server** (default) - Standard Kubernetes metrics from metrics-server
+2. **Prometheus** - Enhanced metrics scraped directly from Kubernetes components
+
+### Using Metrics Server (Default)
+
+By default, ktop uses the Kubernetes Metrics Server for resource metrics:
+
+```bash
+ktop
+# or explicitly:
+ktop --metrics-source=metrics-server
+```
+
+**Behavior:**
+- If Metrics Server is available → displays real-time CPU and memory metrics
+- If Metrics Server is unavailable → automatically falls back to resource requests/limits
+- Works in any Kubernetes cluster, even without Metrics Server installed
+- No additional permissions required
+
+### Using Prometheus Metrics
+
+For enhanced metrics including network I/O, load averages, and container counts, use Prometheus mode:
+
+```bash
+# Basic Prometheus mode (uses default settings)
+ktop --metrics-source=prometheus
+
+# Custom scraping configuration
+ktop --metrics-source=prometheus \
+     --prometheus-scrape-interval=30s \
+     --prometheus-retention=2h \
+     --prometheus-components=kubelet,cadvisor,apiserver
+```
+
+**Available Prometheus Flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--prometheus-scrape-interval` | `15s` | How often to scrape metrics (minimum: 5s) |
+| `--prometheus-retention` | `1h` | How long to keep metrics in memory (minimum: 5m) |
+| `--prometheus-max-samples` | `10000` | Maximum samples per time series |
+| `--prometheus-components` | `kubelet,cadvisor` | Components to scrape metrics from |
+
+**Available Components:**
+- `kubelet` - Node metrics (CPU, memory, network, load averages)
+- `cadvisor` - Container metrics (per-container resource usage)
+- `apiserver` - API server metrics (request latency, counts)
+- `etcd` - etcd metrics (database size, latency)
+- `scheduler` - Scheduler metrics (queue depth, latency)
+- `controller-manager` - Controller metrics (reconciliation)
+- `kube-proxy` - Network proxy metrics
+
+**Requirements for Prometheus Mode:**
+- RBAC permissions to access component `/metrics` endpoints
+- Network access to Kubernetes component endpoints
+- May not work in managed Kubernetes (GKE, EKS, AKS) where component endpoints are restricted
+
+**Note:** Prometheus mode is currently in development. The metrics source is initialized and collects data, but UI integration is not yet complete. The application will show a warning and fall back to metrics-server for display.
+
+### Usage Examples
+
+**Example 1: Default behavior (backward compatible)**
+```bash
+ktop
+# Uses metrics-server, falls back to requests/limits if unavailable
+```
+
+**Example 2: Prometheus with extended retention**
+```bash
+ktop --metrics-source=prometheus --prometheus-retention=6h
+# Keeps metrics for 6 hours for trend analysis
+```
+
+**Example 3: Prometheus with minimal memory footprint**
+```bash
+ktop --metrics-source=prometheus \
+     --prometheus-components=kubelet \
+     --prometheus-retention=30m \
+     --prometheus-max-samples=5000
+# Only scrapes kubelet, shorter retention, fewer samples
+```
+
+**Example 4: Full control plane monitoring**
+```bash
+ktop --metrics-source=prometheus \
+     --prometheus-components=kubelet,cadvisor,apiserver,etcd,scheduler,controller-manager
+# Monitors all control plane components
+```
+
+### Troubleshooting Metrics Sources
+
+**Error: "invalid metrics-source: xyz"**
+- Cause: Invalid source type specified
+- Solution: Use either `metrics-server` or `prometheus`
+
+**Error: "prometheus-scrape-interval must be >= 5s"**
+- Cause: Scrape interval too short
+- Solution: Use at least 5 seconds for scrape interval
+
+**Error: "unknown component: xyz"**
+- Cause: Invalid component name in `--prometheus-components`
+- Solution: Use valid component names (see list above)
+
+**Error: "failed to start prometheus collection"**
+- Cause: Insufficient RBAC permissions or network access issues
+- Solution: Ensure you have permissions to access component metrics endpoints
+- Alternative: Use `--metrics-source=metrics-server` (default)
+
+**Prometheus mode shows warning about UI integration**
+- This is expected - Prometheus metrics collection is working but UI integration is in development
+- The application will use metrics-server for display while Prometheus features are being completed
+
 ### Column Filtering
 
 You can customize which columns are displayed in the nodes and pods tables. This is useful when you want to focus on specific metrics or when working with limited screen space.

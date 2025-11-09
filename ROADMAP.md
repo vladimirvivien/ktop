@@ -17,11 +17,9 @@ ktop is a terminal-based monitoring tool for Kubernetes clusters, following the 
   - [x] Controller for managing collection lifecycle
   - [x] Support for kubelet, cAdvisor, API server, etcd, scheduler, controller-manager, kube-proxy
 - [x] Metrics source interface abstraction (`metrics/source.go`)
+- [x] MetricsServer source implementation (`metrics/k8s/metrics_server_source.go`)
 - [x] Prometheus metrics source implementation (`metrics/prom/prom_source.go`)
-- [x] Hybrid metrics controller with fallback capability (`k8s/hybrid_metrics_controller.go`)
-- [x] Configuration system (`config/metrics_config.go`)
-  - [x] YAML-based configuration
-  - [x] Support for source selection, Prometheus settings, display options
+- [x] Comprehensive test coverage (>80%) for adapter layer
 
 ---
 
@@ -30,22 +28,27 @@ ktop is a terminal-based monitoring tool for Kubernetes clusters, following the 
 **Goal:** Add Prometheus metrics collection as an alternative to metrics-server
 
 > See [docs/prom.md](docs/prom.md) for detailed technical design and implementation specifications.
+> See [.claude/prom-impl-plan.md](.claude/prom-impl-plan.md) for week-by-week implementation details.
 
-### Adapter Layer
-- [ ] Create MetricsSource interface (`metrics/source.go`)
-- [ ] Implement PromMetricsSource (`metrics/prom/prom_source.go`)
-- [ ] Implement MetricsServerSource (`metrics/k8s/metrics_server_source.go`)
-- [ ] Create MetricsController with simple source selection
+**Status:** ~30% complete (Week 1 done, Week 2-3 in progress)
 
-### CLI Integration
+### Adapter Layer (75% complete)
+- [x] Create MetricsSource interface (`metrics/source.go`)
+- [x] Implement PromMetricsSource (`metrics/prom/prom_source.go`)
+- [x] Implement MetricsServerSource (`metrics/k8s/metrics_server_source.go`)
+- [ ] Integrate source selection into application startup
+
+### CLI Integration (0% complete)
 - [ ] Add command-line flags for metrics source selection
   - [ ] `--metrics-source` (metrics-server | prometheus)
   - [ ] `--prometheus-scrape-interval`
   - [ ] `--prometheus-retention`
+  - [ ] `--prometheus-max-samples`
   - [ ] `--prometheus-components`
-- [ ] Configuration file support
+- [ ] Create configuration system (`config/config.go`)
+- [ ] Configuration file support (YAML) - deferred to later phase
 
-### Enhanced Metrics Display
+### Enhanced Metrics Display (0% complete)
 - [ ] Update node view with Prometheus metrics
   - [ ] Network I/O (Rx/Tx bytes)
   - [ ] Load averages (1m, 5m, 15m)
@@ -58,8 +61,9 @@ ktop is a terminal-based monitoring tool for Kubernetes clusters, following the 
 - [ ] Add optional enhanced columns (enabled via `--enhanced-columns`)
 - [ ] Show active metrics source indicator
 
-### Testing & Documentation
-- [ ] Unit tests for adapter layer
+### Testing & Documentation (25% complete)
+- [x] Unit tests for adapter layer (MetricsServerSource, PromMetricsSource)
+- [x] CI/CD pipeline with automated testing
 - [ ] Integration tests with real clusters
 - [ ] Update README with Prometheus features
 - [ ] Document available metrics and configuration options
@@ -204,5 +208,35 @@ To suggest changes, please open a GitHub issue or pull request.
 
 ---
 
-**Last Updated:** October 2025
-**Status:** Active Development
+## Implementation Notes
+
+### Phase 1 Approach
+
+**Simplified Two-Source Model:**
+- Users explicitly select **one** metrics source at startup via `--metrics-source` flag
+- Default: `metrics-server` (backward compatible, no changes to existing behavior)
+- Opt-in: `prometheus` (enhanced metrics from Kubernetes components)
+- **No hybrid mode** - simple explicit choice, easier to debug
+- **No auto-fallback** - if selected source fails, show clear error message
+
+**Week-by-Week Progress:**
+- ✅ Week 1 (Complete): Adapter layer foundation
+  - MetricsSource interface
+  - MetricsServerSource implementation
+  - PromMetricsSource implementation
+  - Comprehensive tests (>80% coverage)
+- 🔄 Week 2 (In Progress): Configuration and CLI integration
+  - Configuration system
+  - CLI flags
+  - Source initialization
+  - Documentation updates
+- ⏳ Week 3 (Planned): Enhanced UI views
+  - Enhanced node/pod models
+  - Optional enhanced columns
+  - Source health indicators
+  - Integration testing
+
+---
+
+**Last Updated:** November 9, 2025
+**Status:** Active Development - Phase 1 in progress (~30% complete)
