@@ -9,6 +9,7 @@ import (
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/prom"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 )
 
@@ -225,12 +226,10 @@ func (p *PromMetricsSource) GetPodMetrics(ctx context.Context, namespace, podNam
 }
 
 // GetMetricsForPod retrieves metrics for a specific pod object
-func (p *PromMetricsSource) GetMetricsForPod(ctx context.Context, pod interface{}) (*metrics.PodMetrics, error) {
+func (p *PromMetricsSource) GetMetricsForPod(ctx context.Context, pod metav1.Object) (*metrics.PodMetrics, error) {
 	// Extract namespace and name from pod object
-	// This is a simplified implementation - in production would use type assertion
-	// For now, delegate to GetPodMetrics with empty values
-	// TODO: Implement proper pod object handling
-	return nil, fmt.Errorf("GetMetricsForPod not yet implemented for Prometheus source")
+	// Delegate to GetPodMetrics
+	return p.GetPodMetrics(ctx, pod.GetNamespace(), pod.GetName())
 }
 
 // GetAllPodMetrics retrieves metrics for all pods

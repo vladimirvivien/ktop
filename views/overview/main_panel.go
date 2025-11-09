@@ -8,12 +8,18 @@ import (
 
 	"github.com/rivo/tview"
 	"github.com/vladimirvivien/ktop/application"
+	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/model"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
 type MainPanel struct {
 	app                 *application.Application
+	metricsSource       metrics.MetricsSource
 	title               string
 	refresh             func()
 	root                *tview.Flex
@@ -34,6 +40,7 @@ func New(app *application.Application, title string) *MainPanel {
 func NewWithColumnOptions(app *application.Application, title string, showAllColumns bool, nodeColumns, podColumns []string) *MainPanel {
 	ctrl := &MainPanel{
 		app:            app,
+		metricsSource:  app.GetMetricsSource(),
 		title:          title,
 		refresh:        app.Refresh,
 		selPanelIndex:  -1,
@@ -119,10 +126,36 @@ func (p *MainPanel) Run(ctx context.Context) error {
 }
 
 func (p *MainPanel) refreshNodeView(ctx context.Context, models []model.NodeModel) error {
-	model.SortNodeModels(models)
+	// The controller passes us models, but we need to rebuild them with fresh metrics
+	// from our MetricsSource. We'll extract the node objects from the models.
+
+	// For now, use a simpler approach: update metrics in the existing models
+	// This requires accessing the original node objects, which the controller has via informers.
+	//
+	// Since we don't have direct access to Get methods, we'll work with what we have:
+	// The models already contain node information, we just need to update their metrics.
+
+	nodeModels := make([]model.NodeModel, 0, len(models))
+	for _, existingModel := range models {
+		// Fetch fresh metrics from our MetricsSource
+		nodeMetrics, err := p.metricsSource.GetNodeMetrics(ctx, existingModel.Name)
+		if err != nil {
+			// Graceful degradation: keep the existing model as-is
+			nodeModels = append(nodeModels, existingModel)
+			continue
+		}
+
+		// Update the model's metrics fields
+		existingModel.UsageCpuQty = nodeMetrics.CPUUsage
+		existingModel.UsageMemQty = nodeMetrics.MemoryUsage
+
+		nodeModels = append(nodeModels, existingModel)
+	}
+
+	model.SortNodeModels(nodeModels)
 
 	p.nodePanel.Clear()
-	p.nodePanel.DrawBody(models)
+	p.nodePanel.DrawBody(nodeModels)
 
 	// required: always schedule screen refresh
 	if p.refresh != nil {
@@ -133,17 +166,69 @@ func (p *MainPanel) refreshNodeView(ctx context.Context, models []model.NodeMode
 }
 
 func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) error {
-	model.SortPodModels(models)
+	// The controller passes us models, but we need to update them with fresh metrics
+	// from our MetricsSource.
+
+	podModels := make([]model.PodModel, 0, len(models))
+	for _, existingModel := range models {
+		// Fetch fresh metrics from our MetricsSource
+		podMetrics, err := p.metricsSource.GetPodMetrics(ctx, existingModel.Namespace, existingModel.Name)
+		if err != nil {
+			// Graceful degradation: keep the existing model as-is
+			podModels = append(podModels, existingModel)
+			continue
+		}
+
+		// Convert metrics and sum up CPU/Memory for all containers
+		v1PodMetrics := convertToV1Beta1PodMetrics(podMetrics)
+
+		// Update the model's usage metrics only if we got actual metrics
+		totalCpu, totalMem := podMetricsTotals(v1PodMetrics)
+
+		// If metrics are available (non-zero), use them
+		// Otherwise keep the existing model which may have requests/limits
+		if totalCpu.Value() > 0 || totalMem.Value() > 0 {
+			existingModel.PodUsageCpuQty = totalCpu
+			existingModel.PodUsageMemQty = totalMem
+		}
+		// else: keep existing model's values (requests/limits from controller)
+
+		podModels = append(podModels, existingModel)
+	}
+
+	model.SortPodModels(podModels)
 
 	// refresh pod list
 	p.podPanel.Clear()
-	p.podPanel.DrawBody(models)
+	p.podPanel.DrawBody(podModels)
 
 	// required: always refresh screen
 	if p.refresh != nil {
 		p.refresh()
 	}
 	return nil
+}
+
+// podMetricsTotals sums up CPU and memory usage across all containers in a pod
+// This helper is copied from model/pod_model.go to avoid import cycles
+func podMetricsTotals(podMetrics *metricsV1beta1.PodMetrics) (totalCpu, totalMem *resource.Quantity) {
+	totalCpu = resource.NewQuantity(0, resource.DecimalSI)
+	totalMem = resource.NewQuantity(0, resource.DecimalSI)
+
+	if podMetrics == nil {
+		return
+	}
+
+	for _, c := range podMetrics.Containers {
+		if cpu := c.Usage.Cpu(); cpu != nil {
+			totalCpu.Add(*cpu)
+		}
+		if mem := c.Usage.Memory(); mem != nil {
+			totalMem.Add(*mem)
+		}
+	}
+
+	return
 }
 
 func (p *MainPanel) refreshWorkloadSummary(ctx context.Context, summary model.ClusterSummary) error {
@@ -161,7 +246,7 @@ func filterColumns(allColumns []string, filterCols []string) []string {
 	if len(filterCols) == 0 {
 		return allColumns
 	}
-	
+
 	result := []string{}
 	for _, col := range allColumns {
 		for _, filterCol := range filterCols {
@@ -171,11 +256,68 @@ func filterColumns(allColumns []string, filterCols []string) []string {
 			}
 		}
 	}
-	
+
 	// If no matches found, return at least the first column (usually NAME)
 	if len(result) == 0 && len(allColumns) > 0 {
 		return []string{allColumns[0]}
 	}
-	
+
 	return result
+}
+
+// convertToV1Beta1NodeMetrics converts metrics.NodeMetrics to v1beta1.NodeMetrics
+// This allows us to use the new MetricsSource interface with existing NodeModel constructors
+func convertToV1Beta1NodeMetrics(nm *metrics.NodeMetrics) *metricsV1beta1.NodeMetrics {
+	if nm == nil {
+		return &metricsV1beta1.NodeMetrics{}
+	}
+
+	usage := v1.ResourceList{}
+	if nm.CPUUsage != nil {
+		usage[v1.ResourceCPU] = *nm.CPUUsage
+	}
+	if nm.MemoryUsage != nil {
+		usage[v1.ResourceMemory] = *nm.MemoryUsage
+	}
+
+	return &metricsV1beta1.NodeMetrics{
+		ObjectMeta: metav1.ObjectMeta{Name: nm.NodeName},
+		Timestamp:  metav1.NewTime(nm.Timestamp),
+		Window:     metav1.Duration{Duration: 0},
+		Usage:      usage,
+	}
+}
+
+// convertToV1Beta1PodMetrics converts metrics.PodMetrics to v1beta1.PodMetrics
+// This allows us to use the new MetricsSource interface with existing PodModel constructors
+func convertToV1Beta1PodMetrics(pm *metrics.PodMetrics) *metricsV1beta1.PodMetrics {
+	if pm == nil {
+		return &metricsV1beta1.PodMetrics{}
+	}
+
+	containers := make([]metricsV1beta1.ContainerMetrics, 0, len(pm.Containers))
+	for _, c := range pm.Containers {
+		usage := v1.ResourceList{}
+		if c.CPUUsage != nil {
+			usage[v1.ResourceCPU] = *c.CPUUsage
+		}
+		if c.MemoryUsage != nil {
+			usage[v1.ResourceMemory] = *c.MemoryUsage
+		}
+
+		containers = append(containers, metricsV1beta1.ContainerMetrics{
+			Name:  c.Name,
+			Usage: usage,
+		})
+	}
+
+	return &metricsV1beta1.PodMetrics{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      pm.PodName,
+			Namespace: pm.Namespace,
+		},
+		Timestamp:  metav1.NewTime(pm.Timestamp),
+		Window:     metav1.Duration{Duration: 0},
+		Containers: containers,
+	}
 }

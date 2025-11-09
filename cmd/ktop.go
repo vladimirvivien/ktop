@@ -12,6 +12,7 @@ import (
 	"github.com/vladimirvivien/ktop/application"
 	"github.com/vladimirvivien/ktop/config"
 	"github.com/vladimirvivien/ktop/k8s"
+	"github.com/vladimirvivien/ktop/metrics"
 	k8sMetrics "github.com/vladimirvivien/ktop/metrics/k8s"
 	promMetrics "github.com/vladimirvivien/ktop/metrics/prom"
 	"github.com/vladimirvivien/ktop/views/overview"
@@ -149,15 +150,15 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	fmt.Printf("Connected to: %s\n", k8sC.RESTConfig().Host)
 
 	// Initialize metrics source based on configuration
+	var metricsSource metrics.MetricsSource
+
 	switch cfg.Source.Type {
 	case "metrics-server":
 		fmt.Println("Using metrics source: Metrics Server")
 		// MetricsServerSource uses the existing k8s.Controller
 		// It already has graceful fallback to requests/limits built-in
 		controller := k8sC.Controller()
-		_ = k8sMetrics.NewMetricsServerSource(controller)
-		// Note: Currently the application uses the controller directly
-		// Future: Pass metricsSource to application for enhanced functionality
+		metricsSource = k8sMetrics.NewMetricsServerSource(controller)
 
 	case "prometheus":
 		fmt.Println("Using metrics source: Prometheus")
@@ -183,9 +184,7 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 		}
 		defer promSource.Stop()
 
-		_ = promSource
-		// Note: Currently not integrated with application
-		// Future: Pass metricsSource to application for enhanced functionality
+		metricsSource = promSource
 
 		fmt.Println("Warning: Prometheus metrics source is not yet fully integrated with the UI")
 		fmt.Println("         Currently using metrics-server fallback for display")
@@ -194,7 +193,7 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 		return fmt.Errorf("unknown metrics source: %s", cfg.Source.Type)
 	}
 
-	app := application.New(k8sC)
+	app := application.New(k8sC, metricsSource)
 	app.WelcomeBanner()
 	
 	// Process column options

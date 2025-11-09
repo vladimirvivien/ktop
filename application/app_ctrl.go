@@ -11,6 +11,7 @@ import (
 	"github.com/vladimirvivien/ktop/buildinfo"
 
 	"github.com/vladimirvivien/ktop/k8s"
+	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
 )
 
@@ -20,35 +21,41 @@ type AppPage struct {
 }
 
 type Application struct {
-	namespace   string
-	k8sClient   *k8s.Client
-	tviewApp    *tview.Application
-	pages       []AppPage
-	modals      []tview.Primitive
-	pageIdx     int
-	tabIdx      int
-	visibleView int
-	panel       *appPanel
-	refreshQ    chan struct{}
-	stopCh      chan struct{}
+	namespace     string
+	k8sClient     *k8s.Client
+	metricsSource metrics.MetricsSource
+	tviewApp      *tview.Application
+	pages         []AppPage
+	modals        []tview.Primitive
+	pageIdx       int
+	tabIdx        int
+	visibleView   int
+	panel         *appPanel
+	refreshQ      chan struct{}
+	stopCh        chan struct{}
 }
 
-func New(k8sC *k8s.Client) *Application {
+func New(k8sC *k8s.Client, metricsSource metrics.MetricsSource) *Application {
 	tapp := tview.NewApplication()
 	app := &Application{
-		k8sClient: k8sC,
-		namespace: k8sC.Namespace(),
-		tviewApp:  tapp,
-		panel:     newPanel(tapp),
-		refreshQ:  make(chan struct{}, 1),
-		pageIdx:   -1,
-		tabIdx:    -1,
+		k8sClient:     k8sC,
+		metricsSource: metricsSource,
+		namespace:     k8sC.Namespace(),
+		tviewApp:      tapp,
+		panel:         newPanel(tapp),
+		refreshQ:      make(chan struct{}, 1),
+		pageIdx:       -1,
+		tabIdx:        -1,
 	}
 	return app
 }
 
 func (app *Application) GetK8sClient() *k8s.Client {
 	return app.k8sClient
+}
+
+func (app *Application) GetMetricsSource() metrics.MetricsSource {
+	return app.metricsSource
 }
 
 func (app *Application) AddPage(panel ui.PanelController) {
