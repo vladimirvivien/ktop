@@ -6,8 +6,47 @@ import (
 	"time"
 
 	"github.com/vladimirvivien/ktop/prom"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 )
+
+// mockPodObject implements metav1.Object for testing
+type mockPodObject struct {
+	namespace string
+	name      string
+}
+
+func (m *mockPodObject) GetNamespace() string              { return m.namespace }
+func (m *mockPodObject) SetNamespace(namespace string)     { m.namespace = namespace }
+func (m *mockPodObject) GetName() string                   { return m.name }
+func (m *mockPodObject) SetName(name string)               { m.name = name }
+func (m *mockPodObject) GetGenerateName() string           { return "" }
+func (m *mockPodObject) SetGenerateName(name string)       {}
+func (m *mockPodObject) GetUID() types.UID                 { return "" }
+func (m *mockPodObject) SetUID(uid types.UID)              {}
+func (m *mockPodObject) GetResourceVersion() string        { return "" }
+func (m *mockPodObject) SetResourceVersion(version string) {}
+func (m *mockPodObject) GetGeneration() int64              { return 0 }
+func (m *mockPodObject) SetGeneration(generation int64)    {}
+func (m *mockPodObject) GetSelfLink() string               { return "" }
+func (m *mockPodObject) SetSelfLink(selfLink string)       {}
+func (m *mockPodObject) GetCreationTimestamp() metav1.Time { return metav1.Time{} }
+func (m *mockPodObject) SetCreationTimestamp(timestamp metav1.Time) {}
+func (m *mockPodObject) GetDeletionTimestamp() *metav1.Time          { return nil }
+func (m *mockPodObject) SetDeletionTimestamp(timestamp *metav1.Time) {}
+func (m *mockPodObject) GetDeletionGracePeriodSeconds() *int64       { return nil }
+func (m *mockPodObject) SetDeletionGracePeriodSeconds(*int64)        {}
+func (m *mockPodObject) GetLabels() map[string]string                { return nil }
+func (m *mockPodObject) SetLabels(labels map[string]string)          {}
+func (m *mockPodObject) GetAnnotations() map[string]string           { return nil }
+func (m *mockPodObject) SetAnnotations(annotations map[string]string) {}
+func (m *mockPodObject) GetFinalizers() []string                      { return nil }
+func (m *mockPodObject) SetFinalizers(finalizers []string)            {}
+func (m *mockPodObject) GetOwnerReferences() []metav1.OwnerReference  { return nil }
+func (m *mockPodObject) SetOwnerReferences([]metav1.OwnerReference)   {}
+func (m *mockPodObject) GetManagedFields() []metav1.ManagedFieldsEntry { return nil }
+func (m *mockPodObject) SetManagedFields(managedFields []metav1.ManagedFieldsEntry) {}
 
 // MockMetricsStore implements prom.MetricsStore for testing
 type MockMetricsStore struct {
@@ -568,14 +607,27 @@ func TestGetMetricsForPod_NotImplemented(t *testing.T) {
 	source.store = NewMockMetricsStore()
 	source.healthy = true
 
-	_, err := source.GetMetricsForPod(context.Background(), nil)
-
-	if err == nil {
-		t.Error("Expected error for not implemented method")
+	// Create a mock pod object
+	mockPod := &mockPodObject{
+		namespace: "test-namespace",
+		name:      "test-pod",
 	}
 
-	expectedErr := "GetMetricsForPod not yet implemented for Prometheus source"
-	if err.Error() != expectedErr {
-		t.Errorf("Expected error '%s', got '%v'", expectedErr, err)
+	metrics, err := source.GetMetricsForPod(context.Background(), mockPod)
+
+	if err != nil {
+		t.Errorf("Expected no error, got %v", err)
+	}
+
+	if metrics == nil {
+		t.Error("Expected metrics to be returned")
+	}
+
+	if metrics.Namespace != "test-namespace" {
+		t.Errorf("Expected namespace 'test-namespace', got '%s'", metrics.Namespace)
+	}
+
+	if metrics.PodName != "test-pod" {
+		t.Errorf("Expected pod name 'test-pod', got '%s'", metrics.PodName)
 	}
 }

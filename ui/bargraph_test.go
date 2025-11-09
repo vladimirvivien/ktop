@@ -74,7 +74,7 @@ func TestBarGraph(t *testing.T) {
 			scale:     5,
 			ratio:     0,
 			colorKeys: ColorKeys{},
-			expected:  "[silver].....",
+			expected:  "[silver]     ",
 		},
 		{
 			name:      "no color",

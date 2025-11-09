@@ -44,10 +44,36 @@ func (m *MetricsServerSource) GetNodeMetrics(ctx context.Context, nodeName strin
 
 // GetPodMetrics retrieves metrics for a specific pod by namespace and name.
 func (m *MetricsServerSource) GetPodMetrics(ctx context.Context, namespace, podName string) (*metrics.PodMetrics, error) {
-	// Note: The existing k8s.Controller doesn't have a method to get pod metrics by name directly.
-	// We need to get all pod metrics and filter, or use GetMetricsForPod with a pod object.
-	// For now, return an error indicating this method requires a pod object.
-	return nil, fmt.Errorf("GetPodMetrics by name not supported by metrics server source, use GetMetricsForPod instead")
+	// Try to get metrics from Metrics Server
+	// Since controller doesn't have a direct method, we get all and filter
+	allPodMetrics, err := m.controller.GetAllPodMetrics(ctx)
+	if err != nil {
+		// Metrics Server unavailable - return empty metrics
+		// The caller will handle graceful degradation
+		m.recordError(err)
+		return &metrics.PodMetrics{
+			PodName:    podName,
+			Namespace:  namespace,
+			Timestamp:  time.Now(),
+			Containers: []metrics.ContainerMetrics{},
+		}, nil
+	}
+
+	// Find the specific pod
+	for _, pm := range allPodMetrics {
+		if pm.Namespace == namespace && pm.Name == podName {
+			m.recordSuccess()
+			return convertPodMetrics(pm), nil
+		}
+	}
+
+	// Pod not found in metrics - return empty metrics
+	return &metrics.PodMetrics{
+		PodName:    podName,
+		Namespace:  namespace,
+		Timestamp:  time.Now(),
+		Containers: []metrics.ContainerMetrics{},
+	}, nil
 }
 
 // GetMetricsForPod retrieves metrics for a specific pod object.

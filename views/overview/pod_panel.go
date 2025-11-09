@@ -89,8 +89,6 @@ func (p *podPanel) DrawBody(data interface{}) {
 		panic(fmt.Sprintf("PodPanel.DrawBody got unexpected type %T", data))
 	}
 
-	client := p.app.GetK8sClient()
-	metricsDisabled := client.AssertMetricsAvailable() != nil
 	colorKeys := ui.ColorKeys{0: "green", 50: "yellow", 90: "red"}
 	var cpuRatio, memRatio ui.Ratio
 	var cpuGraph, memGraph string
@@ -174,7 +172,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%d", pod.Volumes),
+						Text:  fmt.Sprintf("%d/%d", pod.Volumes, pod.VolMounts),
 						Color: tcell.ColorYellow,
 						Align: tview.AlignLeft,
 					},
@@ -201,63 +199,88 @@ func (p *podPanel) DrawBody(data interface{}) {
 				)
 				
 			case "CPU":
-				if metricsDisabled {
-					// no CPU metrics
-					p.list.SetCell(
-						rowIdx, colIdx,
-						&tview.TableCell{
-							Text:  "unavailable",
-							Color: tcell.ColorYellow,
-							Align: tview.AlignLeft,
-						},
-					)
-				} else {
-					cpuRatio = ui.GetRatio(float64(pod.PodUsageCpuQty.MilliValue()), float64(pod.PodRequestedCpuQty.MilliValue()))
+				// Check if we have actual usage metrics (non-zero values)
+				hasUsageMetrics := pod.PodUsageCpuQty != nil && pod.PodUsageCpuQty.MilliValue() > 0
+				hasRequestMetrics := pod.PodRequestedCpuQty != nil && pod.PodRequestedCpuQty.MilliValue() > 0
+				hasAllocatable := pod.NodeAllocatableCpuQty != nil && pod.NodeAllocatableCpuQty.MilliValue() > 0
+
+				if hasUsageMetrics && hasAllocatable {
+					// Display usage with graph: [||        ] 150m 3.8%
+					cpuRatio = ui.GetRatio(float64(pod.PodUsageCpuQty.MilliValue()), float64(pod.NodeAllocatableCpuQty.MilliValue()))
 					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dm/%dm (%1.0f%%)",
-						cpuGraph, pod.PodUsageCpuQty.MilliValue(), pod.PodRequestedCpuQty.MilliValue(), cpuRatio*100,
+						"[white][%s[white]] %dm %.1f%%",
+						cpuGraph, pod.PodUsageCpuQty.MilliValue(), cpuRatio*100,
 					)
-					p.list.SetCell(
-						rowIdx, colIdx,
-						&tview.TableCell{
-							Text:  cpuMetrics,
-							Color: tcell.ColorYellow,
-							Align: tview.AlignLeft,
-						},
-					)
-				}
-				
-			case "MEMORY":
-				if metricsDisabled {
-					// no Memory metrics
-					p.list.SetCell(
-						rowIdx, colIdx,
-						&tview.TableCell{
-							Text:  "unavailable",
-							Color: tcell.ColorYellow,
-							Align: tview.AlignLeft,
-						},
+				} else if hasRequestMetrics && hasAllocatable {
+					// Fallback: show requested with graph: [|         ] 100m 2.5%
+					cpuRatio = ui.GetRatio(float64(pod.PodRequestedCpuQty.MilliValue()), float64(pod.NodeAllocatableCpuQty.MilliValue()))
+					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
+					cpuMetrics = fmt.Sprintf(
+						"[white][%s[white]] %dm %.1f%%",
+						cpuGraph, pod.PodRequestedCpuQty.MilliValue(), cpuRatio*100,
 					)
 				} else {
-					memRatio = ui.GetRatio(float64(pod.PodUsageMemQty.Value()), float64(pod.PodRequestedMemQty.Value()))
-					memGraph = ui.BarGraph(10, memRatio, colorKeys)
-					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dMi/%dMi (%1.0f%%)",
-						memGraph, 
-						pod.PodUsageMemQty.ScaledValue(resource.Mega), 
-						pod.PodRequestedMemQty.ScaledValue(resource.Mega), 
-						memRatio*100,
-					)
-					p.list.SetCell(
-						rowIdx, colIdx,
-						&tview.TableCell{
-							Text:  memMetrics,
-							Color: tcell.ColorYellow,
-							Align: tview.AlignLeft,
-						},
+					// Zero or unavailable: show empty graph with 0m 0.0%
+					cpuGraph = ui.BarGraph(10, 0, colorKeys)
+					cpuMetrics = fmt.Sprintf(
+						"[white][%s[white]] 0m 0.0%%",
+						cpuGraph,
 					)
 				}
+
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:  cpuMetrics,
+						Color: tcell.ColorYellow,
+						Align: tview.AlignLeft,
+					},
+				)
+				
+			case "MEMORY":
+				// Check if we have actual usage metrics (non-zero values)
+				hasUsageMetrics := pod.PodUsageMemQty != nil && pod.PodUsageMemQty.Value() > 0
+				hasRequestMetrics := pod.PodRequestedMemQty != nil && pod.PodRequestedMemQty.Value() > 0
+				hasAllocatable := pod.NodeAllocatableMemQty != nil && pod.NodeAllocatableMemQty.Value() > 0
+
+				if hasUsageMetrics && hasAllocatable {
+					// Display usage with graph: [||        ] 1Gi 0.5%
+					memRatio = ui.GetRatio(float64(pod.PodUsageMemQty.Value()), float64(pod.NodeAllocatableMemQty.Value()))
+					memGraph = ui.BarGraph(10, memRatio, colorKeys)
+					memMetrics = fmt.Sprintf(
+						"[white][%s[white]] %dGi %.1f%%",
+						memGraph,
+						pod.PodUsageMemQty.ScaledValue(resource.Giga),
+						memRatio*100,
+					)
+				} else if hasRequestMetrics && hasAllocatable {
+					// Fallback: show requested with graph: [|         ] 1Gi 0.5%
+					memRatio = ui.GetRatio(float64(pod.PodRequestedMemQty.Value()), float64(pod.NodeAllocatableMemQty.Value()))
+					memGraph = ui.BarGraph(10, memRatio, colorKeys)
+					memMetrics = fmt.Sprintf(
+						"[white][%s[white]] %dGi %.1f%%",
+						memGraph,
+						pod.PodRequestedMemQty.ScaledValue(resource.Giga),
+						memRatio*100,
+					)
+				} else {
+					// Zero or unavailable: show empty graph with 0Gi 0.0%
+					memGraph = ui.BarGraph(10, 0, colorKeys)
+					memMetrics = fmt.Sprintf(
+						"[white][%s[white]] 0Gi 0.0%%",
+						memGraph,
+					)
+				}
+
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:  memMetrics,
+						Color: tcell.ColorYellow,
+						Align: tview.AlignLeft,
+					},
+				)
 			}
 		}
 	}
