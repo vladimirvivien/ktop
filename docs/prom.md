@@ -114,9 +114,16 @@ type MetricsController struct {
 
 Supports two modes:
 - **metrics-server**: Default mode, uses Kubernetes Metrics Server (backward compatible)
+  - **Graceful fallback**: If Metrics Server is unavailable, automatically falls back to resource requests/limits from pod specs
+  - No errors shown to user - works with best available data
+  - Maintains existing ktop behavior where it works even without Metrics Server installed
 - **prometheus**: Uses Prometheus scraping from Kubernetes components
+  - Explicit opt-in for enhanced metrics
+  - Requires RBAC permissions to access component endpoints
+  - If unavailable, shows clear error (no fallback)
+  - User makes explicit choice, gets explicit feedback
 
-No hybrid mode or automatic fallback - users explicitly choose one source at startup.
+**No hybrid mode** - users explicitly choose one source at startup.
 
 #### Enhanced Data Models
 
@@ -223,7 +230,11 @@ ktop
 ktop --metrics-source=metrics-server
 ```
 
-Uses Kubernetes Metrics Server, identical to current behavior.
+Uses Kubernetes Metrics Server with graceful fallback:
+- **If Metrics Server is available:** Shows real-time CPU and memory metrics
+- **If Metrics Server is unavailable:** Automatically falls back to resource requests/limits from pod specifications
+- **No errors, no user intervention** - just works with best available data
+- Maintains existing ktop behavior where it functions even in clusters without Metrics Server installed
 
 ### Prometheus Mode
 
@@ -232,6 +243,13 @@ ktop --metrics-source=prometheus --enhanced-columns --show-trends
 ```
 
 Uses Prometheus scraping with enhanced display and trend analysis.
+
+**Important notes:**
+- Requires RBAC permissions to access Kubernetes component metrics endpoints
+- Requires network access to component endpoints (kubelet, cAdvisor, etc.)
+- May not work in managed Kubernetes environments (GKE, EKS, AKS) where component endpoints are restricted
+- If scraping fails, shows clear error message (no automatic fallback to metrics-server)
+- Opt-in choice for users who need rich metrics and have the necessary permissions
 
 ### Prometheus with Custom Configuration
 
@@ -310,16 +328,24 @@ Extended retention and additional component scraping.
 ## Benefits
 
 1. **Backward compatible**: Existing functionality unchanged, enhanced features opt-in.
+   - Default behavior (metrics-server) maintains graceful fallback to requests/limits
+   - Works in clusters without Metrics Server, just like current ktop
 
-2. **More metrics**: 100+ additional metrics from Kubernetes components.
+2. **More metrics**: 100+ additional metrics from Kubernetes components (when using prometheus).
 
 3. **Simple and clear**: Explicit source selection, no complex fallback logic.
+   - metrics-server: graceful fallback built-in
+   - prometheus: explicit choice, explicit errors
 
 4. **Efficient**: In-memory storage with retention limits, minimal overhead.
 
 5. **Flexible**: Configurable scraping, intervals, and display options.
 
 6. **Better visibility**: Health indicators and trend analysis.
+
+7. **Universal compatibility**: Works in any Kubernetes cluster
+   - Default mode works even without Metrics Server
+   - Prometheus mode for clusters where component endpoints are accessible
 
 ## Risks and Mitigations
 
