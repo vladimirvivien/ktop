@@ -9,3 +9,8 @@ dist
 
 .claude/*
 CLAUDE.md
+
+# KWOK generated manifests (regenerated on each setup)
+hack/kwok/.nodes.yaml
+hack/kwok/.pods.yaml
+hack/kwok/.metrics-usage.yaml
