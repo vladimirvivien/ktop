@@ -11,28 +11,28 @@ import (
 func (cc *CollectorController) Start(ctx context.Context) error {
 	cc.mutex.Lock()
 	defer cc.mutex.Unlock()
-	
+
 	if cc.running {
 		return fmt.Errorf("controller is already running")
 	}
-	
+
 	// Initialize components
 	if err := cc.initialize(); err != nil {
 		return fmt.Errorf("initializing controller: %w", err)
 	}
-	
+
 	// Start background processes
 	cc.running = true
-	
+
 	// Start the metrics collector
 	go cc.runCollector(ctx)
-	
+
 	// Start periodic cleanup
 	go cc.runPeriodicCleanup(ctx)
-	
+
 	// Start component discovery
 	go cc.runComponentDiscovery(ctx)
-	
+
 	return nil
 }
 
@@ -40,13 +40,13 @@ func (cc *CollectorController) Start(ctx context.Context) error {
 func (cc *CollectorController) Stop() error {
 	cc.mutex.Lock()
 	defer cc.mutex.Unlock()
-	
+
 	if !cc.running {
 		return fmt.Errorf("controller is not running")
 	}
-	
+
 	cc.running = false
-	
+
 	// Cleanup would be handled by context cancellation
 	return nil
 }
@@ -55,14 +55,14 @@ func (cc *CollectorController) Stop() error {
 func (cc *CollectorController) initialize() error {
 	// Create metrics store
 	cc.store = NewInMemoryStore(cc.config)
-	
+
 	// Create metrics collector
 	scraper, err := NewKubernetesScraper(cc.kubeConfig, cc.config)
 	if err != nil {
 		return fmt.Errorf("creating scraper: %w", err)
 	}
 	cc.collector = scraper
-	
+
 	return nil
 }
 
@@ -72,10 +72,10 @@ func (cc *CollectorController) runCollector(ctx context.Context) {
 		cc.setLastError(err)
 		return
 	}
-	
+
 	ticker := time.NewTicker(cc.config.Interval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -89,19 +89,19 @@ func (cc *CollectorController) runCollector(ctx context.Context) {
 // collectFromAllComponents collects metrics from all enabled components
 func (cc *CollectorController) collectFromAllComponents(ctx context.Context) {
 	var wg sync.WaitGroup
-	
+
 	for _, component := range cc.config.Components {
 		if !cc.isComponentAvailable(component) {
 			continue
 		}
-		
+
 		wg.Add(1)
 		go func(comp ComponentType) {
 			defer wg.Done()
 			cc.collectFromComponent(ctx, comp)
 		}(component)
 	}
-	
+
 	wg.Wait()
 }
 
@@ -115,7 +115,7 @@ func (cc *CollectorController) collectFromComponent(ctx context.Context, compone
 		}
 		return
 	}
-	
+
 	// Store the metrics
 	if err := cc.store.AddMetrics(metrics); err != nil {
 		cc.setLastError(err)
@@ -124,7 +124,7 @@ func (cc *CollectorController) collectFromComponent(ctx context.Context, compone
 		}
 		return
 	}
-	
+
 	// Notify callback if set
 	if cc.onMetricsCollected != nil {
 		cc.onMetricsCollected(component, metrics)
@@ -138,10 +138,10 @@ func (cc *CollectorController) runPeriodicCleanup(ctx context.Context) {
 	if cleanupInterval < time.Minute {
 		cleanupInterval = time.Minute
 	}
-	
+
 	ticker := time.NewTicker(cleanupInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -158,13 +158,13 @@ func (cc *CollectorController) runPeriodicCleanup(ctx context.Context) {
 func (cc *CollectorController) runComponentDiscovery(ctx context.Context) {
 	// Discovery every 5 minutes
 	discoveryInterval := 5 * time.Minute
-	
+
 	// Run initial discovery
 	cc.discoverAvailableComponents(ctx)
-	
+
 	ticker := time.NewTicker(discoveryInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -182,15 +182,15 @@ func (cc *CollectorController) discoverAvailableComponents(ctx context.Context) 
 		cc.setLastError(err)
 		return
 	}
-	
+
 	cc.mutex.Lock()
 	defer cc.mutex.Unlock()
-	
+
 	// Reset availability
 	for component := range cc.availableComponents {
 		cc.availableComponents[component] = false
 	}
-	
+
 	// Mark discovered components as available
 	for _, component := range components {
 		cc.availableComponents[component] = true
@@ -229,11 +229,11 @@ func (cc *CollectorController) GetConfig() *ScrapeConfig {
 func (cc *CollectorController) UpdateConfig(config *ScrapeConfig) error {
 	cc.mutex.Lock()
 	defer cc.mutex.Unlock()
-	
+
 	if cc.running {
 		return fmt.Errorf("cannot update config while controller is running")
 	}
-	
+
 	cc.config = config
 	return nil
 }
@@ -250,23 +250,23 @@ func (cc *CollectorController) GetStats() map[string]interface{} {
 		}
 	}
 	cc.mutex.RUnlock()
-	
+
 	stats := map[string]interface{}{
-		"running":             running,
+		"running":              running,
 		"available_components": availableComponents,
-		"config":              cc.config,
+		"config":               cc.config,
 	}
-	
+
 	if lastError != nil {
 		stats["last_error"] = lastError.Error()
 	}
-	
+
 	if cc.store != nil {
 		if memStore, ok := cc.store.(*InMemoryStore); ok {
 			stats["store"] = memStore.GetStats()
 		}
 	}
-	
+
 	return stats
 }
 
@@ -275,7 +275,7 @@ func (cc *CollectorController) ForceCollection(ctx context.Context) error {
 	if !cc.IsRunning() {
 		return fmt.Errorf("controller is not running")
 	}
-	
+
 	cc.collectFromAllComponents(ctx)
 	return nil
 }
@@ -285,11 +285,11 @@ func (cc *CollectorController) GetComponentMetrics(component ComponentType) map[
 	if cc.store == nil {
 		return nil
 	}
-	
+
 	if memStore, ok := cc.store.(*InMemoryStore); ok {
 		return memStore.QueryByComponent(component)
 	}
-	
+
 	return nil
 }
 
@@ -298,7 +298,7 @@ func (cc *CollectorController) QueryMetric(metricName string, labelMatchers map[
 	if cc.store == nil {
 		return 0, fmt.Errorf("store not initialized")
 	}
-	
+
 	return cc.store.QueryLatest(metricName, labelMatchers)
 }
 
@@ -307,9 +307,9 @@ func (cc *CollectorController) QueryMetricRange(metricName string, labelMatchers
 	if cc.store == nil {
 		return nil, fmt.Errorf("store not initialized")
 	}
-	
+
 	end := time.Now()
 	start := end.Add(-duration)
-	
+
 	return cc.store.QueryRange(metricName, labelMatchers, start, end)
 }

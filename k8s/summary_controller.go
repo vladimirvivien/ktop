@@ -8,7 +8,6 @@ import (
 	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
 func (c *Controller) setupSummaryHandler(ctx context.Context, handlerFunc RefreshSummaryFunc) {
@@ -66,10 +65,16 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 
 		metrics, err := c.GetNodeMetrics(ctx, node.Name)
 		if err != nil {
-			metrics = new(metricsV1beta1.NodeMetrics)
+			// Metrics not available - skip adding to usage totals (graceful degradation)
+			continue
 		}
-		summary.UsageNodeMemTotal.Add(*metrics.Usage.Memory())
-		summary.UsageNodeCpuTotal.Add(*metrics.Usage.Cpu())
+		// Only add if metrics.Usage is not nil
+		if metrics.Usage.Memory() != nil {
+			summary.UsageNodeMemTotal.Add(*metrics.Usage.Memory())
+		}
+		if metrics.Usage.Cpu() != nil {
+			summary.UsageNodeCpuTotal.Add(*metrics.Usage.Cpu())
+		}
 	}
 
 	// extract pods summary

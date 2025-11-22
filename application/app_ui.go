@@ -47,7 +47,7 @@ func (p *appPanel) Layout(data interface{}) {
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(p.header, 3, 1, false). // header
-		AddItem(p.pages, 0, 1, true)   // body
+		AddItem(p.pages, 0, 1, true)    // body
 		// TODO show footer when multi-page is implemented
 		//AddItem(p.footer, 3, 1, false)  // footer
 	p.root = root

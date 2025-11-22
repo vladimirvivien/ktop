@@ -60,14 +60,19 @@ func (p *clusterSummaryPanel) DrawHeader(data interface{}) {}
 
 func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 	colorKeys := ui.ColorKeys{0: "green", 40: "yellow", 80: "red"}
-	client := p.app.GetK8sClient()
 	graphSize := 40
 	switch summary := data.(type) {
 	case model.ClusterSummary:
 		var cpuRatio, memRatio ui.Ratio
 		var cpuGraph, memGraph string
 		var cpuMetrics, memMetrics string
-		if err := client.AssertMetricsAvailable(); err != nil { // metrics not available
+
+		// Check if usage metrics are actually available (non-zero)
+		// If usage is 0, fall back to showing requested resources
+		hasUsageMetrics := summary.UsageNodeCpuTotal.MilliValue() > 0 || summary.UsageNodeMemTotal.MilliValue() > 0
+
+		if !hasUsageMetrics {
+			// Show requested resources (fallback mode)
 			cpuRatio = ui.GetRatio(float64(summary.RequestedPodCpuTotal.MilliValue()), float64(summary.AllocatableNodeCpuTotal.MilliValue()))
 			cpuGraph = ui.BarGraph(graphSize, cpuRatio, colorKeys)
 			cpuMetrics = fmt.Sprintf(
@@ -78,10 +83,11 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 			memRatio = ui.GetRatio(float64(summary.RequestedPodMemTotal.MilliValue()), float64(summary.AllocatableNodeMemTotal.MilliValue()))
 			memGraph = ui.BarGraph(graphSize, memRatio, colorKeys)
 			memMetrics = fmt.Sprintf(
-				"Memory: [white][%s[white]] %dGi/%dGi (%02.1f%% requested)",
-				memGraph, summary.RequestedPodMemTotal.ScaledValue(resource.Giga), summary.AllocatableNodeMemTotal.ScaledValue(resource.Giga), memRatio*100,
+				"Memory: [white][%s[white]] %s/%s (%02.1f%% requested)",
+				memGraph, ui.FormatMemory(summary.RequestedPodMemTotal), ui.FormatMemory(summary.AllocatableNodeMemTotal), memRatio*100,
 			)
 		} else {
+			// Show actual usage (metrics available)
 			cpuRatio = ui.GetRatio(float64(summary.UsageNodeCpuTotal.MilliValue()), float64(summary.AllocatableNodeCpuTotal.MilliValue()))
 			cpuGraph = ui.BarGraph(graphSize, cpuRatio, colorKeys)
 			cpuMetrics = fmt.Sprintf(
@@ -92,8 +98,8 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 			memRatio = ui.GetRatio(float64(summary.UsageNodeMemTotal.MilliValue()), float64(summary.AllocatableNodeMemTotal.MilliValue()))
 			memGraph = ui.BarGraph(graphSize, memRatio, colorKeys)
 			memMetrics = fmt.Sprintf(
-				"Memory: [white][%s[white]] %dGi/%dGi (%02.1f%% used)",
-				memGraph, summary.UsageNodeMemTotal.ScaledValue(resource.Giga), summary.AllocatableNodeMemTotal.ScaledValue(resource.Giga), memRatio*100,
+				"Memory: [white][%s[white]] %s/%s (%02.1f%% used)",
+				memGraph, ui.FormatMemory(summary.UsageNodeMemTotal), ui.FormatMemory(summary.AllocatableNodeMemTotal), memRatio*100,
 			)
 		}
 

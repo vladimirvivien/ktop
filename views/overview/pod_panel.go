@@ -8,7 +8,6 @@ import (
 	"github.com/vladimirvivien/ktop/application"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/model"
-	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 type podPanel struct {
@@ -65,7 +64,7 @@ func (p *podPanel) DrawHeader(data interface{}) {
 	// Initialize the column map
 	p.colMap = make(map[string]int)
 	p.listCols = cols
-	
+
 	// Set column headers and build column map
 	for i, col := range p.listCols {
 		p.list.SetCell(0, i,
@@ -76,7 +75,7 @@ func (p *podPanel) DrawHeader(data interface{}) {
 				SetExpansion(100).
 				SetSelectable(false),
 		)
-		
+
 		// Map column name to position
 		p.colMap[col] = i
 	}
@@ -99,14 +98,14 @@ func (p *podPanel) DrawBody(data interface{}) {
 
 	for rowIdx, pod := range pods {
 		rowIdx++ // offset for header row
-		
+
 		// Render each column that is included in the filtered view
 		for _, colName := range p.listCols {
 			colIdx, exists := p.colMap[colName]
 			if !exists {
 				continue
 			}
-			
+
 			switch colName {
 			case "NAMESPACE":
 				p.list.SetCell(
@@ -117,7 +116,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "POD":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -127,7 +126,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "READY":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -137,7 +136,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "STATUS":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -147,7 +146,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "RESTARTS":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -157,7 +156,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "AGE":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -167,7 +166,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "VOLS":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -177,7 +176,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "IP":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -187,7 +186,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "NODE":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -197,7 +196,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "CPU":
 				// Check if we have actual usage metrics (non-zero values)
 				hasUsageMetrics := pod.PodUsageCpuQty != nil && pod.PodUsageCpuQty.MilliValue() > 0
@@ -237,7 +236,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "MEMORY":
 				// Check if we have actual usage metrics (non-zero values)
 				hasUsageMetrics := pod.PodUsageMemQty != nil && pod.PodUsageMemQty.Value() > 0
@@ -245,30 +244,30 @@ func (p *podPanel) DrawBody(data interface{}) {
 				hasAllocatable := pod.NodeAllocatableMemQty != nil && pod.NodeAllocatableMemQty.Value() > 0
 
 				if hasUsageMetrics && hasAllocatable {
-					// Display usage with graph: [||        ] 1Gi 0.5%
+					// Display usage with graph: [||        ] 366Mi 0.5%
 					memRatio = ui.GetRatio(float64(pod.PodUsageMemQty.Value()), float64(pod.NodeAllocatableMemQty.Value()))
 					memGraph = ui.BarGraph(10, memRatio, colorKeys)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dGi %.1f%%",
+						"[white][%s[white]] %s %.1f%%",
 						memGraph,
-						pod.PodUsageMemQty.ScaledValue(resource.Giga),
+						ui.FormatMemory(pod.PodUsageMemQty),
 						memRatio*100,
 					)
 				} else if hasRequestMetrics && hasAllocatable {
-					// Fallback: show requested with graph: [|         ] 1Gi 0.5%
+					// Fallback: show requested with graph: [|         ] 512Mi 0.5%
 					memRatio = ui.GetRatio(float64(pod.PodRequestedMemQty.Value()), float64(pod.NodeAllocatableMemQty.Value()))
 					memGraph = ui.BarGraph(10, memRatio, colorKeys)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dGi %.1f%%",
+						"[white][%s[white]] %s %.1f%%",
 						memGraph,
-						pod.PodRequestedMemQty.ScaledValue(resource.Giga),
+						ui.FormatMemory(pod.PodRequestedMemQty),
 						memRatio*100,
 					)
 				} else {
-					// Zero or unavailable: show empty graph with 0Gi 0.0%
+					// Zero or unavailable: show empty graph with 0Mi 0.0%
 					memGraph = ui.BarGraph(10, 0, colorKeys)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] 0Gi 0.0%%",
+						"[white][%s[white]] 0Mi 0.0%%",
 						memGraph,
 					)
 				}

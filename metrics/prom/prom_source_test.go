@@ -17,35 +17,35 @@ type mockPodObject struct {
 	name      string
 }
 
-func (m *mockPodObject) GetNamespace() string              { return m.namespace }
-func (m *mockPodObject) SetNamespace(namespace string)     { m.namespace = namespace }
-func (m *mockPodObject) GetName() string                   { return m.name }
-func (m *mockPodObject) SetName(name string)               { m.name = name }
-func (m *mockPodObject) GetGenerateName() string           { return "" }
-func (m *mockPodObject) SetGenerateName(name string)       {}
-func (m *mockPodObject) GetUID() types.UID                 { return "" }
-func (m *mockPodObject) SetUID(uid types.UID)              {}
-func (m *mockPodObject) GetResourceVersion() string        { return "" }
-func (m *mockPodObject) SetResourceVersion(version string) {}
-func (m *mockPodObject) GetGeneration() int64              { return 0 }
-func (m *mockPodObject) SetGeneration(generation int64)    {}
-func (m *mockPodObject) GetSelfLink() string               { return "" }
-func (m *mockPodObject) SetSelfLink(selfLink string)       {}
-func (m *mockPodObject) GetCreationTimestamp() metav1.Time { return metav1.Time{} }
-func (m *mockPodObject) SetCreationTimestamp(timestamp metav1.Time) {}
-func (m *mockPodObject) GetDeletionTimestamp() *metav1.Time          { return nil }
-func (m *mockPodObject) SetDeletionTimestamp(timestamp *metav1.Time) {}
-func (m *mockPodObject) GetDeletionGracePeriodSeconds() *int64       { return nil }
-func (m *mockPodObject) SetDeletionGracePeriodSeconds(*int64)        {}
-func (m *mockPodObject) GetLabels() map[string]string                { return nil }
-func (m *mockPodObject) SetLabels(labels map[string]string)          {}
-func (m *mockPodObject) GetAnnotations() map[string]string           { return nil }
-func (m *mockPodObject) SetAnnotations(annotations map[string]string) {}
-func (m *mockPodObject) GetFinalizers() []string                      { return nil }
-func (m *mockPodObject) SetFinalizers(finalizers []string)            {}
-func (m *mockPodObject) GetOwnerReferences() []metav1.OwnerReference  { return nil }
-func (m *mockPodObject) SetOwnerReferences([]metav1.OwnerReference)   {}
-func (m *mockPodObject) GetManagedFields() []metav1.ManagedFieldsEntry { return nil }
+func (m *mockPodObject) GetNamespace() string                                       { return m.namespace }
+func (m *mockPodObject) SetNamespace(namespace string)                              { m.namespace = namespace }
+func (m *mockPodObject) GetName() string                                            { return m.name }
+func (m *mockPodObject) SetName(name string)                                        { m.name = name }
+func (m *mockPodObject) GetGenerateName() string                                    { return "" }
+func (m *mockPodObject) SetGenerateName(name string)                                {}
+func (m *mockPodObject) GetUID() types.UID                                          { return "" }
+func (m *mockPodObject) SetUID(uid types.UID)                                       {}
+func (m *mockPodObject) GetResourceVersion() string                                 { return "" }
+func (m *mockPodObject) SetResourceVersion(version string)                          {}
+func (m *mockPodObject) GetGeneration() int64                                       { return 0 }
+func (m *mockPodObject) SetGeneration(generation int64)                             {}
+func (m *mockPodObject) GetSelfLink() string                                        { return "" }
+func (m *mockPodObject) SetSelfLink(selfLink string)                                {}
+func (m *mockPodObject) GetCreationTimestamp() metav1.Time                          { return metav1.Time{} }
+func (m *mockPodObject) SetCreationTimestamp(timestamp metav1.Time)                 {}
+func (m *mockPodObject) GetDeletionTimestamp() *metav1.Time                         { return nil }
+func (m *mockPodObject) SetDeletionTimestamp(timestamp *metav1.Time)                {}
+func (m *mockPodObject) GetDeletionGracePeriodSeconds() *int64                      { return nil }
+func (m *mockPodObject) SetDeletionGracePeriodSeconds(*int64)                       {}
+func (m *mockPodObject) GetLabels() map[string]string                               { return nil }
+func (m *mockPodObject) SetLabels(labels map[string]string)                         {}
+func (m *mockPodObject) GetAnnotations() map[string]string                          { return nil }
+func (m *mockPodObject) SetAnnotations(annotations map[string]string)               {}
+func (m *mockPodObject) GetFinalizers() []string                                    { return nil }
+func (m *mockPodObject) SetFinalizers(finalizers []string)                          {}
+func (m *mockPodObject) GetOwnerReferences() []metav1.OwnerReference                { return nil }
+func (m *mockPodObject) SetOwnerReferences([]metav1.OwnerReference)                 {}
+func (m *mockPodObject) GetManagedFields() []metav1.ManagedFieldsEntry              { return nil }
 func (m *mockPodObject) SetManagedFields(managedFields []metav1.ManagedFieldsEntry) {}
 
 // MockMetricsStore implements prom.MetricsStore for testing
@@ -423,8 +423,8 @@ func TestGetNodeMetrics_WithMockStore(t *testing.T) {
 	mockStore := NewMockMetricsStore()
 	mockStore.SetMetric("kubelet_node_cpu_usage_seconds_total", "node:test-node", 2.5)
 	mockStore.SetMetric("kubelet_node_memory_working_set_bytes", "node:test-node", 1024*1024*1024) // 1GB
-	mockStore.SetMetric("kubelet_node_network_receive_bytes_total", "node:test-node", 1024*1024)    // 1MB
-	mockStore.SetMetric("kubelet_node_network_transmit_bytes_total", "node:test-node", 512*1024)    // 512KB
+	mockStore.SetMetric("kubelet_node_network_receive_bytes_total", "node:test-node", 1024*1024)   // 1MB
+	mockStore.SetMetric("kubelet_node_network_transmit_bytes_total", "node:test-node", 512*1024)   // 512KB
 	mockStore.SetMetric("kubelet_node_load1", "node:test-node", 1.5)
 	mockStore.SetMetric("kubelet_node_load5", "node:test-node", 1.2)
 	mockStore.SetMetric("kubelet_node_load15", "node:test-node", 0.9)

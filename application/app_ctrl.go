@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -84,13 +85,14 @@ func (app *Application) GetStopChan() <-chan struct{} {
 
 func (app *Application) WelcomeBanner() {
 	fmt.Println(`
- _    _ 
+ _    _
 | | _| |_ ___  _ __
 | |/ / __/ _ \| '_ \
 |   <| || (_) | |_) |
 |_|\_\\__\___/| .__/
               |_|`)
-	fmt.Printf("Version %s \n", buildinfo.Version)
+	fmt.Printf("Version %s\n", buildinfo.Version)
+	fmt.Println("Loading cluster data...")
 }
 
 func (app *Application) setup(ctx context.Context) error {
@@ -106,10 +108,12 @@ func (app *Application) setup(ctx context.Context) error {
 
 	var hdr strings.Builder
 	hdr.WriteString("%c [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green] metrics:")
-	if err := app.GetK8sClient().AssertMetricsAvailable(); err != nil {
-		hdr.WriteString(" [red]not connected")
-	} else {
+	// Check MetricsSource health instead of blocking network call
+	// This provides accurate status for both metrics-server and prometheus sources
+	if app.metricsSource != nil && app.metricsSource.IsHealthy() {
 		hdr.WriteString(" [white]connected")
+	} else {
+		hdr.WriteString(" [red]not connected")
 	}
 
 	namespace := app.k8sClient.Namespace()
@@ -123,6 +127,9 @@ func (app *Application) setup(ctx context.Context) error {
 	))
 
 	app.panel.DrawFooter(app.getPageTitles()[app.visibleView])
+
+	// Start periodic header refresh to update metrics status
+	go app.refreshHeaderPeriodically(ctx)
 
 	app.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if event.Key() == tcell.KeyEsc {
@@ -185,4 +192,54 @@ func (app *Application) getPageTitles() (titles []string) {
 		titles = append(titles, page.Title)
 	}
 	return
+}
+
+// refreshHeaderPeriodically updates the header to reflect current metrics status
+// It does an immediate check after 2 seconds (to catch the first metrics fetch),
+// then checks every 10 seconds thereafter
+func (app *Application) refreshHeaderPeriodically(ctx context.Context) {
+	// Do an immediate check after 2 seconds to catch the first metrics fetch
+	time.Sleep(2 * time.Second)
+	app.updateHeader()
+
+	// Then check periodically every 10 seconds
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			app.updateHeader()
+		}
+	}
+}
+
+// updateHeader refreshes the header with current metrics status
+func (app *Application) updateHeader() {
+	var hdr strings.Builder
+	hdr.WriteString("%c [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green] metrics:")
+
+	// Check MetricsSource health
+	if app.metricsSource != nil && app.metricsSource.IsHealthy() {
+		hdr.WriteString(" [white]connected")
+	} else {
+		hdr.WriteString(" [red]not connected")
+	}
+
+	namespace := app.k8sClient.Namespace()
+	if namespace == k8s.AllNamespaces {
+		namespace = "[orange](all)"
+	}
+	client := app.GetK8sClient()
+
+	// Queue a UI update
+	app.tviewApp.QueueUpdateDraw(func() {
+		app.panel.DrawHeader(fmt.Sprintf(
+			hdr.String(),
+			ui.Icons.Rocket, client.RESTConfig().Host, client.GetServerVersion(),
+			client.ClusterContext(), client.Username(), namespace,
+		))
+	})
 }

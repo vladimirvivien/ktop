@@ -203,9 +203,9 @@ func TestMetricsServerSource_GetAvailableMetrics(t *testing.T) {
 func TestMetricsServerSource_HealthTracking(t *testing.T) {
 	source := NewMetricsServerSource(nil)
 
-	// Initially healthy
-	if !source.IsHealthy() {
-		t.Error("Expected source to be initially healthy")
+	// Initially unhealthy (becomes healthy after first successful fetch)
+	if source.IsHealthy() {
+		t.Error("Expected source to be initially unhealthy")
 	}
 
 	info := source.GetSourceInfo()
@@ -221,8 +221,8 @@ func TestMetricsServerSource_HealthTracking(t *testing.T) {
 	if info.ErrorCount != 0 {
 		t.Errorf("Expected ErrorCount 0, got %d", info.ErrorCount)
 	}
-	if !info.Healthy {
-		t.Error("Expected SourceInfo.Healthy to be true")
+	if info.Healthy {
+		t.Error("Expected SourceInfo.Healthy to be false initially")
 	}
 
 	// Record an error
@@ -260,12 +260,12 @@ func TestMetricsServerSource_New(t *testing.T) {
 		t.Fatal("Expected NewMetricsServerSource to return non-nil")
 	}
 
-	if source.controller != nil {
-		t.Error("Expected controller to be nil when passed nil")
+	if source.metricsClient != nil {
+		t.Error("Expected metricsClient to be nil when passed nil controller")
 	}
 
-	if !source.healthy {
-		t.Error("Expected new source to be healthy")
+	if source.healthy {
+		t.Error("Expected new source to be unhealthy initially")
 	}
 
 	if source.errorCount != 0 {

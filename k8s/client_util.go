@@ -25,7 +25,7 @@ func findKubeCfgFile() (string, error) {
 }
 
 func loadConfig(kubeconfig, context string) (*rest.Config, error) {
-	if kubeconfig == ""{
+	if kubeconfig == "" {
 		kcfg, err := findKubeCfgFile()
 		if err != nil {
 			return nil, err

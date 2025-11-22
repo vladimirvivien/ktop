@@ -39,7 +39,7 @@ func TestNewKubernetesScraper(t *testing.T) {
 func TestDiscoverAPIServerTargets(t *testing.T) {
 	config := &rest.Config{Host: "https://test-cluster"}
 	scrapeConfig := DefaultScrapeConfig()
-	
+
 	scraper, err := NewKubernetesScraper(config, scrapeConfig)
 	if err != nil {
 		t.Fatalf("Failed to create scraper: %v", err)
@@ -77,7 +77,7 @@ func TestDiscoverAPIServerTargets(t *testing.T) {
 func TestDiscoverNodeTargets(t *testing.T) {
 	// Create fake Kubernetes client with test nodes
 	fakeClient := fake.NewSimpleClientset()
-	
+
 	// Add test nodes
 	node1 := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
@@ -87,7 +87,7 @@ func TestDiscoverNodeTargets(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{Name: "node-2"},
 		Status:     corev1.NodeStatus{Phase: corev1.NodeRunning},
 	}
-	
+
 	fakeClient.CoreV1().Nodes().Create(context.Background(), node1, metav1.CreateOptions{})
 	fakeClient.CoreV1().Nodes().Create(context.Background(), node2, metav1.CreateOptions{})
 
@@ -148,7 +148,7 @@ func TestDiscoverNodeTargets(t *testing.T) {
 func TestDiscoverPodTargets(t *testing.T) {
 	// Create fake Kubernetes client with test pods
 	fakeClient := fake.NewSimpleClientset()
-	
+
 	// Add test pods for different components
 	etcdPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -158,7 +158,7 @@ func TestDiscoverPodTargets(t *testing.T) {
 		},
 		Status: corev1.PodStatus{Phase: corev1.PodRunning},
 	}
-	
+
 	schedulerPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "kube-scheduler-master",
@@ -167,7 +167,7 @@ func TestDiscoverPodTargets(t *testing.T) {
 		},
 		Status: corev1.PodStatus{Phase: corev1.PodRunning},
 	}
-	
+
 	fakeClient.CoreV1().Pods("kube-system").Create(context.Background(), etcdPod, metav1.CreateOptions{})
 	fakeClient.CoreV1().Pods("kube-system").Create(context.Background(), schedulerPod, metav1.CreateOptions{})
 
@@ -230,7 +230,7 @@ func TestDiscoverPodTargets(t *testing.T) {
 
 func TestParseMetricsBody(t *testing.T) {
 	scraper := &KubernetesScraper{}
-	
+
 	// Sample Prometheus metrics data
 	metricsData := `# HELP test_counter_total A test counter metric
 # TYPE test_counter_total counter
@@ -282,12 +282,12 @@ test_gauge{label="test"} 3.14
 
 func TestConvertMetricFamily(t *testing.T) {
 	scraper := &KubernetesScraper{}
-	
+
 	// Create a test DTO metric family
 	metricName := "test_metric"
 	help := "A test metric"
 	metricType := dto.MetricType_GAUGE
-	
+
 	dtoFamily := &dto.MetricFamily{
 		Name: &metricName,
 		Help: &help,
@@ -332,7 +332,7 @@ func TestConvertMetricFamily(t *testing.T) {
 	}
 
 	timeSeries := internalFamily.TimeSeries[0]
-	
+
 	// Check labels (should include __name__ + metric labels)
 	expectedLabels := 3 // __name__, instance, job
 	if len(timeSeries.Labels) != expectedLabels {
@@ -359,14 +359,14 @@ func TestConvertMetricFamily(t *testing.T) {
 func TestGetAvailableComponents(t *testing.T) {
 	// Create fake client with test resources
 	fakeClient := fake.NewSimpleClientset()
-	
+
 	// Add a node for kubelet/cAdvisor
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
 		Status:     corev1.NodeStatus{Phase: corev1.NodeRunning},
 	}
 	fakeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
-	
+
 	// Add an etcd pod
 	etcdPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
