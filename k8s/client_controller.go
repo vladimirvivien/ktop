@@ -3,8 +3,10 @@ package k8s
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/views/model"
 	"k8s.io/client-go/informers"
 	appsV1Informers "k8s.io/client-go/informers/apps/v1"
@@ -18,10 +20,11 @@ type RefreshPodsFunc func(ctx context.Context, items []model.PodModel) error
 type RefreshSummaryFunc func(ctx context.Context, items model.ClusterSummary) error
 
 type Controller struct {
-	client *Client
+	client        *Client
+	metricsSource metrics.MetricsSource // NEW: for cluster summary metrics
 
-	nodeMetricsInformer *NodeMetricsInformer
-	podMetricsInformer  *PodMetricsInformer
+	nodeMetricsInformer *NodeMetricsInformer // DEPRECATED: no longer initialized
+	podMetricsInformer  *PodMetricsInformer  // DEPRECATED: no longer initialized
 	namespaceInformer   coreV1Informers.NamespaceInformer
 	nodeInformer        coreV1Informers.NodeInformer
 	podInformer         coreV1Informers.PodInformer
@@ -60,28 +63,25 @@ func (c *Controller) SetClusterSummaryRefreshFunc(fn RefreshSummaryFunc) *Contro
 	return c
 }
 
+func (c *Controller) SetMetricsSource(source metrics.MetricsSource) *Controller {
+	c.metricsSource = source
+	return c
+}
+
+func (c *Controller) GetClient() *Client {
+	return c.client
+}
+
 func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	if ctx == nil {
 		return errors.New("context cannot be nil")
 	}
 
 	// initialize
-
-	if err := c.client.AssertMetricsAvailable(); err == nil {
-		c.nodeMetricsInformer = NewNodeMetricsInformer(c.client.metricsClient, resync)
-		nodeMetricsInformerHasSynced := c.nodeMetricsInformer.Informer().HasSynced
-
-		c.podMetricsInformer = NewPodMetricsInformer(c.client.metricsClient, resync, c.client.namespace)
-		podMetricsInformerHasSynced := c.podMetricsInformer.Informer().HasSynced
-
-		go c.nodeMetricsInformer.Informer().Run(ctx.Done())
-		go c.podMetricsInformer.Informer().Run(ctx.Done())
-
-		if ok := cache.WaitForCacheSync(ctx.Done(), nodeMetricsInformerHasSynced, podMetricsInformerHasSynced); !ok {
-			panic("metrics resources failed to sync [nodes, pods, containers]")
-		}
-
-	}
+	// NOTE: Metrics informers are no longer initialized here.
+	// The application now uses MetricsSource interface for metrics collection,
+	// which handles metrics-server and prometheus sources transparently.
+	// The controller only manages core Kubernetes resource informers.
 
 	// initialize informer factories
 	var factory informers.SharedInformerFactory
@@ -128,14 +128,19 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 
 	factory.Start(ctx.Done())
 
-	// wait immediately for core resources to syn
-	// wait for core resources to sync
-	if ok := cache.WaitForCacheSync(ctx.Done(),
+	// Wait for core resources to sync with a short timeout to prevent hanging
+	// This gives informers a chance to populate initial data before UI renders
+	syncCtx, syncCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer syncCancel()
+
+	if ok := cache.WaitForCacheSync(syncCtx.Done(),
 		namespaceHasSynced,
 		nodeHasSynced,
 		podHasSynced,
 	); !ok {
-		panic("core resources failed to sync [namespaces, nodes, pods]")
+		// Timeout or error - continue anyway with graceful degradation
+		// UI will render with empty/partial data initially
+		fmt.Println("Note: Initial data sync still in progress, UI may show partial data briefly")
 	}
 
 	// defer waiting for non-core resources to sync

@@ -144,6 +144,9 @@ func (k8s *Client) GetServerVersion() string {
 // AssertMetricsAvailable checks for available metrics server every 10th invocation.
 // Otherwise, it returns the last known registration state of metrics server.
 func (k8s *Client) AssertMetricsAvailable() error {
+	k8s.Lock()
+	defer k8s.Unlock()
+
 	if k8s.metricsAvailCount != 0 {
 		if k8s.metricsAvailCount%10 != 0 {
 			k8s.metricsAvailCount++
@@ -177,6 +180,10 @@ func (k8s *Client) AssertMetricsAvailable() error {
 
 func (k8s *Client) Controller() *Controller {
 	return k8s.controller
+}
+
+func (k8s *Client) GetMetricsClient() *metricsclient.Clientset {
+	return k8s.metricsClient
 }
 
 // IsAuthz checks access authorization using SelfSubjectAccessReview

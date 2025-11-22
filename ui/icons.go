@@ -17,8 +17,8 @@ var (
 		M               rune
 		Plane           rune
 		Controller      rune
-		Clock rune
-		TrafficLight rune
+		Clock           rune
+		TrafficLight    rune
 	}{
 		BargraphChar:    '|',
 		BargraphLBorder: '[',
@@ -35,7 +35,7 @@ var (
 		M:               'Ⓜ',
 		Plane:           '🛩',
 		Controller:      '🛂',
-		Clock: '⏰',
-		TrafficLight: '🚦',
+		Clock:           '⏰',
+		TrafficLight:    '🚦',
 	}
 )

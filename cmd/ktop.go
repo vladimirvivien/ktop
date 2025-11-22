@@ -36,15 +36,15 @@ var (
 )
 
 type ktopCmdOptions struct {
-	namespace         string
-	allNamespaces     bool
-	context           string
-	kubeconfig        string
-	kubeFlags         *genericclioptions.ConfigFlags
-	page              string // future use
-	nodeColumns       string // comma-separated list of node columns to display
-	podColumns        string // comma-separated list of pod columns to display
-	showAllColumns    bool   // show all columns
+	namespace      string
+	allNamespaces  bool
+	context        string
+	kubeconfig     string
+	kubeFlags      *genericclioptions.ConfigFlags
+	page           string // future use
+	nodeColumns    string // comma-separated list of node columns to display
+	podColumns     string // comma-separated list of pod columns to display
+	showAllColumns bool   // show all columns
 
 	// Metrics configuration
 	metricsSource            string
@@ -195,20 +195,20 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 
 	app := application.New(k8sC, metricsSource)
 	app.WelcomeBanner()
-	
+
 	// Process column options
 	nodeColumns := []string{}
 	if o.nodeColumns != "" {
 		nodeColumns = strings.Split(o.nodeColumns, ",")
 		o.showAllColumns = false
 	}
-	
+
 	podColumns := []string{}
 	if o.podColumns != "" {
 		podColumns = strings.Split(o.podColumns, ",")
 		o.showAllColumns = false
 	}
-	
+
 	// Create a new overview page with column options
 	app.AddPage(overview.NewWithColumnOptions(app, "Overview", o.showAllColumns, nodeColumns, podColumns))
 

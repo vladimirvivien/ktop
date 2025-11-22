@@ -61,7 +61,7 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 
 	// Initialize a new column map
 	p.colMap = make(map[string]int)
-	
+
 	// Reserve index 0 for the legend column
 	p.list.SetCell(0, 0,
 		tview.NewTableCell("").
@@ -74,7 +74,7 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 	)
 
 	p.listCols = cols
-	
+
 	// Set column headers and build column map
 	for i, col := range p.listCols {
 		pos := i + 1
@@ -86,7 +86,7 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 				SetExpansion(100).
 				SetSelectable(false),
 		)
-		
+
 		// Map column name to its position
 		p.colMap[col] = pos
 	}
@@ -98,8 +98,12 @@ func (p *nodePanel) DrawBody(data interface{}) {
 		panic(fmt.Sprintf("NodePanel.DrawBody: unexpected type %T", data))
 	}
 
-	client := p.app.GetK8sClient()
-	metricsDiabled := client.AssertMetricsAvailable() != nil
+	// Check if usage metrics are available by looking at the actual data in the models
+	// Don't rely on AssertMetricsAvailable() as it's cached and unreliable
+	metricsDisabled := true
+	if len(nodes) > 0 && nodes[0].UsageMemQty != nil && nodes[0].UsageMemQty.Value() > 0 {
+		metricsDisabled = false
+	}
 	var cpuRatio, memRatio ui.Ratio
 	var cpuGraph, memGraph string
 	var cpuMetrics, memMetrics string
@@ -110,13 +114,13 @@ func (p *nodePanel) DrawBody(data interface{}) {
 
 	for rowIdx, node := range nodes {
 		rowIdx++ // offset for header-row
-		
+
 		// Always render the legend column
 		controlLegend := ""
 		if node.Controller {
 			controlLegend = fmt.Sprintf("%c", ui.Icons.TrafficLight)
 		}
-		
+
 		p.list.SetCell(
 			rowIdx, 0,
 			&tview.TableCell{
@@ -126,14 +130,14 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				NotSelectable: true,
 			},
 		)
-		
+
 		// Render each column that is included in the filtered view
 		for _, colName := range p.listCols {
 			colIdx, exists := p.colMap[colName]
 			if !exists {
 				continue
 			}
-			
+
 			switch colName {
 			case "NAME":
 				p.list.SetCell(
@@ -144,7 +148,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "STATUS":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -154,7 +158,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "AGE":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -164,7 +168,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "VERSION":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -174,7 +178,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "INT/EXT IPs":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -184,7 +188,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "OS/ARC":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -194,7 +198,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "PODS/IMGs":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -204,7 +208,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "DISK":
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -214,10 +218,10 @@ func (p *nodePanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "CPU":
 				// Calculate CPU metrics
-				if metricsDiabled {
+				if metricsDisabled {
 					cpuRatio = ui.GetRatio(float64(node.RequestedPodCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
 					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
 					cpuMetrics = fmt.Sprintf(
@@ -232,7 +236,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 						cpuGraph, node.UsageCpuQty.MilliValue(), node.AllocatableCpuQty.MilliValue(), cpuRatio*100,
 					)
 				}
-				
+
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
@@ -241,25 +245,25 @@ func (p *nodePanel) DrawBody(data interface{}) {
 						Align: tview.AlignLeft,
 					},
 				)
-				
+
 			case "MEM":
 				// Calculate memory metrics
-				if metricsDiabled {
+				if metricsDisabled {
 					memRatio = ui.GetRatio(float64(node.RequestedPodMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
 					memGraph = ui.BarGraph(10, memRatio, colorKeys)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dGi/%dGi (%1.0f%%)",
-						memGraph, node.RequestedPodMemQty.ScaledValue(resource.Giga), node.AllocatableMemQty.ScaledValue(resource.Giga), memRatio*100,
+						"[white][%s[white]] %s/%s (%1.0f%%)",
+						memGraph, ui.FormatMemory(node.RequestedPodMemQty), ui.FormatMemory(node.AllocatableMemQty), memRatio*100,
 					)
 				} else {
 					memRatio = ui.GetRatio(float64(node.UsageMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
 					memGraph = ui.BarGraph(10, memRatio, colorKeys)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dGi/%dGi (%1.0f%%)",
-						memGraph, node.UsageMemQty.ScaledValue(resource.Giga), node.AllocatableMemQty.ScaledValue(resource.Giga), memRatio*100,
+						"[white][%s[white]] %s/%s (%1.0f%%)",
+						memGraph, ui.FormatMemory(node.UsageMemQty), ui.FormatMemory(node.AllocatableMemQty), memRatio*100,
 					)
 				}
-				
+
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{

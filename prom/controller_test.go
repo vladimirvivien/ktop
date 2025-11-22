@@ -271,7 +271,7 @@ func TestQueryMetricRange(t *testing.T) {
 		store.AddMetrics(testMetrics)
 
 		// Query range
-		samples, err := controller.QueryMetricRange("test_gauge", 
+		samples, err := controller.QueryMetricRange("test_gauge",
 			map[string]string{"instance": "localhost:8080"}, 5*time.Minute)
 		if err != nil {
 			t.Errorf("Failed to query metric range: %v", err)
@@ -365,7 +365,7 @@ func TestControllerWithMockCollector(t *testing.T) {
 	collected := metricsCollectedCount
 	errors := errorCount
 	mu.Unlock()
-	
+
 	t.Logf("Metrics collected: %d, Errors: %d", collected, errors)
 }
 
@@ -390,7 +390,7 @@ func (m *MockCollector) ScrapeComponent(ctx context.Context, component Component
 	if !m.started {
 		return nil, ErrCollectorNotStarted
 	}
-	
+
 	// Return test metrics
 	metrics := *m.metrics // Copy
 	metrics.Component = component
@@ -411,7 +411,7 @@ var ErrCollectorNotStarted = fmt.Errorf("collector not started")
 func TestControllerDiscovery(t *testing.T) {
 	kubeConfig := &rest.Config{Host: "https://test-cluster"}
 	config := DefaultScrapeConfig()
-	
+
 	controller := NewCollectorController(kubeConfig, config)
 
 	// Initialize the controller to set up the collector
@@ -453,6 +453,6 @@ func TestControllerErrorHandling(t *testing.T) {
 	// The controller should handle errors gracefully
 	// We can check that error callbacks were called if errors occurred
 	// But we don't require errors for the test to pass
-	_ = err // Use the variable
+	_ = err        // Use the variable
 	_ = errorCount // Use the variable
 }

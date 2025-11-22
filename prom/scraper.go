@@ -21,7 +21,7 @@ type KubernetesScraper struct {
 	kubeConfig *rest.Config
 	clientset  kubernetes.Interface
 	restClient rest.Interface
-	
+
 	// Discovered targets
 	targetsMutex sync.RWMutex
 	targets      map[ComponentType][]*ScrapeTarget
@@ -33,10 +33,10 @@ func NewKubernetesScraper(kubeConfig *rest.Config, config *ScrapeConfig) (*Kuber
 	if err != nil {
 		return nil, fmt.Errorf("creating kubernetes client: %w", err)
 	}
-	
+
 	// Use the CoreV1 REST client for all operations
 	restClient := clientset.CoreV1().RESTClient()
-	
+
 	scraper := &KubernetesScraper{
 		config:     config,
 		kubeConfig: kubeConfig,
@@ -44,7 +44,7 @@ func NewKubernetesScraper(kubeConfig *rest.Config, config *ScrapeConfig) (*Kuber
 		restClient: restClient,
 		targets:    make(map[ComponentType][]*ScrapeTarget),
 	}
-	
+
 	return scraper, nil
 }
 
@@ -54,7 +54,7 @@ func (ks *KubernetesScraper) Start(ctx context.Context) error {
 	if err := ks.discoverTargets(ctx); err != nil {
 		return fmt.Errorf("discovering targets: %w", err)
 	}
-	
+
 	// Start scraping goroutines for each enabled component
 	ks.targetsMutex.RLock()
 	for _, component := range ks.config.Components {
@@ -62,11 +62,11 @@ func (ks *KubernetesScraper) Start(ctx context.Context) error {
 		if !exists || len(targets) == 0 {
 			continue
 		}
-		
+
 		go ks.scrapeComponentPeriodically(ctx, component)
 	}
 	ks.targetsMutex.RUnlock()
-	
+
 	return nil
 }
 
@@ -84,7 +84,7 @@ func (ks *KubernetesScraper) ScrapeComponent(ctx context.Context, component Comp
 	if !exists || len(targets) == 0 {
 		return nil, fmt.Errorf("no targets found for component %s", component)
 	}
-	
+
 	// For now, scrape the first available target
 	target := targets[0]
 	return ks.scrapeTarget(ctx, target)
@@ -101,17 +101,17 @@ func (ks *KubernetesScraper) GetAvailableComponents(ctx context.Context) ([]Comp
 	if err := ks.discoverTargets(ctx); err != nil {
 		return nil, err
 	}
-	
+
 	ks.targetsMutex.RLock()
 	defer ks.targetsMutex.RUnlock()
-	
+
 	var components []ComponentType
 	for component, targets := range ks.targets {
 		if len(targets) > 0 {
 			components = append(components, component)
 		}
 	}
-	
+
 	return components, nil
 }
 
@@ -119,25 +119,25 @@ func (ks *KubernetesScraper) GetAvailableComponents(ctx context.Context) ([]Comp
 func (ks *KubernetesScraper) discoverTargets(ctx context.Context) error {
 	ks.targetsMutex.Lock()
 	defer ks.targetsMutex.Unlock()
-	
+
 	// Clear existing targets
 	ks.targets = make(map[ComponentType][]*ScrapeTarget)
-	
+
 	// Discover API Server (direct access)
 	if err := ks.discoverAPIServerTargets(ctx); err != nil {
 		// Log but don't fail - API server metrics might not be accessible
 	}
-	
+
 	// Discover Node-based targets (kubelet, cAdvisor)
 	if err := ks.discoverNodeTargets(ctx); err != nil {
 		// Log but don't fail
 	}
-	
+
 	// Discover Pod-based targets (etcd, scheduler, controller-manager, kube-proxy)
 	if err := ks.discoverPodTargets(ctx); err != nil {
 		// Log but don't fail
 	}
-	
+
 	return nil
 }
 
@@ -149,7 +149,7 @@ func (ks *KubernetesScraper) discoverAPIServerTargets(ctx context.Context) error
 		Path:      "/metrics",
 		Enabled:   true,
 	}
-	
+
 	ks.targets[ComponentAPIServer] = []*ScrapeTarget{target}
 	return nil
 }
@@ -160,10 +160,10 @@ func (ks *KubernetesScraper) discoverNodeTargets(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("listing nodes: %w", err)
 	}
-	
+
 	var kubeletTargets []*ScrapeTarget
 	var cadvisorTargets []*ScrapeTarget
-	
+
 	for _, node := range nodes.Items {
 		// Kubelet metrics target - will use RESTClient with Resource("nodes").Name().SubResource("proxy").Suffix("metrics")
 		kubeletTarget := &ScrapeTarget{
@@ -173,7 +173,7 @@ func (ks *KubernetesScraper) discoverNodeTargets(ctx context.Context) error {
 			Enabled:   true,
 		}
 		kubeletTargets = append(kubeletTargets, kubeletTarget)
-		
+
 		// cAdvisor metrics target
 		cadvisorTarget := &ScrapeTarget{
 			Component: ComponentCAdvisor,
@@ -183,10 +183,10 @@ func (ks *KubernetesScraper) discoverNodeTargets(ctx context.Context) error {
 		}
 		cadvisorTargets = append(cadvisorTargets, cadvisorTarget)
 	}
-	
+
 	ks.targets[ComponentKubelet] = kubeletTargets
 	ks.targets[ComponentCAdvisor] = cadvisorTargets
-	
+
 	return nil
 }
 
@@ -199,7 +199,7 @@ func (ks *KubernetesScraper) discoverPodTargets(ctx context.Context) error {
 		ComponentControllerManager: "component=kube-controller-manager",
 		ComponentKubeProxy:         "k8s-app=kube-proxy",
 	}
-	
+
 	// Component to port mapping
 	componentPorts := map[ComponentType]int{
 		ComponentEtcd:              2381,
@@ -207,7 +207,7 @@ func (ks *KubernetesScraper) discoverPodTargets(ctx context.Context) error {
 		ComponentControllerManager: 10257,
 		ComponentKubeProxy:         10249,
 	}
-	
+
 	for component, selector := range componentSelectors {
 		pods, err := ks.clientset.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{
 			LabelSelector: selector,
@@ -215,15 +215,15 @@ func (ks *KubernetesScraper) discoverPodTargets(ctx context.Context) error {
 		if err != nil {
 			continue // Skip this component if we can't list pods
 		}
-		
+
 		var targets []*ScrapeTarget
 		port := componentPorts[component]
-		
+
 		for _, pod := range pods.Items {
 			if pod.Status.Phase != "Running" {
 				continue
 			}
-			
+
 			// Will use RESTClient with Namespace().Resource("pods").Name(podName:port).SubResource("proxy").Suffix("metrics")
 			target := &ScrapeTarget{
 				Component: component,
@@ -235,12 +235,12 @@ func (ks *KubernetesScraper) discoverPodTargets(ctx context.Context) error {
 			}
 			targets = append(targets, target)
 		}
-		
+
 		if len(targets) > 0 {
 			ks.targets[component] = targets
 		}
 	}
-	
+
 	return nil
 }
 
@@ -248,7 +248,7 @@ func (ks *KubernetesScraper) discoverPodTargets(ctx context.Context) error {
 func (ks *KubernetesScraper) scrapeComponentPeriodically(ctx context.Context, component ComponentType) {
 	ticker := time.NewTicker(ks.config.Interval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -266,17 +266,17 @@ func (ks *KubernetesScraper) scrapeComponentPeriodically(ctx context.Context, co
 // scrapeTarget scrapes metrics from a single target using RESTClient
 func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTarget) (*ScrapedMetrics, error) {
 	startTime := time.Now()
-	
+
 	var result rest.Result
 	var endpoint string
-	
+
 	// Build the appropriate RESTClient request based on target type
 	switch target.Component {
 	case ComponentAPIServer:
 		// API server metrics via direct path
 		endpoint = "/metrics"
 		result = ks.restClient.Get().AbsPath("/metrics").Do(ctx)
-		
+
 	case ComponentKubelet, ComponentCAdvisor:
 		// Node-based components via node proxy
 		endpoint = fmt.Sprintf("nodes/%s/proxy/%s", target.NodeName, target.Path)
@@ -286,7 +286,7 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 			SubResource("proxy").
 			Suffix(target.Path).
 			Do(ctx)
-		
+
 	case ComponentEtcd, ComponentScheduler, ComponentControllerManager, ComponentKubeProxy:
 		// Pod-based components via pod proxy
 		podNameWithPort := fmt.Sprintf("%s:%d", target.PodName, target.Port)
@@ -298,13 +298,13 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 			SubResource("proxy").
 			Suffix(target.Path).
 			Do(ctx)
-		
+
 	default:
 		return nil, fmt.Errorf("unsupported component type: %s", target.Component)
 	}
-	
+
 	scrapeDuration := time.Since(startTime)
-	
+
 	// Check for errors
 	if err := result.Error(); err != nil {
 		return &ScrapedMetrics{
@@ -315,7 +315,7 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 			Error:          fmt.Errorf("REST request failed: %w", err),
 		}, err
 	}
-	
+
 	// Get raw response body
 	rawBody, err := result.Raw()
 	if err != nil {
@@ -327,7 +327,7 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 			Error:          fmt.Errorf("getting response body: %w", err),
 		}, err
 	}
-	
+
 	// Parse metrics
 	families, err := ks.parseMetricsBody(rawBody)
 	if err != nil {
@@ -339,14 +339,14 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 			Error:          fmt.Errorf("parsing metrics: %w", err),
 		}, err
 	}
-	
+
 	// Convert to our internal format
 	metricFamilies := make(map[string]*MetricFamily)
 	for name, family := range families {
 		metricFamily := ks.convertMetricFamily(name, family)
 		metricFamilies[name] = metricFamily
 	}
-	
+
 	return &ScrapedMetrics{
 		Component:      target.Component,
 		Endpoint:       endpoint,
@@ -371,21 +371,21 @@ func (ks *KubernetesScraper) convertMetricFamily(name string, family *dto.Metric
 		LastUpdated: time.Now(),
 		TimeSeries:  make([]*TimeSeries, 0),
 	}
-	
+
 	timestamp := time.Now().UnixMilli()
-	
+
 	for _, metric := range family.Metric {
 		// Build labels
 		lbls := make(labels.Labels, 0, len(metric.Label)+1)
 		lbls = append(lbls, labels.Label{Name: "__name__", Value: name})
-		
+
 		for _, label := range metric.Label {
 			lbls = append(lbls, labels.Label{
 				Name:  label.GetName(),
 				Value: label.GetValue(),
 			})
 		}
-		
+
 		// Extract value based on metric type
 		var value float64
 		switch family.GetType() {
@@ -410,7 +410,7 @@ func (ks *KubernetesScraper) convertMetricFamily(name string, family *dto.Metric
 				value = metric.Untyped.GetValue()
 			}
 		}
-		
+
 		// Create time series
 		timeSeries := &TimeSeries{
 			Labels: lbls,
@@ -421,9 +421,9 @@ func (ks *KubernetesScraper) convertMetricFamily(name string, family *dto.Metric
 				},
 			},
 		}
-		
+
 		metricFamily.TimeSeries = append(metricFamily.TimeSeries, timeSeries)
 	}
-	
+
 	return metricFamily
 }

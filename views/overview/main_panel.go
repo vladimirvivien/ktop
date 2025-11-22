@@ -56,23 +56,23 @@ func (p *MainPanel) Layout(data interface{}) {
 	// Define the default columns
 	allNodeColumns := []string{"NAME", "STATUS", "AGE", "VERSION", "INT/EXT IPs", "OS/ARC", "PODS/IMGs", "DISK", "CPU", "MEM"}
 	allPodColumns := []string{"NAMESPACE", "POD", "READY", "STATUS", "RESTARTS", "AGE", "VOLS", "IP", "NODE", "CPU", "MEMORY"}
-	
+
 	// Use filtered columns if specified
 	nodeColumnsToDisplay := allNodeColumns
 	podColumnsToDisplay := allPodColumns
-	
+
 	if !p.showAllColumns {
 		if len(p.nodeColumns) > 0 {
 			// Filter node columns
 			nodeColumnsToDisplay = filterColumns(allNodeColumns, p.nodeColumns)
 		}
-		
+
 		if len(p.podColumns) > 0 {
 			// Filter pod columns
 			podColumnsToDisplay = filterColumns(allPodColumns, p.podColumns)
 		}
 	}
-	
+
 	p.nodePanel = NewNodePanel(p.app, fmt.Sprintf(" %c Nodes ", ui.Icons.Factory))
 	p.nodePanel.DrawHeader(nodeColumnsToDisplay)
 
@@ -115,6 +115,7 @@ func (p *MainPanel) GetChildrenViews() []tview.Primitive {
 func (p *MainPanel) Run(ctx context.Context) error {
 	p.Layout(nil)
 	ctrl := p.app.GetK8sClient().Controller()
+	ctrl.SetMetricsSource(p.metricsSource) // Provide metrics source to controller for cluster summary
 	ctrl.SetClusterSummaryRefreshFunc(p.refreshWorkloadSummary)
 	ctrl.SetNodeRefreshFunc(p.refreshNodeView)
 	ctrl.SetPodRefreshFunc(p.refreshPods)

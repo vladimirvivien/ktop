@@ -78,7 +78,7 @@ func TestAddMetrics(t *testing.T) {
 func TestQueryLatest(t *testing.T) {
 	store := NewInMemoryStore(DefaultScrapeConfig())
 	metrics := createTestScrapedMetrics()
-	
+
 	err := store.AddMetrics(metrics)
 	if err != nil {
 		t.Fatalf("Failed to add metrics: %v", err)
@@ -114,14 +114,14 @@ func TestQueryRange(t *testing.T) {
 	// Add metrics at different times
 	now := time.Now()
 	for i := 0; i < 5; i++ {
-		metrics := createTestScrapedMetricsAtTime(now.Add(time.Duration(i)*time.Minute))
+		metrics := createTestScrapedMetricsAtTime(now.Add(time.Duration(i) * time.Minute))
 		store.AddMetrics(metrics)
 	}
 
 	// Query range
 	start := now.Add(-1 * time.Minute)
 	end := now.Add(6 * time.Minute)
-	
+
 	samples, err := store.QueryRange("test_gauge", map[string]string{"instance": "localhost:8080"}, start, end)
 	if err != nil {
 		t.Fatalf("Failed to query range: %v", err)
@@ -152,7 +152,7 @@ func TestMaxSamplesLimit(t *testing.T) {
 	// Add 5 samples (more than the limit of 3)
 	for i := 0; i < 5; i++ {
 		timeSeries.Samples = append(timeSeries.Samples, MetricSample{
-			Timestamp: time.Now().Add(time.Duration(i)*time.Second).UnixMilli(),
+			Timestamp: time.Now().Add(time.Duration(i) * time.Second).UnixMilli(),
 			Value:     float64(i),
 		})
 	}
@@ -204,7 +204,7 @@ func TestCleanup(t *testing.T) {
 func TestGetLabelValues(t *testing.T) {
 	store := NewInMemoryStore(DefaultScrapeConfig())
 	metrics := createTestScrapedMetrics()
-	
+
 	err := store.AddMetrics(metrics)
 	if err != nil {
 		t.Fatalf("Failed to add metrics: %v", err)
@@ -238,7 +238,7 @@ func TestGetLabelValues(t *testing.T) {
 func TestGetStats(t *testing.T) {
 	store := NewInMemoryStore(DefaultScrapeConfig())
 	metrics := createTestScrapedMetrics()
-	
+
 	err := store.AddMetrics(metrics)
 	if err != nil {
 		t.Fatalf("Failed to add metrics: %v", err)

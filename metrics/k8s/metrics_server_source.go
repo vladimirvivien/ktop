@@ -9,30 +9,44 @@ import (
 	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/metrics"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
 // MetricsServerSource implements metrics.MetricsSource using the Kubernetes Metrics Server.
 // This source provides basic CPU and memory metrics only.
 type MetricsServerSource struct {
-	controller *k8s.Controller
-	healthy    bool
-	mu         sync.RWMutex
-	lastError  error
-	errorCount int
+	metricsClient *metricsclient.Clientset
+	healthy       bool
+	mu            sync.RWMutex
+	lastError     error
+	errorCount    int
 }
 
 // NewMetricsServerSource creates a new MetricsServerSource wrapping the k8s.Controller.
 func NewMetricsServerSource(controller *k8s.Controller) *MetricsServerSource {
+	var metricsClient *metricsclient.Clientset
+	if controller != nil {
+		if client := controller.GetClient(); client != nil {
+			metricsClient = client.GetMetricsClient()
+		}
+	}
+
 	return &MetricsServerSource{
-		controller: controller,
-		healthy:    true,
+		metricsClient: metricsClient,
+		healthy:       false, // Start unhealthy, will become healthy on first successful fetch
 	}
 }
 
 // GetNodeMetrics retrieves metrics for a specific node from the Metrics Server.
 func (m *MetricsServerSource) GetNodeMetrics(ctx context.Context, nodeName string) (*metrics.NodeMetrics, error) {
-	nodeMetrics, err := m.controller.GetNodeMetrics(ctx, nodeName)
+	// Call Metrics Server API directly to avoid circular dependency
+	if m.metricsClient == nil {
+		m.recordError(fmt.Errorf("metrics client not available"))
+		return nil, fmt.Errorf("metrics client not available")
+	}
+
+	nodeMetrics, err := m.metricsClient.MetricsV1beta1().NodeMetricses().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		m.recordError(err)
 		return nil, fmt.Errorf("metrics server: %w", err)
@@ -44,36 +58,21 @@ func (m *MetricsServerSource) GetNodeMetrics(ctx context.Context, nodeName strin
 
 // GetPodMetrics retrieves metrics for a specific pod by namespace and name.
 func (m *MetricsServerSource) GetPodMetrics(ctx context.Context, namespace, podName string) (*metrics.PodMetrics, error) {
-	// Try to get metrics from Metrics Server
-	// Since controller doesn't have a direct method, we get all and filter
-	allPodMetrics, err := m.controller.GetAllPodMetrics(ctx)
+	// Call Metrics Server API directly
+	if m.metricsClient == nil {
+		m.recordError(fmt.Errorf("metrics client not available"))
+		return nil, fmt.Errorf("metrics client not available")
+	}
+
+	podMetrics, err := m.metricsClient.MetricsV1beta1().PodMetricses(namespace).Get(ctx, podName, metav1.GetOptions{})
 	if err != nil {
-		// Metrics Server unavailable - return empty metrics
-		// The caller will handle graceful degradation
+		// Metrics Server unavailable - return error so caller can handle graceful degradation
 		m.recordError(err)
-		return &metrics.PodMetrics{
-			PodName:    podName,
-			Namespace:  namespace,
-			Timestamp:  time.Now(),
-			Containers: []metrics.ContainerMetrics{},
-		}, nil
+		return nil, fmt.Errorf("metrics server unavailable: %w", err)
 	}
 
-	// Find the specific pod
-	for _, pm := range allPodMetrics {
-		if pm.Namespace == namespace && pm.Name == podName {
-			m.recordSuccess()
-			return convertPodMetrics(pm), nil
-		}
-	}
-
-	// Pod not found in metrics - return empty metrics
-	return &metrics.PodMetrics{
-		PodName:    podName,
-		Namespace:  namespace,
-		Timestamp:  time.Now(),
-		Containers: []metrics.ContainerMetrics{},
-	}, nil
+	m.recordSuccess()
+	return convertPodMetrics(podMetrics), nil
 }
 
 // GetMetricsForPod retrieves metrics for a specific pod object.
@@ -86,7 +85,13 @@ func (m *MetricsServerSource) GetMetricsForPod(ctx context.Context, pod metav1.O
 
 // GetAllPodMetrics retrieves metrics for all pods.
 func (m *MetricsServerSource) GetAllPodMetrics(ctx context.Context) ([]*metrics.PodMetrics, error) {
-	podMetricsList, err := m.controller.GetAllPodMetrics(ctx)
+	// Call Metrics Server API directly
+	if m.metricsClient == nil {
+		m.recordError(fmt.Errorf("metrics client not available"))
+		return nil, fmt.Errorf("metrics client not available")
+	}
+
+	podMetricsList, err := m.metricsClient.MetricsV1beta1().PodMetricses("").List(ctx, metav1.ListOptions{})
 	if err != nil {
 		m.recordError(err)
 		return nil, fmt.Errorf("metrics server: %w", err)
@@ -94,9 +99,9 @@ func (m *MetricsServerSource) GetAllPodMetrics(ctx context.Context) ([]*metrics.
 
 	m.recordSuccess()
 
-	result := make([]*metrics.PodMetrics, 0, len(podMetricsList))
-	for _, pm := range podMetricsList {
-		result = append(result, convertPodMetrics(pm))
+	result := make([]*metrics.PodMetrics, 0, len(podMetricsList.Items))
+	for i := range podMetricsList.Items {
+		result = append(result, convertPodMetrics(&podMetricsList.Items[i]))
 	}
 
 	return result, nil

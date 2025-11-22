@@ -50,7 +50,6 @@ func (c *Controller) GetDaemonSetList(ctx context.Context) ([]*appsV1.DaemonSet,
 	return items, nil
 }
 
-
 func (c *Controller) GetReplicaSetList(ctx context.Context) ([]*appsV1.ReplicaSet, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()

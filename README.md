@@ -127,6 +127,30 @@ For instance, the following will show cluster information for workload resources
 ktop --namespace my-app --context web-cluster
 ```
 
+## How Metrics Work
+
+ktop displays resource metrics from your Kubernetes cluster using one of two sources:
+
+### Metrics Server (Default)
+
+When you run `ktop` without flags, it uses the Kubernetes Metrics Server:
+
+- **If Metrics Server is available**: Shows real-time CPU and memory usage
+- **If Metrics Server is unavailable**: Automatically falls back to resource requests/limits
+- **Always works**: Even in clusters without Metrics Server installed
+
+This graceful fallback ensures ktop always provides useful information about your cluster resources.
+
+### Prometheus (Enhanced Metrics)
+
+For richer metrics including network I/O, load averages, and container statistics, use Prometheus mode:
+
+```bash
+ktop --metrics-source=prometheus
+```
+
+This provides additional metrics beyond CPU and memory, giving you deeper insights into cluster performance. See the [Metrics Source Selection](#metrics-source-selection) section below for full details.
+
 ## Metrics Source Selection
 
 ktop supports two metrics sources for gathering cluster resource metrics:
@@ -188,7 +212,13 @@ ktop --metrics-source=prometheus \
 - Network access to Kubernetes component endpoints
 - May not work in managed Kubernetes (GKE, EKS, AKS) where component endpoints are restricted
 
-**Note:** Prometheus mode is currently in development. The metrics source is initialized and collects data, but UI integration is not yet complete. The application will show a warning and fall back to metrics-server for display.
+**Enhanced Metrics Available:**
+When using Prometheus mode, you get access to additional metrics including:
+- Network I/O statistics (Rx/Tx bytes)
+- System load averages (1m, 5m, 15m)
+- Container counts per node
+- Per-container resource breakdowns
+- And more...
 
 ### Usage Examples
 
@@ -238,10 +268,6 @@ ktop --metrics-source=prometheus \
 - Cause: Insufficient RBAC permissions or network access issues
 - Solution: Ensure you have permissions to access component metrics endpoints
 - Alternative: Use `--metrics-source=metrics-server` (default)
-
-**Prometheus mode shows warning about UI integration**
-- This is expected - Prometheus metrics collection is working but UI integration is in development
-- The application will use metrics-server for display while Prometheus features are being completed
 
 ### Column Filtering
 
