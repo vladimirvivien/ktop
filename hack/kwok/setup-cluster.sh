@@ -142,7 +142,7 @@ spec:
   path: /metrics/nodes/{nodeName}/metrics/resource
 EOF
 
-    METRICS_CONFIG="--enable-metrics-server -c $METRICS_FILE"
+    METRICS_CONFIG="--enable=metrics-server --enable-crds=Metric --enable-crds=ClusterResourceUsage -c $METRICS_FILE"
 fi
 
 # 2. Create kwokctl cluster
@@ -154,6 +154,12 @@ fi
 kwokctl create cluster --name "$CLUSTER_NAME" $METRICS_CONFIG --wait 60s
 kubectl config use-context "kwok-$CLUSTER_NAME"
 sleep 5
+
+# Apply metrics configuration to the cluster if enabled
+if [ "$ENABLE_METRICS" = "true" ]; then
+    echo "2a. Applying metrics configuration to cluster..."
+    kubectl apply -f "$METRICS_FILE"
+fi
 
 # 3. Generate nodes manifest
 echo "3. Generating nodes manifest..."

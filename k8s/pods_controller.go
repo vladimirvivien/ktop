@@ -26,27 +26,22 @@ func (c *Controller) GetPodModels(ctx context.Context) (models []model.PodModel,
 	if err != nil {
 		return
 	}
-	nodeMetricsCache := make(map[string]*metricsV1beta1.NodeMetrics)
 	nodeAllocResMap := make(map[string]coreV1.ResourceList)
+
+	// NOTE: Pod metrics are now fetched in batch by the view layer (refreshPods)
+	// to avoid N individual API calls. We pass empty metrics here and they'll be
+	// populated later with actual metrics from GetAllPodMetrics().
+	// This significantly improves performance with large pod counts.
+
+	// NOTE: Node metrics are also not fetched here anymore. They were causing
+	// slow timeouts (6s per node) when metrics-server is unavailable.
+	// Node metrics are used for percentage calculations, which can be done in the view layer.
+	emptyNodeMetrics := new(metricsV1beta1.NodeMetrics)
+
 	for _, pod := range pods {
+		podMetrics := new(metricsV1beta1.PodMetrics)
 
-		// retrieve metrics per pod
-		podMetrics, err := c.GetPodMetricsByName(ctx, pod)
-		if err != nil {
-			podMetrics = new(metricsV1beta1.PodMetrics)
-		}
-
-		// retrieve and cache node metrics for related pod-node
-		if metrics, ok := nodeMetricsCache[pod.Spec.NodeName]; !ok {
-			metrics, err = c.GetNodeMetrics(ctx, pod.Spec.NodeName)
-			if err != nil {
-				metrics = new(metricsV1beta1.NodeMetrics)
-			}
-			nodeMetricsCache[pod.Spec.NodeName] = metrics
-		}
-		nodeMetrics := nodeMetricsCache[pod.Spec.NodeName]
-
-		model := model.NewPodModel(pod, podMetrics, nodeMetrics)
+		model := model.NewPodModel(pod, podMetrics, emptyNodeMetrics)
 
 		// retrieve pod's node allocatable resources
 		if alloc, ok := nodeAllocResMap[pod.Spec.NodeName]; !ok {
