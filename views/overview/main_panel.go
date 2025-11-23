@@ -170,29 +170,46 @@ func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) er
 	// The controller passes us models, but we need to update them with fresh metrics
 	// from our MetricsSource.
 
+	// OPTIMIZATION: Fetch ALL pod metrics in a single batch API call
+	// instead of making 200 individual calls (one per pod)
+	allPodMetrics, err := p.metricsSource.GetAllPodMetrics(ctx)
+	if err != nil {
+		// Fallback: if batch fetch fails, use existing models without metrics updates
+		model.SortPodModels(models)
+		p.podPanel.Clear()
+		p.podPanel.DrawBody(models)
+		if p.refresh != nil {
+			p.refresh()
+		}
+		return nil
+	}
+
+	// Build a map for fast lookup: namespace/name -> PodMetrics
+	metricsMap := make(map[string]*metrics.PodMetrics, len(allPodMetrics))
+	for _, pm := range allPodMetrics {
+		key := pm.Namespace + "/" + pm.PodName
+		metricsMap[key] = pm
+	}
+
+	// Update models with metrics from the map
 	podModels := make([]model.PodModel, 0, len(models))
 	for _, existingModel := range models {
-		// Fetch fresh metrics from our MetricsSource
-		podMetrics, err := p.metricsSource.GetPodMetrics(ctx, existingModel.Namespace, existingModel.Name)
-		if err != nil {
-			// Graceful degradation: keep the existing model as-is
-			podModels = append(podModels, existingModel)
-			continue
+		key := existingModel.Namespace + "/" + existingModel.Name
+		if podMetrics, found := metricsMap[key]; found {
+			// Convert metrics and sum up CPU/Memory for all containers
+			v1PodMetrics := convertToV1Beta1PodMetrics(podMetrics)
+
+			// Update the model's usage metrics only if we got actual metrics
+			totalCpu, totalMem := podMetricsTotals(v1PodMetrics)
+
+			// If metrics are available (non-zero), use them
+			// Otherwise keep the existing model which may have requests/limits
+			if totalCpu.Value() > 0 || totalMem.Value() > 0 {
+				existingModel.PodUsageCpuQty = totalCpu
+				existingModel.PodUsageMemQty = totalMem
+			}
 		}
-
-		// Convert metrics and sum up CPU/Memory for all containers
-		v1PodMetrics := convertToV1Beta1PodMetrics(podMetrics)
-
-		// Update the model's usage metrics only if we got actual metrics
-		totalCpu, totalMem := podMetricsTotals(v1PodMetrics)
-
-		// If metrics are available (non-zero), use them
-		// Otherwise keep the existing model which may have requests/limits
-		if totalCpu.Value() > 0 || totalMem.Value() > 0 {
-			existingModel.PodUsageCpuQty = totalCpu
-			existingModel.PodUsageMemQty = totalMem
-		}
-		// else: keep existing model's values (requests/limits from controller)
+		// If no metrics found in map, keep existing model's values (requests/limits from controller)
 
 		podModels = append(podModels, existingModel)
 	}
