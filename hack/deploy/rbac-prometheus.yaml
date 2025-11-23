@@ -1,0 +1,92 @@
+# RBAC permissions required for ktop to scrape Prometheus metrics
+# from Kubernetes component endpoints
+#
+# Apply this to grant a user/service account the necessary permissions:
+#   kubectl apply -f rbac-prometheus.yaml
+#
+# Then create a RoleBinding/ClusterRoleBinding to bind this role to your user/service account
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ktop-prometheus-reader
+rules:
+# Required to list and get nodes for discovery
+- apiGroups: [""]
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+
+# Required to access node proxy for kubelet and cAdvisor metrics
+# This is the primary endpoint: /api/v1/nodes/{node}/proxy/metrics
+- apiGroups: [""]
+  resources:
+  - nodes/proxy
+  verbs:
+  - get
+
+# Required to list and get pods for component discovery
+# (etcd, scheduler, controller-manager run as pods)
+- apiGroups: [""]
+  resources:
+  - pods
+  verbs:
+  - get
+  - list
+
+# Required to access pod proxy for component metrics
+# Endpoints like: /api/v1/namespaces/kube-system/pods/{pod}:{port}/proxy/metrics
+- apiGroups: [""]
+  resources:
+  - pods/proxy
+  verbs:
+  - get
+
+# Required to access API server metrics directly
+# Endpoint: /metrics (non-resource URL)
+- nonResourceURLs:
+  - /metrics
+  verbs:
+  - get
+
+---
+# Example: Bind this role to a specific user
+# Replace "your-username" with your actual username
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ktop-prometheus-reader-binding
+subjects:
+- kind: User
+  name: your-username  # Replace with your username
+  apiGroup: rbac.authorization.k8s.io
+roleRef:
+  kind: ClusterRole
+  name: ktop-prometheus-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Alternative: Bind to a service account
+# Useful for running ktop as a pod in the cluster
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ktop
+  namespace: default
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ktop-prometheus-serviceaccount-binding
+subjects:
+- kind: ServiceAccount
+  name: ktop
+  namespace: default
+roleRef:
+  kind: ClusterRole
+  name: ktop-prometheus-reader
+  apiGroup: rbac.authorization.k8s.io
