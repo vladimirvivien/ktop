@@ -107,6 +107,40 @@ func (p *PromMetricsSource) Stop() error {
 	return p.controller.Stop()
 }
 
+// calculateCPURate calculates CPU usage rate from counter samples over a time window
+// Returns CPU cores (e.g., 0.1 = 100 millicores)
+// Uses silent fallback - returns error without logging on insufficient samples
+func (p *PromMetricsSource) calculateCPURate(metricName string, labelMatchers map[string]string, window time.Duration) (float64, error) {
+	now := time.Now()
+	start := now.Add(-window)
+
+	samples, err := p.store.QueryRange(metricName, labelMatchers, start, now)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(samples) < 2 {
+		return 0, fmt.Errorf("insufficient samples for rate calculation (need >=2, got %d)", len(samples))
+	}
+
+	// Calculate rate from first and last sample
+	firstSample := samples[0]
+	lastSample := samples[len(samples)-1]
+
+	deltaValue := lastSample.Value - firstSample.Value
+	deltaTimeMs := lastSample.Timestamp - firstSample.Timestamp
+	deltaTimeSeconds := float64(deltaTimeMs) / 1000.0 // Convert milliseconds to seconds
+
+	if deltaTimeSeconds <= 0 {
+		return 0, fmt.Errorf("invalid time delta: %f seconds", deltaTimeSeconds)
+	}
+
+	// Rate in CPU cores
+	rate := deltaValue / deltaTimeSeconds
+
+	return rate, nil
+}
+
 // GetNodeMetrics retrieves metrics for a specific node from Prometheus
 func (p *PromMetricsSource) GetNodeMetrics(ctx context.Context, nodeName string) (*metrics.NodeMetrics, error) {
 	p.mu.RLock()
@@ -125,16 +159,17 @@ func (p *PromMetricsSource) GetNodeMetrics(ctx context.Context, nodeName string)
 		Timestamp: time.Now(),
 	}
 
-	// Query CPU usage: kubelet_node_cpu_usage_seconds_total
-	if cpuUsage, err := p.store.QueryLatest("kubelet_node_cpu_usage_seconds_total",
-		map[string]string{"node": nodeName}); err == nil {
-		// Convert seconds to cores (millicores)
-		nodeMetrics.CPUUsage = resource.NewMilliQuantity(int64(cpuUsage*1000), resource.DecimalSI)
+	// Node-level metrics from cAdvisor root container (id="/")
+	labelMatchers := map[string]string{"id": "/"}
+
+	// Query CPU usage: container_cpu_usage_seconds_total (counter - needs rate calculation)
+	if cpuRate, err := p.calculateCPURate("container_cpu_usage_seconds_total", labelMatchers, 40*time.Second); err == nil {
+		// Convert CPU cores to millicores
+		nodeMetrics.CPUUsage = resource.NewMilliQuantity(int64(cpuRate*1000), resource.DecimalSI)
 	}
 
-	// Query Memory usage: kubelet_node_memory_working_set_bytes
-	if memUsage, err := p.store.QueryLatest("kubelet_node_memory_working_set_bytes",
-		map[string]string{"node": nodeName}); err == nil {
+	// Query Memory usage: container_memory_working_set_bytes (gauge - use latest value)
+	if memUsage, err := p.store.QueryLatest("container_memory_working_set_bytes", labelMatchers); err == nil {
 		nodeMetrics.MemoryUsage = resource.NewQuantity(int64(memUsage), resource.BinarySI)
 	}
 
@@ -201,24 +236,29 @@ func (p *PromMetricsSource) GetPodMetrics(ctx context.Context, namespace, podNam
 	}
 
 	// Query container metrics from cAdvisor
-	// container_cpu_usage_seconds_total{pod="podName", namespace="namespace"}
+	// Include all containers (including pause containers if they emit metrics)
 	labelMatchers := map[string]string{
 		"pod":       podName,
 		"namespace": namespace,
 	}
 
-	// Get CPU usage for containers
-	if cpuUsage, err := p.store.QueryLatest("container_cpu_usage_seconds_total", labelMatchers); err == nil {
-		containerMetrics := metrics.ContainerMetrics{
-			Name:     "main", // TODO: Get actual container name from labels
-			CPUUsage: resource.NewMilliQuantity(int64(cpuUsage*1000), resource.DecimalSI),
-		}
+	// Get CPU usage for containers (counter - needs rate calculation)
+	containerMetrics := metrics.ContainerMetrics{
+		Name: "main", // TODO: Get actual container name from labels
+	}
 
-		// Get memory usage
-		if memUsage, err := p.store.QueryLatest("container_memory_working_set_bytes", labelMatchers); err == nil {
-			containerMetrics.MemoryUsage = resource.NewQuantity(int64(memUsage), resource.BinarySI)
-		}
+	if cpuRate, err := p.calculateCPURate("container_cpu_usage_seconds_total", labelMatchers, 40*time.Second); err == nil {
+		// Convert CPU cores to millicores
+		containerMetrics.CPUUsage = resource.NewMilliQuantity(int64(cpuRate*1000), resource.DecimalSI)
+	}
 
+	// Get memory usage (gauge - use latest value)
+	if memUsage, err := p.store.QueryLatest("container_memory_working_set_bytes", labelMatchers); err == nil {
+		containerMetrics.MemoryUsage = resource.NewQuantity(int64(memUsage), resource.BinarySI)
+	}
+
+	// Only add container metrics if we got at least one metric
+	if containerMetrics.CPUUsage != nil || containerMetrics.MemoryUsage != nil {
 		podMetrics.Containers = append(podMetrics.Containers, containerMetrics)
 	}
 

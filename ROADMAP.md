@@ -30,23 +30,49 @@ ktop is a terminal-based monitoring tool for Kubernetes clusters, following the 
 > See [docs/prom.md](docs/prom.md) for detailed technical design and implementation specifications.
 > See [.claude/prom-impl-plan.md](.claude/prom-impl-plan.md) for week-by-week implementation details.
 
-**Status:** ~30% complete (Week 1 done, Week 2-3 in progress)
+**Status:** ~70% complete (Weeks 1-3 done, critical issues discovered during testing)
 
-### Adapter Layer (75% complete)
+### Adapter Layer (100% complete) ✅
 - [x] Create MetricsSource interface (`metrics/source.go`)
 - [x] Implement PromMetricsSource (`metrics/prom/prom_source.go`)
 - [x] Implement MetricsServerSource (`metrics/k8s/metrics_server_source.go`)
-- [ ] Integrate source selection into application startup
+- [x] Integrate source selection into application startup
+- [x] Fix circular dependencies and performance issues
 
-### CLI Integration (0% complete)
-- [ ] Add command-line flags for metrics source selection
-  - [ ] `--metrics-source` (metrics-server | prometheus)
-  - [ ] `--prometheus-scrape-interval`
-  - [ ] `--prometheus-retention`
-  - [ ] `--prometheus-max-samples`
-  - [ ] `--prometheus-components`
-- [ ] Create configuration system (`config/config.go`)
+### CLI Integration (100% complete) ✅
+- [x] Add command-line flags for metrics source selection
+  - [x] `--metrics-source` (metrics-server | prometheus)
+  - [x] `--prometheus-scrape-interval`
+  - [x] `--prometheus-retention`
+  - [x] `--prometheus-max-samples`
+  - [x] `--prometheus-components`
+- [x] Create configuration system (`config/config.go`)
+- [x] Configuration validation with clear error messages
 - [ ] Configuration file support (YAML) - deferred to later phase
+
+### UI Integration (100% complete) ✅
+- [x] Wire MetricsSource through application to views
+- [x] Graceful fallback when Metrics Server unavailable
+- [x] Conversion helpers for v1beta1 compatibility
+- [x] Batch metrics fetching for performance (~20x faster)
+
+### Prometheus Metrics Mapping (0% complete) ⚠️ **CRITICAL ISSUES**
+> See `.claude/prometheus-metrics-issues.md` for detailed analysis
+
+**Issues discovered during manual testing:**
+- [ ] Fix metric names (currently queries non-existent `kubelet_node_*` metrics)
+  - [ ] Use `container_*` metrics from cAdvisor with `id="/"` for nodes
+  - [ ] Use proper label matchers for pod metrics
+- [ ] Add rate calculation for CPU counter metrics
+  - [ ] Implement delta calculation over time windows
+  - [ ] Convert cumulative seconds to cores/millicores
+- [ ] Verify node/pod metrics display actual usage (not requests)
+
+**Current behavior:**
+- ✅ Pod memory: Correct (gauge metrics work)
+- ❌ Pod CPU: Shows astronomical percentages (348080%!) - counter treated as gauge
+- ❌ Node metrics: Falls back to resource requests - wrong metric names
+- ❌ Cluster summary: Shows requests instead of usage
 
 ### Enhanced Metrics Display (0% complete)
 - [ ] Update node view with Prometheus metrics
@@ -61,13 +87,16 @@ ktop is a terminal-based monitoring tool for Kubernetes clusters, following the 
 - [ ] Add optional enhanced columns (enabled via `--enhanced-columns`)
 - [ ] Show active metrics source indicator
 
-### Testing & Documentation (25% complete)
+### Testing & Documentation (80% complete) ✅
 - [x] Unit tests for adapter layer (MetricsServerSource, PromMetricsSource)
 - [x] CI/CD pipeline with automated testing
-- [ ] Integration tests with real clusters
-- [ ] Update README with Prometheus features
-- [ ] Document available metrics and configuration options
-- [ ] RBAC permissions documentation
+- [x] Performance testing with KWOK (200-pod clusters)
+- [x] Manual testing on minikube cluster
+- [x] Update README with Prometheus features
+- [x] Document RBAC permissions (`hack/deploy/rbac-prometheus.yaml`)
+- [x] Complete user guide (`docs/prom-metrics.md`)
+- [ ] Integration tests with real clusters (automated)
+- [ ] Fix Prometheus metrics issues before production use
 
 ---
 
@@ -225,18 +254,25 @@ To suggest changes, please open a GitHub issue or pull request.
   - MetricsServerSource implementation
   - PromMetricsSource implementation
   - Comprehensive tests (>80% coverage)
-- 🔄 Week 2 (In Progress): Configuration and CLI integration
-  - Configuration system
-  - CLI flags
-  - Source initialization
+- ✅ Week 2 (Complete): Configuration and CLI integration
+  - Configuration system with validation
+  - CLI flags for source selection
+  - Source initialization logic
   - Documentation updates
-- ⏳ Week 3 (Planned): Enhanced UI views
-  - Enhanced node/pod models
-  - Optional enhanced columns
-  - Source health indicators
-  - Integration testing
+- ✅ Week 3 (Complete): UI integration and performance fixes
+  - Wired MetricsSource through application to views
+  - Graceful fallback implementation
+  - Fixed circular dependencies and performance issues
+  - Batch metrics fetching (~20x faster)
+  - Memory display accuracy fixes
+- ⚠️ Manual Testing (Issues Discovered): Prometheus metrics mapping
+  - Infrastructure works (scraping, storage, RBAC)
+  - Critical issues found: wrong metric names, counter vs gauge
+  - Documentation complete (user guide, RBAC manifest)
+  - **Action required:** Fix metric mapping before production use
 
 ---
 
-**Last Updated:** November 9, 2025
-**Status:** Active Development - Phase 1 in progress (~30% complete)
+**Last Updated:** November 23, 2025
+**Status:** Active Development - Phase 1 ~70% complete (infrastructure done, metrics mapping needs fixes)
+**Next Action:** Fix Prometheus metrics issues (see `.claude/prometheus-metrics-issues.md`)
