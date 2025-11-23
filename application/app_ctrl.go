@@ -107,11 +107,12 @@ func (app *Application) setup(ctx context.Context) error {
 	app.panel.Layout(app.pages)
 
 	var hdr strings.Builder
-	hdr.WriteString("%c [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green] metrics:")
+	hdr.WriteString("%c [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green]metrics:")
 	// Check MetricsSource health instead of blocking network call
 	// This provides accurate status for both metrics-server and prometheus sources
 	if app.metricsSource != nil && app.metricsSource.IsHealthy() {
-		hdr.WriteString(" [white]connected")
+		sourceInfo := app.metricsSource.GetSourceInfo()
+		hdr.WriteString(fmt.Sprintf(" [white]%s", sourceInfo.Type))
 	} else {
 		hdr.WriteString(" [red]not connected")
 	}
@@ -219,11 +220,12 @@ func (app *Application) refreshHeaderPeriodically(ctx context.Context) {
 // updateHeader refreshes the header with current metrics status
 func (app *Application) updateHeader() {
 	var hdr strings.Builder
-	hdr.WriteString("%c [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green] metrics:")
+	hdr.WriteString("%c [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green]metrics:")
 
 	// Check MetricsSource health
 	if app.metricsSource != nil && app.metricsSource.IsHealthy() {
-		hdr.WriteString(" [white]connected")
+		sourceInfo := app.metricsSource.GetSourceInfo()
+		hdr.WriteString(fmt.Sprintf(" [white]%s", sourceInfo.Type))
 	} else {
 		hdr.WriteString(" [red]not connected")
 	}

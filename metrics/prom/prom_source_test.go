@@ -2,6 +2,7 @@ package prom
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -75,7 +76,32 @@ func (m *MockMetricsStore) QueryLatest(metricName string, labelMatchers map[stri
 }
 
 func (m *MockMetricsStore) QueryRange(metricName string, labelMatchers map[string]string, start, end time.Time) ([]*prom.MetricSample, error) {
-	return nil, nil
+	if metricValues, ok := m.metrics[metricName]; ok {
+		// Generate two samples 40 seconds apart for rate testing
+		now := time.Now()
+		firstValue := 0.0
+		lastValue := 0.0
+
+		// Get the metric value (simplified - just use first value found)
+		for _, value := range metricValues {
+			lastValue = value
+			break
+		}
+
+		// First sample: 40 seconds ago with base value
+		// Last sample: now with value increased by 4.0 (simulates 4 CPU seconds over 40s = 0.1 cores = 100m)
+		firstValue = lastValue - 4.0
+		if firstValue < 0 {
+			firstValue = 0
+		}
+
+		samples := []*prom.MetricSample{
+			{Timestamp: now.Add(-40 * time.Second).UnixMilli(), Value: firstValue},
+			{Timestamp: now.UnixMilli(), Value: lastValue},
+		}
+		return samples, nil
+	}
+	return nil, fmt.Errorf("metric %s not found", metricName)
 }
 
 func (m *MockMetricsStore) GetMetricNames() []string {
@@ -420,9 +446,11 @@ func TestGetNodeMetrics_WithMockStore(t *testing.T) {
 	source, _ := NewPromMetricsSource(&rest.Config{}, nil)
 
 	// Set up mock store with test data
+	// Using correct cAdvisor metric names with id="/" for node-level
 	mockStore := NewMockMetricsStore()
-	mockStore.SetMetric("kubelet_node_cpu_usage_seconds_total", "node:test-node", 2.5)
-	mockStore.SetMetric("kubelet_node_memory_working_set_bytes", "node:test-node", 1024*1024*1024) // 1GB
+	// CPU: Set to 104.0 (counter value), QueryRange will return samples that calculate to 0.1 cores = 100m
+	mockStore.SetMetric("container_cpu_usage_seconds_total", "id:/", 104.0)
+	mockStore.SetMetric("container_memory_working_set_bytes", "id:/", 1024*1024*1024) // 1GB
 	mockStore.SetMetric("kubelet_node_network_receive_bytes_total", "node:test-node", 1024*1024)   // 1MB
 	mockStore.SetMetric("kubelet_node_network_transmit_bytes_total", "node:test-node", 512*1024)   // 512KB
 	mockStore.SetMetric("kubelet_node_load1", "node:test-node", 1.5)
@@ -448,11 +476,11 @@ func TestGetNodeMetrics_WithMockStore(t *testing.T) {
 		t.Errorf("Expected NodeName 'test-node', got '%s'", metrics.NodeName)
 	}
 
-	// Verify CPU usage (2.5 cores = 2500 millicores)
+	// Verify CPU usage (rate calculation: 4 CPU seconds over 40s = 0.1 cores = 100 millicores)
 	if metrics.CPUUsage == nil {
 		t.Error("Expected CPUUsage to be set")
-	} else if metrics.CPUUsage.MilliValue() != 2500 {
-		t.Errorf("Expected CPU 2500m, got %d", metrics.CPUUsage.MilliValue())
+	} else if metrics.CPUUsage.MilliValue() != 100 {
+		t.Errorf("Expected CPU 100m (from rate calculation), got %d", metrics.CPUUsage.MilliValue())
 	}
 
 	// Verify Memory usage (1GB)
@@ -502,7 +530,8 @@ func TestGetPodMetrics_WithMockStore(t *testing.T) {
 	source, _ := NewPromMetricsSource(&rest.Config{}, nil)
 
 	mockStore := NewMockMetricsStore()
-	mockStore.SetMetric("container_cpu_usage_seconds_total", "pod:test-pod", 0.5)
+	// CPU: Set to 104.0 (counter value), QueryRange will return samples that calculate to 0.1 cores = 100m
+	mockStore.SetMetric("container_cpu_usage_seconds_total", "pod:test-pod", 104.0)
 	mockStore.SetMetric("container_memory_working_set_bytes", "pod:test-pod", 256*1024*1024) // 256MB
 
 	source.store = mockStore
@@ -534,8 +563,8 @@ func TestGetPodMetrics_WithMockStore(t *testing.T) {
 
 		if container.CPUUsage == nil {
 			t.Error("Expected container CPUUsage to be set")
-		} else if container.CPUUsage.MilliValue() != 500 {
-			t.Errorf("Expected container CPU 500m, got %d", container.CPUUsage.MilliValue())
+		} else if container.CPUUsage.MilliValue() != 100 {
+			t.Errorf("Expected container CPU 100m (from rate calculation), got %d", container.CPUUsage.MilliValue())
 		}
 
 		if container.MemoryUsage == nil {

@@ -221,7 +221,8 @@ func (p *nodePanel) DrawBody(data interface{}) {
 
 			case "CPU":
 				// Calculate CPU metrics
-				if metricsDisabled {
+				// Check if usage metrics are actually available (nil check for graceful degradation)
+				if metricsDisabled || node.UsageCpuQty == nil {
 					cpuRatio = ui.GetRatio(float64(node.RequestedPodCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
 					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
 					cpuMetrics = fmt.Sprintf(
@@ -248,7 +249,8 @@ func (p *nodePanel) DrawBody(data interface{}) {
 
 			case "MEM":
 				// Calculate memory metrics
-				if metricsDisabled {
+				// Check if usage metrics are actually available (nil check for graceful degradation)
+				if metricsDisabled || node.UsageMemQty == nil {
 					memRatio = ui.GetRatio(float64(node.RequestedPodMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
 					memGraph = ui.BarGraph(10, memRatio, colorKeys)
 					memMetrics = fmt.Sprintf(
