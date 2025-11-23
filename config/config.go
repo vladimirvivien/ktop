@@ -15,7 +15,7 @@ type Config struct {
 
 // SourceConfig defines which metrics source to use
 type SourceConfig struct {
-	Type string // "metrics-server" | "prometheus"
+	Type string // "metrics-server" | "prometheus" | "none"
 }
 
 // PrometheusConfig holds Prometheus-specific settings
@@ -48,8 +48,8 @@ func DefaultConfig() *Config {
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
 	// Validate source type
-	if c.Source.Type != "metrics-server" && c.Source.Type != "prometheus" {
-		return fmt.Errorf("invalid metrics-source: %s (must be 'metrics-server' or 'prometheus')", c.Source.Type)
+	if c.Source.Type != "metrics-server" && c.Source.Type != "prometheus" && c.Source.Type != "none" {
+		return fmt.Errorf("invalid metrics-source: %s (must be 'metrics-server', 'prometheus', or 'none')", c.Source.Type)
 	}
 
 	// Validate Prometheus config if prometheus source is selected

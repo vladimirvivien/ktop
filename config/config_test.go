@@ -96,7 +96,7 @@ func TestValidate_InvalidSource(t *testing.T) {
 		t.Error("Expected error for invalid source type")
 	}
 
-	expectedMsg := "invalid metrics-source: invalid-source (must be 'metrics-server' or 'prometheus')"
+	expectedMsg := "invalid metrics-source: invalid-source (must be 'metrics-server', 'prometheus', or 'none')"
 	if err != nil && err.Error() != expectedMsg {
 		t.Errorf("Expected error message '%s', got '%s'", expectedMsg, err.Error())
 	}
