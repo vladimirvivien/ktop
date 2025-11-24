@@ -153,8 +153,7 @@ func (p *MainPanel) refreshNodeView(ctx context.Context, models []model.NodeMode
 		nodeModels = append(nodeModels, existingModel)
 	}
 
-	model.SortNodeModels(nodeModels)
-
+	// Sorting is now handled by the panel itself in DrawBody
 	p.nodePanel.Clear()
 	p.nodePanel.DrawBody(nodeModels)
 
@@ -181,7 +180,7 @@ func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) er
 
 	if p.metricsSource == nil || err != nil {
 		// Fallback: if metrics source is nil or batch fetch fails, use existing models without metrics updates
-		model.SortPodModels(models)
+		// Sorting is now handled by the panel itself in DrawBody
 		p.podPanel.Clear()
 		p.podPanel.DrawBody(models)
 		if p.refresh != nil {
@@ -220,8 +219,7 @@ func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) er
 		podModels = append(podModels, existingModel)
 	}
 
-	model.SortPodModels(podModels)
-
+	// Sorting is now handled by the panel itself in DrawBody
 	// refresh pod list
 	p.podPanel.Clear()
 	p.podPanel.DrawBody(podModels)
