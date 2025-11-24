@@ -3,10 +3,13 @@ package application
 import (
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/vladimirvivien/ktop/buildinfo"
+	"github.com/vladimirvivien/ktop/ui"
 )
 
 var (
@@ -23,7 +26,11 @@ type appPanel struct {
 	pages    *tview.Pages
 	footer   *tview.Table
 	modals   []tview.Primitive
-	root     *tview.Flex
+	root     *tview.Pages // CHANGED: from *tview.Flex to *tview.Pages
+
+	// Toast tracking
+	currentToastID string
+	toastMutex     sync.Mutex
 }
 
 func newPanel(app *tview.Application) *appPanel {
@@ -45,13 +52,18 @@ func (p *appPanel) Layout(data interface{}) {
 	p.footer = tview.NewTable()
 	p.footer.SetBorder(true)
 
-	root := tview.NewFlex().SetDirection(tview.FlexRow).
+	// Existing layout
+	mainLayout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(p.header, 3, 1, false). // header
 		AddItem(p.pages, 0, 1, true)    // body
 		// TODO show footer when multi-page is implemented
 		//AddItem(p.footer, 3, 1, false)  // footer
-	p.root = root
-	p.tviewApp.SetRoot(root, true)
+
+	// NEW: Wrap in Pages for toast layering
+	p.root = tview.NewPages()
+	p.root.AddPage("main", mainLayout, true, true)
+
+	p.tviewApp.SetRoot(p.root, true)
 
 	// add pages
 	pages, ok := data.([]AppPage)
@@ -138,4 +150,46 @@ func (p *appPanel) switchToPage(title string) {
 
 func (p *appPanel) showModalView(t tview.Primitive) {
 	p.tviewApp.SetRoot(t, false)
+}
+
+// showToast displays a toast notification with auto-dismiss
+func (p *appPanel) showToast(message string, level ui.ToastLevel, duration time.Duration) string {
+	p.toastMutex.Lock()
+	defer p.toastMutex.Unlock()
+
+	// Dismiss current toast (replace old with new)
+	if p.currentToastID != "" {
+		p.root.RemovePage(p.currentToastID)
+	}
+
+	// Create toast using tview.Modal
+	toast := ui.NewToast(message, level)
+
+	// Add to pages with unique ID
+	toastID := fmt.Sprintf("toast-%d", time.Now().UnixNano())
+	p.root.AddPage(toastID, toast, true, true)
+	p.currentToastID = toastID
+
+	// Auto-dismiss after duration (0 = no timeout, manual dismiss only)
+	if duration > 0 {
+		go func() {
+			time.Sleep(duration)
+			p.tviewApp.QueueUpdateDraw(func() {
+				p.dismissToast(toastID)
+			})
+		}()
+	}
+
+	return toastID
+}
+
+// dismissToast removes a toast notification by ID
+func (p *appPanel) dismissToast(toastID string) {
+	p.toastMutex.Lock()
+	defer p.toastMutex.Unlock()
+
+	if p.currentToastID == toastID {
+		p.root.RemovePage(toastID)
+		p.currentToastID = ""
+	}
 }

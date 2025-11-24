@@ -138,17 +138,17 @@ func (p *MainPanel) refreshNodeView(ctx context.Context, models []model.NodeMode
 
 	nodeModels := make([]model.NodeModel, 0, len(models))
 	for _, existingModel := range models {
-		// Fetch fresh metrics from our MetricsSource
-		nodeMetrics, err := p.metricsSource.GetNodeMetrics(ctx, existingModel.Name)
-		if err != nil {
-			// Graceful degradation: keep the existing model as-is
-			nodeModels = append(nodeModels, existingModel)
-			continue
+		// Fetch fresh metrics from our MetricsSource (if available)
+		if p.metricsSource != nil {
+			nodeMetrics, err := p.metricsSource.GetNodeMetrics(ctx, existingModel.Name)
+			if err == nil {
+				// Update the model's metrics fields
+				existingModel.UsageCpuQty = nodeMetrics.CPUUsage
+				existingModel.UsageMemQty = nodeMetrics.MemoryUsage
+			}
+			// If err != nil, graceful degradation: keep existing model as-is
 		}
-
-		// Update the model's metrics fields
-		existingModel.UsageCpuQty = nodeMetrics.CPUUsage
-		existingModel.UsageMemQty = nodeMetrics.MemoryUsage
+		// If metricsSource is nil, keep existing model as-is (fallback mode)
 
 		nodeModels = append(nodeModels, existingModel)
 	}
@@ -172,9 +172,15 @@ func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) er
 
 	// OPTIMIZATION: Fetch ALL pod metrics in a single batch API call
 	// instead of making 200 individual calls (one per pod)
-	allPodMetrics, err := p.metricsSource.GetAllPodMetrics(ctx)
-	if err != nil {
-		// Fallback: if batch fetch fails, use existing models without metrics updates
+	var allPodMetrics []*metrics.PodMetrics
+	var err error
+
+	if p.metricsSource != nil {
+		allPodMetrics, err = p.metricsSource.GetAllPodMetrics(ctx)
+	}
+
+	if p.metricsSource == nil || err != nil {
+		// Fallback: if metrics source is nil or batch fetch fails, use existing models without metrics updates
 		model.SortPodModels(models)
 		p.podPanel.Clear()
 		p.podPanel.DrawBody(models)

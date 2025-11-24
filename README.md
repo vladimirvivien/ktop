@@ -113,6 +113,11 @@ Flags:
   -n, --namespace string               If present, the namespace scope for this CLI request
       --node-columns string            Comma-separated list of node columns to display (e.g. 'NAME,CPU,MEM')
       --pod-columns string             Comma-separated list of pod columns to display (e.g. 'NAMESPACE,POD,STATUS')
+      --metrics-source string          Metrics source: 'metrics-server' (default), 'prometheus', or 'none' (default "metrics-server")
+      --prometheus-components strings  Kubernetes components to scrape (comma-separated: kubelet,cadvisor,apiserver,etcd,scheduler,controller-manager,kube-proxy) (default [kubelet,cadvisor])
+      --prometheus-max-samples int     Maximum samples per time series (default 10000)
+      --prometheus-retention string    Prometheus metrics retention time (e.g., 30m, 1h, 2h) (default "1h")
+      --prometheus-scrape-interval string Prometheus scrape interval (e.g., 10s, 30s, 1m) (default "15s")
       --request-timeout string         The length of time to wait before giving up on a single server request. Non-zero values should contain a corresponding time unit (e.g. 1s, 2m, 3h). A value of zero means don't timeout requests. (default "0")
   -s, --server string                  The address and port of the Kubernetes API server
       --show-all-columns               If true, show all columns (default true)
@@ -127,40 +132,17 @@ For instance, the following will show cluster information for workload resources
 ktop --namespace my-app --context web-cluster
 ```
 
-## How Metrics Work
+## Metrics Source Selection
 
-ktop displays resource metrics from your Kubernetes cluster using one of two sources:
+ktop supports three metrics sources for gathering cluster resource metrics:
+
+1. **Metrics Server** (default) - Standard Kubernetes CPU/memory metrics with automatic fallback
+2. **Prometheus** - Enhanced metrics scraped directly from Kubernetes components
+3. **None** - Skip metrics collection, display resource requests/limits only
 
 ### Metrics Server (Default)
 
-When you run `ktop` without flags, it uses the Kubernetes Metrics Server:
-
-- **If Metrics Server is available**: Shows real-time CPU and memory usage
-- **If Metrics Server is unavailable**: Automatically falls back to resource requests/limits
-- **Always works**: Even in clusters without Metrics Server installed
-
-This graceful fallback ensures ktop always provides useful information about your cluster resources.
-
-### Prometheus (Enhanced Metrics)
-
-For richer metrics including network I/O, load averages, and container statistics, use Prometheus mode:
-
-```bash
-ktop --metrics-source=prometheus
-```
-
-This provides additional metrics beyond CPU and memory, giving you deeper insights into cluster performance. See the [Metrics Source Selection](#metrics-source-selection) section below for full details.
-
-## Metrics Source Selection
-
-ktop supports two metrics sources for gathering cluster resource metrics:
-
-1. **Metrics Server** (default) - Standard Kubernetes metrics from metrics-server
-2. **Prometheus** - Enhanced metrics scraped directly from Kubernetes components
-
-### Using Metrics Server (Default)
-
-By default, ktop uses the Kubernetes Metrics Server for resource metrics:
+The default mode uses Kubernetes Metrics Server with graceful fallback:
 
 ```bash
 ktop
@@ -169,37 +151,38 @@ ktop --metrics-source=metrics-server
 ```
 
 **Behavior:**
-- If Metrics Server is available → displays real-time CPU and memory metrics
-- If Metrics Server is unavailable → automatically falls back to resource requests/limits
-- Works in any Kubernetes cluster, even without Metrics Server installed
-- No additional permissions required
+- Automatically detects and uses Metrics Server if available
+- Displays real-time CPU and memory usage from metrics-server
+- Falls back to resource requests/limits if metrics-server is unavailable
+- No additional RBAC permissions required
+- Works in any cluster, even without metrics infrastructure
 
-### Using Prometheus Metrics
+### Prometheus (Enhanced Metrics)
 
-For enhanced metrics including network I/O, load averages, and container counts, use Prometheus mode:
+Use Prometheus mode for richer metrics beyond CPU and memory:
 
 ```bash
-# Basic Prometheus mode (uses default settings)
+# Basic usage with defaults
 ktop --metrics-source=prometheus
 
-# Custom scraping configuration
+# Customize scraping behavior
 ktop --metrics-source=prometheus \
      --prometheus-scrape-interval=30s \
      --prometheus-retention=2h \
      --prometheus-components=kubelet,cadvisor,apiserver
 ```
 
-**Available Prometheus Flags:**
+**Configuration Flags:**
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--prometheus-scrape-interval` | `15s` | How often to scrape metrics (minimum: 5s) |
 | `--prometheus-retention` | `1h` | How long to keep metrics in memory (minimum: 5m) |
 | `--prometheus-max-samples` | `10000` | Maximum samples per time series |
-| `--prometheus-components` | `kubelet,cadvisor` | Components to scrape metrics from |
+| `--prometheus-components` | `kubelet,cadvisor` | Comma-separated list of components to scrape |
 
 **Available Components:**
-- `kubelet` - Node metrics (CPU, memory, network, load averages)
+- `kubelet` - Node metrics (CPU, memory, network I/O, load averages)
 - `cadvisor` - Container metrics (per-container resource usage)
 - `apiserver` - API server metrics (request latency, counts)
 - `etcd` - etcd metrics (database size, latency)
@@ -207,54 +190,61 @@ ktop --metrics-source=prometheus \
 - `controller-manager` - Controller metrics (reconciliation)
 - `kube-proxy` - Network proxy metrics
 
-**Requirements for Prometheus Mode:**
-- RBAC permissions to access component `/metrics` endpoints
+**Requirements:**
+- RBAC permissions for component `/metrics` endpoints (see [RBAC Setup](#rbac-setup-for-prometheus) below)
 - Network access to Kubernetes component endpoints
-- May not work in managed Kubernetes (GKE, EKS, AKS) where component endpoints are restricted
+- **Note:** May not work in managed Kubernetes (GKE, EKS, AKS) where control plane access is restricted
 
-**Enhanced Metrics Available:**
-When using Prometheus mode, you get access to additional metrics including:
-- Network I/O statistics (Rx/Tx bytes)
-- System load averages (1m, 5m, 15m)
-- Container counts per node
-- Per-container resource breakdowns
-- And more...
+#### RBAC Setup for Prometheus
+
+Apply required permissions for accessing component `/metrics` endpoints:
+
+```bash
+kubectl apply -f https://raw.githubusercontent.com/vladimirvivien/ktop/main/hack/deploy/rbac-prometheus.yaml
+```
+
+You can also download and customize the manifest from [hack/deploy/rbac-prometheus.yaml](./hack/deploy/rbac-prometheus.yaml).
+
+### Fallback Mode (No Metrics)
+
+Skip metrics collection entirely and display only resource requests/limits:
+
+```bash
+ktop --metrics-source=none
+```
+
+**Use cases:**
+- Viewing resource allocations instead of actual usage
+- Clusters without metrics infrastructure
+- Testing ktop configuration
+
+**Behavior:** Immediate startup with no metrics collection; displays resource requests/limits and node allocatable capacity.
 
 ### Usage Examples
 
-**Example 1: Default behavior (backward compatible)**
 ```bash
+# Default: metrics-server with automatic fallback
 ktop
-# Uses metrics-server, falls back to requests/limits if unavailable
-```
 
-**Example 2: Prometheus with extended retention**
-```bash
+# Prometheus with extended retention
 ktop --metrics-source=prometheus --prometheus-retention=6h
-# Keeps metrics for 6 hours for trend analysis
-```
 
-**Example 3: Prometheus with minimal memory footprint**
-```bash
+# Prometheus with minimal memory footprint
 ktop --metrics-source=prometheus \
      --prometheus-components=kubelet \
      --prometheus-retention=30m \
      --prometheus-max-samples=5000
-# Only scrapes kubelet, shorter retention, fewer samples
-```
 
-**Example 4: Full control plane monitoring**
-```bash
+# Full control plane monitoring
 ktop --metrics-source=prometheus \
      --prometheus-components=kubelet,cadvisor,apiserver,etcd,scheduler,controller-manager
-# Monitors all control plane components
 ```
 
 ### Troubleshooting Metrics Sources
 
 **Error: "invalid metrics-source: xyz"**
 - Cause: Invalid source type specified
-- Solution: Use either `metrics-server` or `prometheus`
+- Solution: Use `metrics-server`, `prometheus`, or `none`
 
 **Error: "prometheus-scrape-interval must be >= 5s"**
 - Cause: Scrape interval too short
@@ -266,8 +256,17 @@ ktop --metrics-source=prometheus \
 
 **Error: "failed to start prometheus collection"**
 - Cause: Insufficient RBAC permissions or network access issues
-- Solution: Ensure you have permissions to access component metrics endpoints
-- Alternative: Use `--metrics-source=metrics-server` (default)
+- Solution: Check and apply required RBAC permissions
+  ```bash
+  # Check if you have required permissions
+  kubectl auth can-i get nodes/proxy
+  kubectl auth can-i get pods/proxy
+  kubectl auth can-i get --raw /metrics
+
+  # Apply RBAC permissions for Prometheus mode
+  kubectl apply -f https://raw.githubusercontent.com/vladimirvivien/ktop/main/hack/deploy/rbac-prometheus.yaml
+  ```
+- Alternative: Use `--metrics-source=metrics-server` or `--metrics-source=none`
 
 ### Column Filtering
 
@@ -316,33 +315,35 @@ Available pod columns:
 - CPU
 - MEMORY
 
-## ktop metrics
+## ktop UI
 
-The ktop UI provides several metrics including a high-level summary of workload components installed on your cluster:
+The ktop UI displays cluster workload information across three panels:
 
 <h1 align="center">
     <img src="./docs/ktop-cluster-summary.png" alt="ktop">
 </h1>
 
-### Usage metrics from `metrics-server`
+**Cluster Summary Panel** - High-level overview of cluster resources and workload counts
 
-ktop can display metrics with or without Metrics Server present.  When a cluster has an instance of a [kubernetes-sigs/metrics-server](https://github.com/kubernetes-sigs/metrics-server) installed (and properly configured), ktop will automatically discover the server as shown:
+**Nodes Panel** - Node status, capacity, and resource usage (or allocations)
+
+**Pods Panel** - Pod status, resource usage (or requests/limits), and placement
+
+### Metrics Display
+
+When metrics are available (metrics-server or Prometheus), ktop displays real-time resource utilization:
 
 <h1 align="center">
     <img src="./docs/ktop-metrics-connected.png" alt="ktop">
 </h1>
 
-With the metrics server installed, ktop will display resource utilization metrics as reported by the Metrics Server.
-
-### Request/limit metrics
-
-When there is no Metrics Server present in the cluster, ktop will still work:
+When metrics are unavailable, ktop automatically displays resource requests and limits:
 
 <h1 align="center">
     <img src="./docs/ktop-metrics-not-connected.png" alt="ktop">
 </h1>
 
-Instead of resource utilization, ktop will display resource requests and limits for nodes and pods.
+See [Metrics Source Selection](#metrics-source-selection) for configuration options.
 
 ## Known issue
 For ktop to work properly, the user account that is used (from the Kubernetes config) must have access rights to the following API objects, and their metrics: 
@@ -375,10 +376,3 @@ arguments to adjust your connection parameters:
 
 There are many other arguments that may be configured to create a successful connection to the API server.
 See the full list of CLI arguments in the *Running ktop* section above.
-
-## Roadmap
-
-* A multi-page UI to display metrics for additional components
-* Display OOM processes
-* Additional installation methods (Homebrew, linux packages, etc)
-* Etc
