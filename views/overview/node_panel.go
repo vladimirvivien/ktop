@@ -2,6 +2,7 @@ package overview
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -12,18 +13,26 @@ import (
 )
 
 type nodePanel struct {
-	app      *application.Application
-	title    string
-	root     *tview.Flex
-	children []tview.Primitive
-	listCols []string
-	list     *tview.Table
-	laidout  bool
-	colMap   map[string]int // Maps column name to position index
+	app         *application.Application
+	title       string
+	root        *tview.Flex
+	children    []tview.Primitive
+	listCols    []string
+	list        *tview.Table
+	laidout     bool
+	colMap      map[string]int    // Maps column name to position index
+	sortColumn  string            // Current sort column
+	sortAsc     bool              // Sort direction: true=ascending, false=descending
+	currentData []model.NodeModel // Store current data for re-sorting
 }
 
 func NewNodePanel(app *application.Application, title string) ui.Panel {
-	p := &nodePanel{app: app, title: title}
+	p := &nodePanel{
+		app:        app,
+		title:      title,
+		sortColumn: "NAME", // Default sort by NAME
+		sortAsc:    true,   // Default ascending
+	}
 	p.Layout(nil)
 	return p
 }
@@ -39,9 +48,20 @@ func (p *nodePanel) Layout(_ interface{}) {
 		p.list.SetFocusFunc(func() {
 			p.list.SetSelectable(true, false)
 			p.list.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorYellow).Foreground(tcell.ColorBlue))
+			p.list.Select(1, 0) // Select row 1 (first data row), column 0
 		})
 		p.list.SetBlurFunc(func() {
 			p.list.SetSelectable(false, false)
+		})
+
+		// Capture keyboard events for sorting shortcuts
+		p.list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			if event.Key() == tcell.KeyRune {
+				if p.handleSortKey(event.Rune()) {
+					return nil // Event consumed
+				}
+			}
+			return event // Pass through unhandled events
 		})
 
 		p.root = tview.NewFlex().SetDirection(tview.FlexRow).
@@ -51,6 +71,75 @@ func (p *nodePanel) Layout(_ interface{}) {
 		p.root.SetTitleAlign(tview.AlignLeft)
 		p.laidout = true
 	}
+}
+
+// formatColumnHeader formats a column header with keyboard shortcut hint and sort indicator
+func (p *nodePanel) formatColumnHeader(col string) string {
+	if len(col) == 0 {
+		return col
+	}
+
+	// Map column name to keyboard shortcut key
+	columnToKey := map[string]rune{
+		"NAME":        'n',
+		"STATUS":      's',
+		"AGE":         'a',
+		"VERSION":     'v',
+		"INT/EXT IPs": 'i',
+		"OS/ARC":      'o',
+		"PODS/IMGs":   'p',
+		"DISK":        'd',
+		"CPU":         'c',
+		"MEM":         'm',
+	}
+
+	// Find the shortcut key for this column
+	key, exists := columnToKey[col]
+	var formatted string
+
+	if exists {
+		// Find position of key character (case-insensitive)
+		keyPos := -1
+		colUpper := strings.ToUpper(col)
+		keyUpper := strings.ToUpper(string(key))
+		for i, ch := range colUpper {
+			if string(ch) == keyUpper {
+				keyPos = i
+				break
+			}
+		}
+
+		if keyPos >= 0 && keyPos < len(col) {
+			// Build formatted string with highlighted character at correct position
+			before := col[:keyPos]
+			highlighted := string(col[keyPos])
+			after := ""
+			if keyPos+1 < len(col) {
+				after = col[keyPos+1:]
+			}
+			formatted = fmt.Sprintf("%s[%s::b]%s[%s::-]%s",
+				before, ui.Theme.HeaderShortcutKey, highlighted, ui.Theme.HeaderForeground, after)
+		} else {
+			// Fallback: highlight first character if position not found
+			formatted = fmt.Sprintf("[%s::b]%c[%s::-]%s",
+				ui.Theme.HeaderShortcutKey, col[0], ui.Theme.HeaderForeground, col[1:])
+		}
+	} else {
+		// No mapping found, highlight first character
+		formatted = fmt.Sprintf("[%s::b]%c[%s::-]%s",
+			ui.Theme.HeaderShortcutKey, col[0], ui.Theme.HeaderForeground, col[1:])
+	}
+
+	// Add sort indicator if this is the active sort column
+	if col == p.sortColumn {
+		if p.sortAsc {
+			formatted += " ▲" // Ascending
+		} else {
+			formatted += " ▼" // Descending
+		}
+	}
+
+	return formatted
 }
 
 func (p *nodePanel) DrawHeader(data interface{}) {
@@ -70,7 +159,7 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 			SetBackgroundColor(tcell.ColorDarkGreen).
 			SetMaxWidth(1).
 			SetExpansion(0).
-			SetSelectable(false),
+			SetSelectable(true),
 	)
 
 	p.listCols = cols
@@ -78,13 +167,17 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 	// Set column headers and build column map
 	for i, col := range p.listCols {
 		pos := i + 1
+
+		// Format column header with keyboard shortcut hint and sort indicator
+		headerText := p.formatColumnHeader(col)
+
 		p.list.SetCell(0, pos,
-			tview.NewTableCell(col).
+			tview.NewTableCell(headerText).
 				SetTextColor(tcell.ColorWhite).
 				SetAlign(tview.AlignLeft).
 				SetBackgroundColor(tcell.ColorDarkGreen).
 				SetExpansion(100).
-				SetSelectable(false),
+				SetSelectable(true),
 		)
 
 		// Map column name to its position
@@ -92,11 +185,89 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 	}
 }
 
+// GetSortParams returns the current sort column and direction
+func (p *nodePanel) GetSortParams() (string, bool) {
+	return p.sortColumn, p.sortAsc
+}
+
+// toggleSort toggles the sort column and direction
+func (p *nodePanel) toggleSort(columnName string) {
+	if columnName == p.sortColumn {
+		// Same column - toggle direction
+		p.sortAsc = !p.sortAsc
+	} else {
+		// New column - start with ascending
+		p.sortColumn = columnName
+		p.sortAsc = true
+	}
+
+	// Re-sort and redraw with current data
+	if len(p.currentData) > 0 {
+		// Clear and redraw header with updated sort indicators
+		p.list.Clear()
+		p.DrawHeader(p.listCols)
+
+		// Redraw body with re-sorted data
+		p.DrawBody(p.currentData)
+
+		// Trigger screen refresh
+		if p.app != nil {
+			p.app.Refresh()
+		}
+	}
+}
+
+// handleSortKey processes keyboard shortcuts for sorting
+// Returns true if the key was handled, false otherwise
+func (p *nodePanel) handleSortKey(key rune) bool {
+	// Map keyboard shortcuts to column names
+	keyToColumn := map[rune]string{
+		'n': "NAME",
+		's': "STATUS",
+		'a': "AGE",
+		'v': "VERSION",
+		'i': "INT/EXT IPs",
+		'o': "OS/ARC",
+		'p': "PODS/IMGs",
+		'd': "DISK",
+		'c': "CPU",
+		'm': "MEM",
+	}
+
+	columnName, exists := keyToColumn[key]
+	if !exists {
+		return false
+	}
+
+	// Check if this column is visible (when using column filtering)
+	columnVisible := false
+	for _, col := range p.listCols {
+		if col == columnName {
+			columnVisible = true
+			break
+		}
+	}
+
+	if !columnVisible {
+		return false
+	}
+
+	// Toggle sort for this column
+	p.toggleSort(columnName)
+	return true
+}
+
 func (p *nodePanel) DrawBody(data interface{}) {
 	nodes, ok := data.([]model.NodeModel)
 	if !ok {
 		panic(fmt.Sprintf("NodePanel.DrawBody: unexpected type %T", data))
 	}
+
+	// Store the data for re-sorting
+	p.currentData = nodes
+
+	// Sort nodes according to current sort state
+	model.SortNodeModelsBy(nodes, p.sortColumn, p.sortAsc)
 
 	// Check if usage metrics are available by looking at the actual data in the models
 	// Don't rely on AssertMetricsAvailable() as it's cached and unreliable

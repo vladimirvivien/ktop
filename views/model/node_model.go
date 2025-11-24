@@ -148,7 +148,154 @@ func GetNodeIp(node *coreV1.Node, addrType coreV1.NodeAddressType) string {
 }
 
 func SortNodeModels(nodes []NodeModel) {
-	sort.Slice(nodes, func(i, j int) bool {
-		return nodes[i].Name < nodes[j].Name
-	})
+	SortNodeModelsBy(nodes, "NAME", true)
+}
+
+// SortNodeModelsBy sorts nodes by the specified column and direction
+func SortNodeModelsBy(nodes []NodeModel, column string, ascending bool) {
+	var sortFunc func(i, j int) bool
+
+	switch column {
+	case "NAME":
+		sortFunc = func(i, j int) bool {
+			return nodes[i].Name < nodes[j].Name
+		}
+
+	case "STATUS":
+		sortFunc = func(i, j int) bool {
+			// Ready before NotReady
+			if nodes[i].Status == nodes[j].Status {
+				return nodes[i].Name < nodes[j].Name
+			}
+			return nodes[i].Status > nodes[j].Status
+		}
+
+	case "AGE":
+		sortFunc = func(i, j int) bool {
+			// Older nodes first (earlier creation time)
+			if nodes[i].CreationTime.Equal(&nodes[j].CreationTime) {
+				return nodes[i].Name < nodes[j].Name
+			}
+			return nodes[i].CreationTime.Before(&nodes[j].CreationTime)
+		}
+
+	case "VERSION":
+		sortFunc = func(i, j int) bool {
+			if nodes[i].KubeletVersion == nodes[j].KubeletVersion {
+				return nodes[i].Name < nodes[j].Name
+			}
+			return nodes[i].KubeletVersion < nodes[j].KubeletVersion
+		}
+
+	case "INT/EXT IPs":
+		sortFunc = func(i, j int) bool {
+			if nodes[i].InternalIP == nodes[j].InternalIP {
+				return nodes[i].Name < nodes[j].Name
+			}
+			return nodes[i].InternalIP < nodes[j].InternalIP
+		}
+
+	case "OS/ARC":
+		sortFunc = func(i, j int) bool {
+			osArcI := nodes[i].OSImage + "/" + nodes[i].Architecture
+			osArcJ := nodes[j].OSImage + "/" + nodes[j].Architecture
+			if osArcI == osArcJ {
+				return nodes[i].Name < nodes[j].Name
+			}
+			return osArcI < osArcJ
+		}
+
+	case "PODS/IMGs":
+		sortFunc = func(i, j int) bool {
+			if nodes[i].PodsCount == nodes[j].PodsCount {
+				if nodes[i].ContainerImagesCount == nodes[j].ContainerImagesCount {
+					return nodes[i].Name < nodes[j].Name
+				}
+				return nodes[i].ContainerImagesCount < nodes[j].ContainerImagesCount
+			}
+			return nodes[i].PodsCount < nodes[j].PodsCount
+		}
+
+	case "DISK":
+		sortFunc = func(i, j int) bool {
+			diskI := int64(0)
+			diskJ := int64(0)
+
+			if nodes[i].AllocatableStorageQty != nil {
+				diskI = nodes[i].AllocatableStorageQty.Value()
+			}
+			if nodes[j].AllocatableStorageQty != nil {
+				diskJ = nodes[j].AllocatableStorageQty.Value()
+			}
+
+			if diskI == diskJ {
+				return nodes[i].Name < nodes[j].Name
+			}
+			return diskI < diskJ
+		}
+
+	case "CPU":
+		sortFunc = func(i, j int) bool {
+			cpuI := int64(0)
+			cpuJ := int64(0)
+
+			// Prefer usage metrics, fall back to requested if unavailable
+			if nodes[i].UsageCpuQty != nil && nodes[i].UsageCpuQty.MilliValue() > 0 {
+				cpuI = nodes[i].UsageCpuQty.MilliValue()
+			} else if nodes[i].RequestedPodCpuQty != nil {
+				cpuI = nodes[i].RequestedPodCpuQty.MilliValue()
+			}
+
+			if nodes[j].UsageCpuQty != nil && nodes[j].UsageCpuQty.MilliValue() > 0 {
+				cpuJ = nodes[j].UsageCpuQty.MilliValue()
+			} else if nodes[j].RequestedPodCpuQty != nil {
+				cpuJ = nodes[j].RequestedPodCpuQty.MilliValue()
+			}
+
+			if cpuI == cpuJ {
+				return nodes[i].Name < nodes[j].Name
+			}
+			return cpuI < cpuJ
+		}
+
+	case "MEM":
+		sortFunc = func(i, j int) bool {
+			memI := int64(0)
+			memJ := int64(0)
+
+			// Prefer usage metrics, fall back to requested if unavailable
+			if nodes[i].UsageMemQty != nil && nodes[i].UsageMemQty.Value() > 0 {
+				memI = nodes[i].UsageMemQty.Value()
+			} else if nodes[i].RequestedPodMemQty != nil {
+				memI = nodes[i].RequestedPodMemQty.Value()
+			}
+
+			if nodes[j].UsageMemQty != nil && nodes[j].UsageMemQty.Value() > 0 {
+				memJ = nodes[j].UsageMemQty.Value()
+			} else if nodes[j].RequestedPodMemQty != nil {
+				memJ = nodes[j].RequestedPodMemQty.Value()
+			}
+
+			if memI == memJ {
+				return nodes[i].Name < nodes[j].Name
+			}
+			return memI < memJ
+		}
+
+	default:
+		// Default to NAME sorting
+		sortFunc = func(i, j int) bool {
+			return nodes[i].Name < nodes[j].Name
+		}
+	}
+
+	// Apply sort
+	if ascending {
+		sort.Slice(nodes, sortFunc)
+	} else {
+		// Reverse for descending
+		sort.Slice(nodes, func(i, j int) bool {
+			return !sortFunc(i, j)
+		})
+	}
 }

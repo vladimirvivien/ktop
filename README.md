@@ -315,6 +315,43 @@ Available pod columns:
 - CPU
 - MEMORY
 
+### Column Sorting
+
+Both the nodes and pods tables support interactive column sorting using keyboard shortcuts. The sortable column is indicated by a highlighted character in the column header, and the active sort column displays an arrow (▲ for ascending, ▼ for descending).
+
+**How to Sort:**
+- Press `tab` key to cycle through and select panel
+- Press the highlighted character key to sort by that column
+- Press the same key again to toggle between ascending and descending order
+- Press a different key to switch to sorting by a different column
+
+**Node Panel Shortcuts:**
+- `n` - Sort by NAME
+- `s` - Sort by STATUS
+- `a` - Sort by AGE
+- `v` - Sort by VERSION
+- `i` - Sort by INT/EXT IPs
+- `o` - Sort by OS/ARC
+- `p` - Sort by PODS/IMGs
+- `d` - Sort by DISK
+- `c` - Sort by CPU
+- `m` - Sort by MEM
+
+**Pod Panel Shortcuts:**
+- `n` - Sort by NAMESPACE
+- `p` - Sort by POD
+- `r` - Sort by READY
+- `s` - Sort by STATUS
+- `t` - Sort by RESTARTS
+- `a` - Sort by AGE
+- `v` - Sort by VOLS
+- `i` - Sort by IP
+- `o` - Sort by NODE
+- `c` - Sort by CPU
+- `m` - Sort by MEMORY
+
+**Note:** Keyboard shortcuts only work for visible columns. When using column filtering (`--node-columns` or `--pod-columns`), only the shortcuts for displayed columns will be active.
+
 ## ktop UI
 
 The ktop UI displays cluster workload information across three panels:
