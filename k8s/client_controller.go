@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/vladimirvivien/ktop/health"
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/views/model"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	appsV1Informers "k8s.io/client-go/informers/apps/v1"
 	batchV1Informers "k8s.io/client-go/informers/batch/v1"
@@ -42,6 +44,9 @@ type Controller struct {
 	nodeRefreshFunc    RefreshNodesFunc
 	podRefreshFunc     RefreshPodsFunc
 	summaryRefreshFunc RefreshSummaryFunc
+
+	// API health tracking
+	healthTracker *health.APIHealthTracker
 }
 
 func newController(client *Client) *Controller {
@@ -66,6 +71,25 @@ func (c *Controller) SetClusterSummaryRefreshFunc(fn RefreshSummaryFunc) *Contro
 func (c *Controller) SetMetricsSource(source metrics.MetricsSource) *Controller {
 	c.metricsSource = source
 	return c
+}
+
+func (c *Controller) SetHealthTracker(tracker *health.APIHealthTracker) *Controller {
+	c.healthTracker = tracker
+	return c
+}
+
+// reportSuccess reports a successful API operation to the health tracker
+func (c *Controller) reportSuccess() {
+	if c.healthTracker != nil {
+		c.healthTracker.ReportSuccess()
+	}
+}
+
+// reportError reports an API error to the health tracker
+func (c *Controller) reportError(err error) {
+	if c.healthTracker != nil {
+		c.healthTracker.ReportError(err)
+	}
 }
 
 func (c *Controller) GetClient() *Client {
@@ -164,5 +188,58 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	c.setupNodeHandler(ctx, c.nodeRefreshFunc)
 	c.installPodsHandler(ctx, c.podRefreshFunc)
 
+	// Start API health monitor - makes periodic live API calls to detect connection loss
+	c.startAPIHealthMonitor(ctx)
+
 	return nil
+}
+
+// startAPIHealthMonitor periodically checks API server connectivity
+// This is needed because informers cache data and don't report connection loss
+func (c *Controller) startAPIHealthMonitor(ctx context.Context) {
+	if c.healthTracker == nil {
+		return
+	}
+
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				c.checkAPIHealth(ctx)
+			}
+		}
+	}()
+}
+
+// checkAPIHealth makes a lightweight API call to verify connectivity
+// This bypasses all caching to get an accurate health status
+func (c *Controller) checkAPIHealth(ctx context.Context) {
+	if c.healthTracker == nil {
+		return
+	}
+
+	// Use a short timeout for the health check
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// Invalidate discovery cache to ensure fresh API call
+	c.client.discoClient.Invalidate()
+
+	// Make a direct API call that cannot be cached - list namespaces with a fresh request
+	// This is the most reliable way to check if the API server is reachable
+	_, err := c.client.kubeClient.CoreV1().Namespaces().List(checkCtx, metav1.ListOptions{
+		Limit:          1,
+		ResourceVersion: "0", // Force fresh fetch from API server, not etcd cache
+	})
+	if err != nil {
+		c.reportError(err)
+		return
+	}
+
+	c.reportSuccess()
 }

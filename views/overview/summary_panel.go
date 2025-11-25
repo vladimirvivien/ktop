@@ -59,7 +59,14 @@ func (p *clusterSummaryPanel) Layout(data interface{}) {
 func (p *clusterSummaryPanel) DrawHeader(data interface{}) {}
 
 func (p *clusterSummaryPanel) DrawBody(data interface{}) {
-	colorKeys := ui.ColorKeys{0: "green", 40: "yellow", 80: "red"}
+	// Update title with disconnected state if applicable
+	if p.app.IsAPIDisconnected() {
+		p.root.SetTitle(fmt.Sprintf("%s [red][DISCONNECTED - Press R to reconnect]", p.GetTitle()))
+	} else {
+		p.root.SetTitle(p.GetTitle())
+	}
+
+	colorKeys := ui.ColorKeys{0: "olivedrab", 40: "yellow", 80: "red"}
 	graphSize := 40
 	switch summary := data.(type) {
 	case model.ClusterSummary:

@@ -199,6 +199,10 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	}
 
 	app := application.New(k8sC, metricsSource)
+
+	// Connect API health tracker to the k8s controller
+	k8sC.Controller().SetHealthTracker(app.GetAPIHealthTracker())
+
 	app.WelcomeBanner()
 
 	// Process column options
