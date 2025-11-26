@@ -29,8 +29,9 @@ type appPanel struct {
 	root     *tview.Pages // CHANGED: from *tview.Flex to *tview.Pages
 
 	// Toast tracking
-	currentToastID string
-	toastMutex     sync.Mutex
+	currentToastID      string
+	toastMutex          sync.Mutex
+	toastButtonCallback ui.ToastCallback // Callback for toast button presses
 }
 
 func newPanel(app *tview.Application) *appPanel {
@@ -152,8 +153,18 @@ func (p *appPanel) showModalView(t tview.Primitive) {
 	p.tviewApp.SetRoot(t, false)
 }
 
-// showToast displays a toast notification with auto-dismiss
+// setToastButtonCallback sets the callback for toast button presses
+func (p *appPanel) setToastButtonCallback(callback ui.ToastCallback) {
+	p.toastButtonCallback = callback
+}
+
+// showToast displays a toast notification with auto-dismiss (no buttons)
 func (p *appPanel) showToast(message string, level ui.ToastLevel, duration time.Duration) string {
+	return p.showToastWithButtons(message, level, duration, nil)
+}
+
+// showToastWithButtons displays a toast notification with buttons
+func (p *appPanel) showToastWithButtons(message string, level ui.ToastLevel, duration time.Duration, buttons []string) string {
 	p.toastMutex.Lock()
 	defer p.toastMutex.Unlock()
 
@@ -162,20 +173,45 @@ func (p *appPanel) showToast(message string, level ui.ToastLevel, duration time.
 		p.root.RemovePage(p.currentToastID)
 	}
 
-	// Create toast using tview.Modal
-	toast := ui.NewToast(message, level)
+	toastID := fmt.Sprintf("toast-%d", time.Now().UnixNano())
+
+	// Create callback that dismisses toast and calls user callback
+	// Run in goroutine to avoid blocking the modal's event handler
+	wrappedCallback := func(buttonLabel string) {
+		go func() {
+			// Dismiss toast first
+			p.tviewApp.QueueUpdateDraw(func() {
+				p.dismissToastInternal(toastID)
+			})
+			// Then call the user callback
+			if p.toastButtonCallback != nil {
+				p.toastButtonCallback(buttonLabel)
+			}
+		}()
+	}
+
+	var toast *tview.Modal
+	if len(buttons) > 0 {
+		// Create toast with buttons
+		toast = ui.NewToastWithButtons(message, level, buttons, wrappedCallback)
+	} else {
+		// Create toast without buttons but with ESC handler for quitting
+		toast = ui.NewToastWithEscHandler(message, level, wrappedCallback)
+	}
 
 	// Add to pages with unique ID
-	toastID := fmt.Sprintf("toast-%d", time.Now().UnixNano())
 	p.root.AddPage(toastID, toast, true, true)
 	p.currentToastID = toastID
+
+	// Ensure the modal has focus so it can receive key input
+	p.tviewApp.SetFocus(toast)
 
 	// Auto-dismiss after duration (0 = no timeout, manual dismiss only)
 	if duration > 0 {
 		go func() {
 			time.Sleep(duration)
 			p.tviewApp.QueueUpdateDraw(func() {
-				p.dismissToast(toastID)
+				p.dismissToastInternal(toastID)
 			})
 		}()
 	}
@@ -183,13 +219,28 @@ func (p *appPanel) showToast(message string, level ui.ToastLevel, duration time.
 	return toastID
 }
 
-// dismissToast removes a toast notification by ID
+// dismissToast removes a toast notification by ID (public, acquires lock)
 func (p *appPanel) dismissToast(toastID string) {
 	p.toastMutex.Lock()
 	defer p.toastMutex.Unlock()
+	p.dismissToastInternal(toastID)
+}
 
+// dismissToastInternal removes a toast notification by ID (internal, no lock)
+// Must be called from within QueueUpdateDraw or with toastMutex held
+func (p *appPanel) dismissToastInternal(toastID string) {
 	if p.currentToastID == toastID {
 		p.root.RemovePage(toastID)
 		p.currentToastID = ""
+		// Switch back to main page and restore focus
+		p.root.SwitchToPage("main")
+		p.tviewApp.SetFocus(p.root)
 	}
+}
+
+// hasActiveToast returns true if a toast is currently displayed
+func (p *appPanel) hasActiveToast() bool {
+	p.toastMutex.Lock()
+	defer p.toastMutex.Unlock()
+	return p.currentToastID != ""
 }

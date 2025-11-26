@@ -41,66 +41,87 @@ func ColorKeysFromSlice(colors []string) ColorKeys {
 	return keys
 }
 
-// BarGraph returns a colorized string, like ||||||||, which represents
-// a bargrah built using scale and ratio values.  Colors provide key mapping
-// to colorize the graph basede on the value of ratio.
-// If ratio is zero (nothing to graph), the function returns a series of dots.
+// BarGraph returns a colorized string using braille characters with fractional precision.
+// Each character position can show 8 levels of fill (using braille dot patterns),
+// giving much finer granularity than simple filled/empty blocks.
+// Colors provide key mapping to colorize the graph based on the value of ratio.
 func BarGraph(scale int, ratio Ratio, colors ColorKeys) string {
 	if scale == 0 {
 		return ""
 	}
 
-	normVal := float64(ratio) * float64(scale)
-	graphVal := int(math.Ceil(normVal))
-
 	var graph strings.Builder
-	var color string
 
-	// nothing to graph
-	if normVal == 0 {
-		if c, found := colors[0]; !found {
-			color = colorZeroGraph
-		} else {
-			color = c
-		}
-
-		graph.WriteString("[")
-		graph.WriteString(color)
-		graph.WriteString("]")
-		for j := 0; j < (scale - graphVal); j++ {
-			graph.WriteString(" ")
+	// nothing to graph - show empty bar
+	if ratio == 0 {
+		graph.WriteString("[darkgray]")
+		for j := 0; j < scale; j++ {
+			graph.WriteString(Icons.BargraphEmpty)
 		}
 		return graph.String()
 	}
 
-	// assign color
-	if colors == nil || len(colors) == 0 {
-		color = colorNoKeys
+	// Clamp ratio to [0, 1]
+	if ratio > 1 {
+		ratio = 1
 	}
 
-	key := int(float64(ratio) * 100)
+	// Calculate total "dots" available (8 dots per character * scale characters)
+	totalDots := scale * 8
+	filledDots := int(math.Round(float64(ratio) * float64(totalDots)))
 
-	for _, k := range colors.Keys() {
-		if key >= k {
-			color = colors[k]
+	// Build color keys for threshold lookup
+	colorKeys := colors.Keys()
+
+	// Draw each character position
+	for i := 0; i < scale; i++ {
+		// Calculate how many dots should be filled in this character (0-8)
+		startDot := i * 8
+		endDot := startDot + 8
+		dotsInThisChar := 0
+
+		if filledDots >= endDot {
+			// This character is fully filled
+			dotsInThisChar = 8
+		} else if filledDots > startDot {
+			// This character is partially filled
+			dotsInThisChar = filledDots - startDot
 		}
-	}
+		// else: dotsInThisChar = 0 (empty)
 
-	if color == "" {
-		color = colorNoKeys
-	}
+		// Calculate what percentage this position represents (for color selection)
+		positionPercent := int((float64(i) / float64(scale)) * 100)
 
-	// draw graph
-	graph.WriteString(string(Icons.BargraphLBorder))
-	graph.WriteString(color)
-	graph.WriteString(string(Icons.BargraphRBorder))
+		// Find the appropriate color for this position
+		segmentColor := colorNoKeys
+		if colors != nil && len(colors) > 0 {
+			for _, k := range colorKeys {
+				if positionPercent >= k {
+					segmentColor = colors[k]
+				}
+			}
+		}
 
-	for i := 0; i < int(math.Min(float64(scale), float64(graphVal))); i++ {
-		graph.WriteRune(Icons.BargraphChar)
-	}
+		// Select the appropriate braille character
+		var brailleChar string
+		if dotsInThisChar == 0 {
+			// Empty - use darkgray for consistency
+			graph.WriteString("[darkgray]")
+			graph.WriteString(Icons.BargraphEmpty)
+			continue
+		} else if dotsInThisChar == 8 {
+			// Fully filled
+			brailleChar = Icons.BargraphFull
+		} else {
+			// Partially filled (1-7 dots)
+			brailleChar = Icons.BargraphPartials[dotsInThisChar-1]
+		}
 
-	for j := 0; j < (scale - graphVal); j++ {
-		graph.WriteString(" ")
+		// Write this character with its color
+		graph.WriteString("[")
+		graph.WriteString(segmentColor)
+		graph.WriteString("]")
+		graph.WriteString(brailleChar)
 	}
 
 	return graph.String()

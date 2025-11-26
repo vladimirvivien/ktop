@@ -10,6 +10,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/vladimirvivien/ktop/buildinfo"
+	"github.com/vladimirvivien/ktop/health"
 
 	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/metrics"
@@ -40,6 +41,10 @@ type Application struct {
 	lastMetricsSource     string
 	loadingToastID        string
 	loadingToastStartTime time.Time
+
+	// API health tracking
+	apiHealthTracker   *health.APIHealthTracker
+	apiHealthToastID   string // Persistent toast for API health issues
 }
 
 func New(k8sC *k8s.Client, metricsSource metrics.MetricsSource) *Application {
@@ -54,6 +59,48 @@ func New(k8sC *k8s.Client, metricsSource metrics.MetricsSource) *Application {
 		pageIdx:       -1,
 		tabIdx:        -1,
 	}
+
+	// Initialize API health tracker with persistent toast callback
+	app.apiHealthTracker = health.NewAPIHealthTracker(func(state health.APIState, msg string) {
+		// Use QueueUpdateDraw to safely update UI from callback
+		tapp.QueueUpdateDraw(func() {
+			switch state {
+			case health.APIHealthy:
+				// Connection restored - dismiss persistent toast and show brief success (no buttons)
+				if app.apiHealthToastID != "" {
+					app.DismissToast(app.apiHealthToastID)
+					app.apiHealthToastID = ""
+				}
+				app.ShowToast(msg, ui.ToastSuccess, 3*time.Second)
+
+			case health.APIUnhealthy:
+				// Connection lost or retrying - show persistent toast (no buttons during retry)
+				if app.apiHealthToastID != "" {
+					app.DismissToast(app.apiHealthToastID)
+				}
+				// Duration 0 = persistent, no auto-dismiss, no buttons during retry sequence
+				app.apiHealthToastID = app.ShowToast(msg, ui.ToastWarning, 0)
+
+			case health.APIDisconnected:
+				// All retries exhausted - show persistent error toast with Retry and Quit buttons
+				if app.apiHealthToastID != "" {
+					app.DismissToast(app.apiHealthToastID)
+				}
+				// Duration 0 = persistent, no auto-dismiss
+				app.apiHealthToastID = app.ShowToastWithButtons(msg, ui.ToastError, 0, []string{"Retry", "Quit"})
+			}
+		})
+	})
+
+	// Set up callbacks for health state changes
+	app.apiHealthTracker.SetOnDisconnected(func() {
+		app.Refresh() // Trigger UI refresh to show zeroed values
+	})
+
+	app.apiHealthTracker.SetOnHealthy(func() {
+		app.Refresh() // Trigger UI refresh when reconnected
+	})
+
 	return app
 }
 
@@ -63,6 +110,29 @@ func (app *Application) GetK8sClient() *k8s.Client {
 
 func (app *Application) GetMetricsSource() metrics.MetricsSource {
 	return app.metricsSource
+}
+
+// GetAPIHealthTracker returns the API health tracker for controllers to report status
+func (app *Application) GetAPIHealthTracker() *health.APIHealthTracker {
+	return app.apiHealthTracker
+}
+
+// GetAPIHealth returns the current API health state
+func (app *Application) GetAPIHealth() health.APIState {
+	if app.apiHealthTracker == nil {
+		return health.APIHealthy
+	}
+	return app.apiHealthTracker.GetState()
+}
+
+// IsAPIHealthy returns true if the API connection is healthy
+func (app *Application) IsAPIHealthy() bool {
+	return app.apiHealthTracker == nil || app.apiHealthTracker.IsHealthy()
+}
+
+// IsAPIDisconnected returns true if the API connection has been lost
+func (app *Application) IsAPIDisconnected() bool {
+	return app.apiHealthTracker != nil && app.apiHealthTracker.IsDisconnected()
 }
 
 func (app *Application) AddPage(panel ui.PanelController) {
@@ -75,6 +145,15 @@ func (app *Application) ShowModal(view tview.Primitive) {
 
 func (app *Application) ShowToast(message string, level ui.ToastLevel, duration time.Duration) string {
 	return app.panel.showToast(message, level, duration)
+}
+
+func (app *Application) ShowToastWithButtons(message string, level ui.ToastLevel, duration time.Duration, buttons []string) string {
+	return app.panel.showToastWithButtons(message, level, duration, buttons)
+}
+
+// HasActiveToast returns true if a toast modal is currently displayed
+func (app *Application) HasActiveToast() bool {
+	return app.panel.hasActiveToast()
 }
 
 func (app *Application) DismissToast(toastID string) {
@@ -121,7 +200,7 @@ func (app *Application) setup(ctx context.Context) error {
 	app.panel.Layout(app.pages)
 
 	var hdr strings.Builder
-	hdr.WriteString("%c [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green]metrics:")
+	hdr.WriteString("%s [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green]metrics:")
 	// Check MetricsSource health instead of blocking network call
 	// This provides accurate status for both metrics-server and prometheus sources
 	if app.metricsSource != nil && app.metricsSource.IsHealthy() {
@@ -159,9 +238,37 @@ func (app *Application) setup(ctx context.Context) error {
 	// Start periodic header refresh to update metrics status
 	go app.refreshHeaderPeriodically(ctx)
 
+	// Set toast button callback to handle Retry and Quit buttons
+	app.panel.setToastButtonCallback(func(buttonLabel string) {
+		switch buttonLabel {
+		case "Quit":
+			app.Stop()
+		case "Retry":
+			if app.IsAPIDisconnected() {
+				app.apiHealthTracker.TryReconnect()
+			}
+		}
+	})
+
 	app.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		// When a toast modal is displayed, let it handle all input
+		// Don't process global shortcuts here - the modal handles them
+		if app.HasActiveToast() {
+			return event // Pass through to modal
+		}
+
+		// Handle ESC to quit (only when no modal is shown)
 		if event.Key() == tcell.KeyEsc {
 			app.Stop()
+			return nil
+		}
+
+		// Handle 'R' key for reconnecting when API is disconnected
+		if event.Key() == tcell.KeyRune && (event.Rune() == 'R' || event.Rune() == 'r') {
+			if app.IsAPIDisconnected() {
+				app.apiHealthTracker.TryReconnect()
+				return nil
+			}
 		}
 
 		if event.Key() == tcell.KeyTAB {
@@ -249,7 +356,7 @@ func (app *Application) refreshHeaderPeriodically(ctx context.Context) {
 // updateHeader refreshes the header with current metrics status
 func (app *Application) updateHeader() {
 	var hdr strings.Builder
-	hdr.WriteString("%c [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green]metrics:")
+	hdr.WriteString("%s [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green]metrics:")
 
 	// Check MetricsSource health
 	if app.metricsSource != nil && app.metricsSource.IsHealthy() {
@@ -277,9 +384,23 @@ func (app *Application) updateHeader() {
 
 // checkHealthTransition detects when metrics source transitions between healthy/unhealthy
 // and displays appropriate toast notifications
+// NOTE: Metrics toasts are suppressed when API server is unhealthy to reduce noise
 func (app *Application) checkHealthTransition() {
 	if app.metricsSource == nil {
 		// No metrics source (fallback mode) - no toasts
+		return
+	}
+
+	// IMPORTANT: If API server is unhealthy/disconnected, don't show metrics toasts
+	// The API health tracker handles all connection-related notifications
+	if !app.IsAPIHealthy() {
+		// Just track the state silently without showing toasts
+		app.lastHealthyState = app.metricsSource.IsHealthy()
+		// Dismiss any pending loading toast
+		if app.loadingToastID != "" {
+			app.DismissToast(app.loadingToastID)
+			app.loadingToastID = ""
+		}
 		return
 	}
 

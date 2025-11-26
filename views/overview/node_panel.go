@@ -278,18 +278,27 @@ func (p *nodePanel) DrawBody(data interface{}) {
 	var cpuRatio, memRatio ui.Ratio
 	var cpuGraph, memGraph string
 	var cpuMetrics, memMetrics string
-	colorKeys := ui.ColorKeys{0: "green", 50: "yellow", 90: "red"}
+	colorKeys := ui.ColorKeys{0: "olivedrab", 50: "yellow", 90: "red"}
 
-	p.root.SetTitle(fmt.Sprintf("%s(%d) ", p.GetTitle(), len(nodes)))
+	// Update title with disconnected state if applicable
+	if p.app.IsAPIDisconnected() {
+		p.root.SetTitle(fmt.Sprintf("%s(%d) [red][DISCONNECTED - Press R to reconnect]", p.GetTitle(), len(nodes)))
+	} else {
+		p.root.SetTitle(fmt.Sprintf("%s(%d) ", p.GetTitle(), len(nodes)))
+	}
 	p.root.SetTitleAlign(tview.AlignLeft)
 
 	for rowIdx, node := range nodes {
 		rowIdx++ // offset for header-row
 
+		// Determine row color based on node status
+		// Unhealthy nodes get their status color for the entire row
+		rowColor := ui.GetRowColorForStatus(node.Status, "node")
+
 		// Always render the legend column
 		controlLegend := ""
 		if node.Controller {
-			controlLegend = fmt.Sprintf("%c", ui.Icons.TrafficLight)
+			controlLegend = ui.Icons.TrafficLight
 		}
 
 		p.list.SetCell(
@@ -315,17 +324,19 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  node.Name,
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
 
 			case "STATUS":
+				// Status column: green for healthy, status color for unhealthy
+				statusColor := ui.GetTcellColor(ui.GetStatusColor(node.Status, "node"))
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  node.Status,
-						Color: tcell.ColorYellow,
+						Color: statusColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -335,7 +346,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  node.TimeSinceStart,
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -345,7 +356,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  node.KubeletVersion,
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -355,7 +366,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  fmt.Sprintf("%s/%s", node.InternalIP, node.ExternalIP),
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -365,7 +376,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  fmt.Sprintf("%s/%s", node.OSImage, node.Architecture),
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -375,7 +386,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  fmt.Sprintf("%d/%d", node.PodsCount, node.ContainerImagesCount),
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -385,7 +396,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  fmt.Sprintf("%dGi", node.AllocatableStorageQty.ScaledValue(resource.Giga)),
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -396,16 +407,22 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				if metricsDisabled || node.UsageCpuQty == nil {
 					cpuRatio = ui.GetRatio(float64(node.RequestedPodCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
 					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
+					// Color the percentage based on usage threshold
+					cpuPercentage := float64(cpuRatio) * 100
+					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dm/%dm (%1.0f%%)",
-						cpuGraph, node.RequestedPodCpuQty.MilliValue(), node.AllocatableCpuQty.MilliValue(), cpuRatio*100,
+						"[white][%s[white]] %dm/%dm ([%s]%1.0f%%[white])",
+						cpuGraph, node.RequestedPodCpuQty.MilliValue(), node.AllocatableCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
 					)
 				} else {
 					cpuRatio = ui.GetRatio(float64(node.UsageCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
 					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
+					// Color the percentage based on usage threshold
+					cpuPercentage := float64(cpuRatio) * 100
+					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dm/%dm (%1.0f%%)",
-						cpuGraph, node.UsageCpuQty.MilliValue(), node.AllocatableCpuQty.MilliValue(), cpuRatio*100,
+						"[white][%s[white]] %dm/%dm ([%s]%1.0f%%[white])",
+						cpuGraph, node.UsageCpuQty.MilliValue(), node.AllocatableCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
 					)
 				}
 
@@ -413,7 +430,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  cpuMetrics,
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -424,16 +441,22 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				if metricsDisabled || node.UsageMemQty == nil {
 					memRatio = ui.GetRatio(float64(node.RequestedPodMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
 					memGraph = ui.BarGraph(10, memRatio, colorKeys)
+					// Color the percentage based on usage threshold
+					memPercentage := float64(memRatio) * 100
+					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s/%s (%1.0f%%)",
-						memGraph, ui.FormatMemory(node.RequestedPodMemQty), ui.FormatMemory(node.AllocatableMemQty), memRatio*100,
+						"[white][%s[white]] %s/%s ([%s]%1.0f%%[white])",
+						memGraph, ui.FormatMemory(node.RequestedPodMemQty), ui.FormatMemory(node.AllocatableMemQty), memPercentageColor, memPercentage,
 					)
 				} else {
 					memRatio = ui.GetRatio(float64(node.UsageMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
 					memGraph = ui.BarGraph(10, memRatio, colorKeys)
+					// Color the percentage based on usage threshold
+					memPercentage := float64(memRatio) * 100
+					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s/%s (%1.0f%%)",
-						memGraph, ui.FormatMemory(node.UsageMemQty), ui.FormatMemory(node.AllocatableMemQty), memRatio*100,
+						"[white][%s[white]] %s/%s ([%s]%1.0f%%[white])",
+						memGraph, ui.FormatMemory(node.UsageMemQty), ui.FormatMemory(node.AllocatableMemQty), memPercentageColor, memPercentage,
 					)
 				}
 
@@ -441,7 +464,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  memMetrics,
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)

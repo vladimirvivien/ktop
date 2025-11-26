@@ -105,8 +105,10 @@ func (c *Controller) setupNodeHandler(ctx context.Context, handlerFunc RefreshNo
 func (c *Controller) refreshNodes(ctx context.Context, handlerFunc RefreshNodesFunc) error {
 	models, err := c.GetNodeModels(ctx)
 	if err != nil {
+		c.reportError(err)
 		return err
 	}
+	c.reportSuccess()
 	handlerFunc(ctx, models)
 	return nil
 }

@@ -85,8 +85,10 @@ func (c *Controller) installPodsHandler(ctx context.Context, refreshFunc Refresh
 func (c *Controller) refreshPods(ctx context.Context, refreshFunc RefreshPodsFunc) error {
 	models, err := c.GetPodModels(ctx)
 	if err != nil {
+		c.reportError(err)
 		return err
 	}
+	c.reportSuccess()
 	refreshFunc(ctx, models)
 	return nil
 }

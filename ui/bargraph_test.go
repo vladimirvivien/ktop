@@ -74,35 +74,58 @@ func TestBarGraph(t *testing.T) {
 			scale:     5,
 			ratio:     0,
 			colorKeys: ColorKeys{},
-			expected:  "[silver]     ",
+			expected:  "[darkgray]⠀⠀⠀⠀⠀",
 		},
 		{
 			name:      "no color",
 			scale:     10,
 			ratio:     0.10,
 			colorKeys: nil,
-			expected:  "[white]|         ",
+			// 10% of 10 chars = 1 full braille char (8 dots), remaining 9 empty
+			expected: "[white]⣿[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀",
 		},
 		{
 			name:      "2-color, unspecified color",
 			scale:     10,
 			ratio:     0.10,
 			colorKeys: ColorKeys{15: "green", 30: "red"},
-			expected:  "[white]|         ",
+			// 10% is below 15% threshold, so uses default white
+			expected: "[white]⣿[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀",
 		},
 		{
 			name:      "2-color, select color 1",
 			scale:     10,
 			ratio:     0.20,
 			colorKeys: ColorKeys{15: "green", 30: "red"},
-			expected:  "[green]||        ",
+			// 20% = 16 dots out of 80 = 2 full chars
+			// pos 0 (0%) -> white (below 15%), pos 1 (10%) -> white (below 15%)
+			expected: "[white]⣿[white]⣿[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀",
 		},
 		{
 			name:      "2-color, select color 2",
 			scale:     10,
 			ratio:     0.30,
 			colorKeys: ColorKeys{15: "green", 30: "red"},
-			expected:  "[red]|||       ",
+			// 30% = 24 dots out of 80 = 3 full chars
+			// pos 0 (0%) -> white, pos 1 (10%) -> white, pos 2 (20%) -> green (>=15%)
+			expected: "[white]⣿[white]⣿[green]⣿[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀[darkgray]⠀",
+		},
+		{
+			name:      "full bar",
+			scale:     5,
+			ratio:     1.0,
+			colorKeys: ColorKeys{0: "green", 50: "yellow", 90: "red"},
+			// 100% = all full, colors: pos0(0%)=green, pos1(20%)=green, pos2(40%)=green, pos3(60%)=yellow, pos4(80%)=yellow
+			expected: "[green]⣿[green]⣿[green]⣿[yellow]⣿[yellow]⣿",
+		},
+		{
+			name:      "fractional fill",
+			scale:     5,
+			ratio:     0.45,
+			colorKeys: ColorKeys{0: "green", 50: "yellow"},
+			// 45% of 40 dots = 18 dots = 2 full (16 dots) + 2 dots partial
+			// pos0(0%)=green full, pos1(20%)=green full, pos2(40%)=green partial(⡄)
+			expected: "[green]⣿[green]⣿[green]⡄[darkgray]⠀[darkgray]⠀",
 		},
 	}
 

@@ -260,16 +260,25 @@ func (p *podPanel) DrawBody(data interface{}) {
 	// Sort pods according to current sort state
 	model.SortPodModelsBy(pods, p.sortColumn, p.sortAsc)
 
-	colorKeys := ui.ColorKeys{0: "green", 50: "yellow", 90: "red"}
+	colorKeys := ui.ColorKeys{0: "olivedrab", 50: "yellow", 90: "red"}
 	var cpuRatio, memRatio ui.Ratio
 	var cpuGraph, memGraph string
 	var cpuMetrics, memMetrics string
 
-	p.root.SetTitle(fmt.Sprintf("%s(%d) ", p.GetTitle(), len(pods)))
+	// Update title with disconnected state if applicable
+	if p.app.IsAPIDisconnected() {
+		p.root.SetTitle(fmt.Sprintf("%s(%d) [red][DISCONNECTED - Press R to reconnect]", p.GetTitle(), len(pods)))
+	} else {
+		p.root.SetTitle(fmt.Sprintf("%s(%d) ", p.GetTitle(), len(pods)))
+	}
 	p.root.SetTitleAlign(tview.AlignLeft)
 
 	for rowIdx, pod := range pods {
 		rowIdx++ // offset for header row
+
+		// Determine row color based on pod status
+		// Unhealthy pods get their status color for the entire row
+		rowColor := ui.GetRowColorForStatus(pod.Status, "pod")
 
 		// Render each column that is included in the filtered view
 		for _, colName := range p.listCols {
@@ -284,7 +293,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  pod.Namespace,
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -294,7 +303,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  pod.Name,
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -304,17 +313,19 @@ func (p *podPanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  fmt.Sprintf("%d/%d", pod.ReadyContainers, pod.TotalContainers),
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
 
 			case "STATUS":
+				// Status column: green for healthy, status color for unhealthy
+				statusColor := ui.GetTcellColor(ui.GetStatusColor(pod.Status, "pod"))
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  pod.Status,
-						Color: tcell.ColorYellow,
+						Color: statusColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -324,7 +335,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  fmt.Sprintf("%d", pod.Restarts),
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -334,7 +345,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  pod.TimeSince,
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -344,7 +355,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  fmt.Sprintf("%d/%d", pod.Volumes, pod.VolMounts),
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -354,7 +365,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  pod.IP,
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -364,7 +375,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  pod.Node,
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -379,23 +390,27 @@ func (p *podPanel) DrawBody(data interface{}) {
 					// Display usage with graph: [||        ] 150m 3.8%
 					cpuRatio = ui.GetRatio(float64(pod.PodUsageCpuQty.MilliValue()), float64(pod.NodeAllocatableCpuQty.MilliValue()))
 					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
+					cpuPercentage := float64(cpuRatio) * 100
+					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dm %.1f%%",
-						cpuGraph, pod.PodUsageCpuQty.MilliValue(), cpuRatio*100,
+						"[white][%s[white]] %dm [%s]%.1f%%[white]",
+						cpuGraph, pod.PodUsageCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
 					)
 				} else if hasRequestMetrics && hasAllocatable {
 					// Fallback: show requested with graph: [|         ] 100m 2.5%
 					cpuRatio = ui.GetRatio(float64(pod.PodRequestedCpuQty.MilliValue()), float64(pod.NodeAllocatableCpuQty.MilliValue()))
 					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
+					cpuPercentage := float64(cpuRatio) * 100
+					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dm %.1f%%",
-						cpuGraph, pod.PodRequestedCpuQty.MilliValue(), cpuRatio*100,
+						"[white][%s[white]] %dm [%s]%.1f%%[white]",
+						cpuGraph, pod.PodRequestedCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
 					)
 				} else {
 					// Zero or unavailable: show empty graph with 0m 0.0%
 					cpuGraph = ui.BarGraph(10, 0, colorKeys)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] 0m 0.0%%",
+						"[white][%s[white]] 0m [green]0.0%%[white]",
 						cpuGraph,
 					)
 				}
@@ -404,7 +419,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  cpuMetrics,
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -419,27 +434,31 @@ func (p *podPanel) DrawBody(data interface{}) {
 					// Display usage with graph: [||        ] 366Mi 0.5%
 					memRatio = ui.GetRatio(float64(pod.PodUsageMemQty.Value()), float64(pod.NodeAllocatableMemQty.Value()))
 					memGraph = ui.BarGraph(10, memRatio, colorKeys)
+					memPercentage := float64(memRatio) * 100
+					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s %.1f%%",
+						"[white][%s[white]] %s [%s]%.1f%%[white]",
 						memGraph,
 						ui.FormatMemory(pod.PodUsageMemQty),
-						memRatio*100,
+						memPercentageColor, memPercentage,
 					)
 				} else if hasRequestMetrics && hasAllocatable {
 					// Fallback: show requested with graph: [|         ] 512Mi 0.5%
 					memRatio = ui.GetRatio(float64(pod.PodRequestedMemQty.Value()), float64(pod.NodeAllocatableMemQty.Value()))
 					memGraph = ui.BarGraph(10, memRatio, colorKeys)
+					memPercentage := float64(memRatio) * 100
+					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s %.1f%%",
+						"[white][%s[white]] %s [%s]%.1f%%[white]",
 						memGraph,
 						ui.FormatMemory(pod.PodRequestedMemQty),
-						memRatio*100,
+						memPercentageColor, memPercentage,
 					)
 				} else {
 					// Zero or unavailable: show empty graph with 0Mi 0.0%
 					memGraph = ui.BarGraph(10, 0, colorKeys)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] 0Mi 0.0%%",
+						"[white][%s[white]] 0Mi [green]0.0%%[white]",
 						memGraph,
 					)
 				}
@@ -448,7 +467,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:  memMetrics,
-						Color: tcell.ColorYellow,
+						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)

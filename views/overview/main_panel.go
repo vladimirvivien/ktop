@@ -73,14 +73,14 @@ func (p *MainPanel) Layout(data interface{}) {
 		}
 	}
 
-	p.nodePanel = NewNodePanel(p.app, fmt.Sprintf(" %c Nodes ", ui.Icons.Factory))
+	p.nodePanel = NewNodePanel(p.app, fmt.Sprintf(" %s Nodes ", ui.Icons.Factory))
 	p.nodePanel.DrawHeader(nodeColumnsToDisplay)
 
-	p.clusterSummaryPanel = NewClusterSummaryPanel(p.app, fmt.Sprintf(" %c Cluster Summary ", ui.Icons.Thermometer))
+	p.clusterSummaryPanel = NewClusterSummaryPanel(p.app, fmt.Sprintf(" %s Cluster Summary ", ui.Icons.Thermometer))
 	p.clusterSummaryPanel.Layout(nil)
 	p.clusterSummaryPanel.DrawHeader(nil)
 
-	p.podPanel = NewPodPanel(p.app, fmt.Sprintf(" %c Pods ", ui.Icons.Package))
+	p.podPanel = NewPodPanel(p.app, fmt.Sprintf(" %s Pods ", ui.Icons.Package))
 	p.podPanel.DrawHeader(podColumnsToDisplay)
 
 	p.children = []tview.Primitive{

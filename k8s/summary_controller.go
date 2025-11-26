@@ -34,6 +34,7 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	// extract namespace summary
 	namespaces, err := c.GetNamespaceList(ctx)
 	if err != nil {
+		c.reportError(err)
 		return err
 	}
 	summary.Namespaces = len(namespaces)
@@ -159,6 +160,7 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 
 	pvcs, err := c.GetPVCList(ctx)
 	if err != nil {
+		c.reportError(err)
 		return err
 	}
 	summary.PVCCount = len(pvcs)
@@ -169,6 +171,8 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 		}
 	}
 
+	// Report success after all data is collected
+	c.reportSuccess()
 	handlerFunc(ctx, summary)
 	return nil
 }
