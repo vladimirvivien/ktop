@@ -188,6 +188,13 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	c.setupNodeHandler(ctx, c.nodeRefreshFunc)
 	c.installPodsHandler(ctx, c.podRefreshFunc)
 
+	// Wire up reconnect callback to trigger immediate health check when user presses Retry
+	if c.healthTracker != nil {
+		c.healthTracker.SetOnTryReconnect(func() {
+			c.checkAPIHealth(ctx)
+		})
+	}
+
 	// Start API health monitor - makes periodic live API calls to detect connection loss
 	c.startAPIHealthMonitor(ctx)
 
@@ -224,7 +231,7 @@ func (c *Controller) checkAPIHealth(ctx context.Context) {
 	}
 
 	// Use a short timeout for the health check
-	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	checkCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
 	// Invalidate discovery cache to ensure fresh API call
@@ -233,8 +240,7 @@ func (c *Controller) checkAPIHealth(ctx context.Context) {
 	// Make a direct API call that cannot be cached - list namespaces with a fresh request
 	// This is the most reliable way to check if the API server is reachable
 	_, err := c.client.kubeClient.CoreV1().Namespaces().List(checkCtx, metav1.ListOptions{
-		Limit:          1,
-		ResourceVersion: "0", // Force fresh fetch from API server, not etcd cache
+		Limit: 1,
 	})
 	if err != nil {
 		c.reportError(err)

@@ -75,6 +75,18 @@ func (m *MockMetricsStore) QueryLatest(metricName string, labelMatchers map[stri
 	return 0, nil
 }
 
+func (m *MockMetricsStore) QueryLatestSum(metricName string, labelMatchers map[string]string) (float64, error) {
+	if metricValues, ok := m.metrics[metricName]; ok {
+		// Sum all matching values (simulates multiple containers)
+		var total float64
+		for _, value := range metricValues {
+			total += value
+		}
+		return total, nil
+	}
+	return 0, nil
+}
+
 func (m *MockMetricsStore) QueryRange(metricName string, labelMatchers map[string]string, start, end time.Time) ([]*prom.MetricSample, error) {
 	if metricValues, ok := m.metrics[metricName]; ok {
 		// Generate two samples 40 seconds apart for rate testing
@@ -100,6 +112,33 @@ func (m *MockMetricsStore) QueryRange(metricName string, labelMatchers map[strin
 			{Timestamp: now.UnixMilli(), Value: lastValue},
 		}
 		return samples, nil
+	}
+	return nil, fmt.Errorf("metric %s not found", metricName)
+}
+
+func (m *MockMetricsStore) QueryRangePerSeries(metricName string, labelMatchers map[string]string, start, end time.Time) (map[string][]*prom.MetricSample, error) {
+	if metricValues, ok := m.metrics[metricName]; ok {
+		// Generate two samples 40 seconds apart for rate testing
+		now := time.Now()
+
+		result := make(map[string][]*prom.MetricSample)
+
+		// Create a series for each label set stored
+		for labels, lastValue := range metricValues {
+			// First sample: 40 seconds ago with base value
+			// Last sample: now with value increased by 4.0 (simulates 4 CPU seconds over 40s = 0.1 cores = 100m)
+			firstValue := lastValue - 4.0
+			if firstValue < 0 {
+				firstValue = 0
+			}
+
+			samples := []*prom.MetricSample{
+				{Timestamp: now.Add(-40 * time.Second).UnixMilli(), Value: firstValue},
+				{Timestamp: now.UnixMilli(), Value: lastValue},
+			}
+			result[labels] = samples
+		}
+		return result, nil
 	}
 	return nil, fmt.Errorf("metric %s not found", metricName)
 }

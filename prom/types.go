@@ -98,11 +98,23 @@ type MetricsStore interface {
 	// AddMetrics stores scraped metrics
 	AddMetrics(metrics *ScrapedMetrics) error
 
-	// QueryLatest returns the latest value for a metric
+	// QueryLatest returns the latest value for a metric from a single series.
+	// If multiple series match, returns the value from the series with the most recent timestamp.
 	QueryLatest(metricName string, labelMatchers map[string]string) (float64, error)
 
+	// QueryLatestSum returns the sum of latest values across all matching series.
+	// This is essential for gauge metrics like memory that need to be aggregated
+	// across multiple containers in a pod.
+	QueryLatestSum(metricName string, labelMatchers map[string]string) (float64, error)
+
 	// QueryRange returns metric values over a time range
+	// DEPRECATED: Use QueryRangePerSeries for rate calculations
 	QueryRange(metricName string, labelMatchers map[string]string, start, end time.Time) ([]*MetricSample, error)
+
+	// QueryRangePerSeries returns metric values over a time range, grouped by series key.
+	// Each series key maps to that series' samples, preserving per-series ordering.
+	// This is essential for accurate rate calculations on counter metrics.
+	QueryRangePerSeries(metricName string, labelMatchers map[string]string, start, end time.Time) (map[string][]*MetricSample, error)
 
 	// GetMetricNames returns all available metric names
 	GetMetricNames() []string

@@ -29,6 +29,11 @@ func (c *Controller) setupSummaryHandler(ctx context.Context, handlerFunc Refres
 }
 
 func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSummaryFunc) error {
+	// Skip refresh if API is disconnected - don't update UI with stale cached data
+	if c.healthTracker != nil && c.healthTracker.IsDisconnected() {
+		return nil
+	}
+
 	var summary model.ClusterSummary
 
 	// extract namespace summary

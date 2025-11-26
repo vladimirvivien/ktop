@@ -44,9 +44,10 @@ type APIHealthTracker struct {
 	mu                sync.RWMutex
 
 	// Callbacks
-	onStateChange  func(APIState, string) // For toast notifications
-	onHealthy      func()                 // Resume normal operation
-	onDisconnected func()                 // Zero out UI values
+	onStateChange    func(APIState, string) // For toast notifications
+	onHealthy        func()                 // Resume normal operation
+	onDisconnected   func()                 // Zero out UI values
+	onTryReconnect   func()                 // Trigger immediate health check
 }
 
 // NewAPIHealthTracker creates a new health tracker with the given state change callback
@@ -74,6 +75,14 @@ func (h *APIHealthTracker) SetOnDisconnected(callback func()) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.onDisconnected = callback
+}
+
+// SetOnTryReconnect sets the callback for when user requests reconnection
+// This allows the controller to trigger an immediate health check
+func (h *APIHealthTracker) SetOnTryReconnect(callback func()) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.onTryReconnect = callback
 }
 
 // ReportSuccess should be called when an API operation succeeds
@@ -128,14 +137,15 @@ func (h *APIHealthTracker) ReportError(err error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	h.lastError = err
-	h.lastErrorTime = time.Now()
-	h.consecutiveOK = 0 // Reset consecutive success counter on any error
-
-	// Already disconnected, don't process more errors
+	// Already disconnected, don't process more errors or update timestamps
+	// This allows recovery when server comes back online
 	if h.state == APIDisconnected {
 		return
 	}
+
+	h.lastError = err
+	h.lastErrorTime = time.Now()
+	h.consecutiveOK = 0 // Reset consecutive success counter on any error
 
 	// First error - transition to unhealthy
 	if h.state == APIHealthy {
@@ -189,18 +199,28 @@ func (h *APIHealthTracker) scheduleRetry() {
 // TryReconnect attempts to reconnect when in disconnected state (called when user presses 'R')
 func (h *APIHealthTracker) TryReconnect() {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 
 	if h.state != APIDisconnected {
+		h.mu.Unlock()
 		return
 	}
 
 	h.state = APIUnhealthy
 	h.retryCount = 0
 	h.lastError = nil
+	h.lastErrorTime = time.Time{} // Reset error time to allow immediate recovery
 
 	if h.onStateChange != nil {
 		h.onStateChange(APIUnhealthy, "Reconnecting...")
+	}
+
+	// Capture callback before releasing lock
+	reconnectCallback := h.onTryReconnect
+	h.mu.Unlock()
+
+	// Trigger immediate health check (outside lock to avoid deadlock)
+	if reconnectCallback != nil {
+		go reconnectCallback()
 	}
 }
 

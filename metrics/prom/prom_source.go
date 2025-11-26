@@ -110,35 +110,71 @@ func (p *PromMetricsSource) Stop() error {
 // calculateCPURate calculates CPU usage rate from counter samples over a time window
 // Returns CPU cores (e.g., 0.1 = 100 millicores)
 // Uses silent fallback - returns error without logging on insufficient samples
+//
+// This function handles multiple time series correctly by:
+// 1. Querying samples per-series (not flattening across series)
+// 2. Calculating rate for each series individually
+// 3. Summing the rates across all matching series
+//
+// This is essential for pods with multiple containers, where each container
+// has its own container_cpu_usage_seconds_total time series.
 func (p *PromMetricsSource) calculateCPURate(metricName string, labelMatchers map[string]string, window time.Duration) (float64, error) {
 	now := time.Now()
 	start := now.Add(-window)
 
-	samples, err := p.store.QueryRange(metricName, labelMatchers, start, now)
+	// Use QueryRangePerSeries to get samples grouped by series
+	// This prevents mixing samples from different containers
+	seriesSamples, err := p.store.QueryRangePerSeries(metricName, labelMatchers, start, now)
 	if err != nil {
 		return 0, err
 	}
 
-	if len(samples) < 2 {
-		return 0, fmt.Errorf("insufficient samples for rate calculation (need >=2, got %d)", len(samples))
+	if len(seriesSamples) == 0 {
+		return 0, fmt.Errorf("no matching series found for rate calculation")
 	}
 
-	// Calculate rate from first and last sample
-	firstSample := samples[0]
-	lastSample := samples[len(samples)-1]
+	// Calculate rate for each series and sum them
+	var totalRate float64
+	validSeriesCount := 0
 
-	deltaValue := lastSample.Value - firstSample.Value
-	deltaTimeMs := lastSample.Timestamp - firstSample.Timestamp
-	deltaTimeSeconds := float64(deltaTimeMs) / 1000.0 // Convert milliseconds to seconds
+	for _, samples := range seriesSamples {
+		if len(samples) < 2 {
+			// Skip series with insufficient samples
+			continue
+		}
 
-	if deltaTimeSeconds <= 0 {
-		return 0, fmt.Errorf("invalid time delta: %f seconds", deltaTimeSeconds)
+		// Calculate rate from first and last sample within this series
+		firstSample := samples[0]
+		lastSample := samples[len(samples)-1]
+
+		deltaValue := lastSample.Value - firstSample.Value
+		deltaTimeMs := lastSample.Timestamp - firstSample.Timestamp
+		deltaTimeSeconds := float64(deltaTimeMs) / 1000.0 // Convert milliseconds to seconds
+
+		if deltaTimeSeconds <= 0 {
+			// Skip series with invalid time delta
+			continue
+		}
+
+		// Handle counter resets (value went down)
+		if deltaValue < 0 {
+			// Counter reset detected - use last value as the rate approximation
+			// This is a simplified approach; a more accurate method would detect
+			// the reset point and calculate rate from there
+			deltaValue = lastSample.Value
+		}
+
+		// Rate in CPU cores for this series
+		seriesRate := deltaValue / deltaTimeSeconds
+		totalRate += seriesRate
+		validSeriesCount++
 	}
 
-	// Rate in CPU cores
-	rate := deltaValue / deltaTimeSeconds
+	if validSeriesCount == 0 {
+		return 0, fmt.Errorf("insufficient samples for rate calculation in any series")
+	}
 
-	return rate, nil
+	return totalRate, nil
 }
 
 // GetNodeMetrics retrieves metrics for a specific node from Prometheus
@@ -252,8 +288,9 @@ func (p *PromMetricsSource) GetPodMetrics(ctx context.Context, namespace, podNam
 		containerMetrics.CPUUsage = resource.NewMilliQuantity(int64(cpuRate*1000), resource.DecimalSI)
 	}
 
-	// Get memory usage (gauge - use latest value)
-	if memUsage, err := p.store.QueryLatest("container_memory_working_set_bytes", labelMatchers); err == nil {
+	// Get memory usage (gauge - sum across all containers in the pod)
+	// Use QueryLatestSum to aggregate memory from multiple containers
+	if memUsage, err := p.store.QueryLatestSum("container_memory_working_set_bytes", labelMatchers); err == nil {
 		containerMetrics.MemoryUsage = resource.NewQuantity(int64(memUsage), resource.BinarySI)
 	}
 
