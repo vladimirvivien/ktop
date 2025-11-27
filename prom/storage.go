@@ -111,7 +111,10 @@ func (store *InMemoryStore) AddMetrics(metrics *ScrapedMetrics) error {
 	return nil
 }
 
-// QueryLatest returns the latest value for a metric
+// QueryLatest returns the latest value for a metric from a single series.
+// If multiple series match, returns the value from the series with the most recent timestamp.
+// NOTE: For metrics that need to be summed across multiple series (e.g., container memory
+// for pods with multiple containers), use QueryLatestSum instead.
 func (store *InMemoryStore) QueryLatest(metricName string, labelMatchers map[string]string) (float64, error) {
 	store.mutex.RLock()
 	defer store.mutex.RUnlock()
@@ -150,7 +153,46 @@ func (store *InMemoryStore) QueryLatest(metricName string, labelMatchers map[str
 	return latestValue, nil
 }
 
+// QueryLatestSum returns the sum of latest values across all matching series.
+// This is essential for gauge metrics like memory that need to be aggregated
+// across multiple containers in a pod.
+func (store *InMemoryStore) QueryLatestSum(metricName string, labelMatchers map[string]string) (float64, error) {
+	store.mutex.RLock()
+	defer store.mutex.RUnlock()
+
+	seriesMap, exists := store.series[metricName]
+	if !exists {
+		return 0, fmt.Errorf("metric %s not found", metricName)
+	}
+
+	var totalValue float64
+	found := false
+
+	for _, ts := range seriesMap {
+		if !store.matchesLabels(ts.Labels, labelMatchers) {
+			continue
+		}
+
+		if len(ts.Samples) == 0 {
+			continue
+		}
+
+		// Get the latest sample from this series and add to total
+		sample := ts.Samples[len(ts.Samples)-1]
+		totalValue += sample.Value
+		found = true
+	}
+
+	if !found {
+		return 0, fmt.Errorf("no matching series found for metric %s", metricName)
+	}
+
+	return totalValue, nil
+}
+
 // QueryRange returns metric values over a time range
+// DEPRECATED: This method flattens samples from multiple series which breaks rate calculations.
+// Use QueryRangePerSeries for accurate rate calculations across multiple time series.
 func (store *InMemoryStore) QueryRange(metricName string, labelMatchers map[string]string, start, end time.Time) ([]*MetricSample, error) {
 	store.mutex.RLock()
 	defer store.mutex.RUnlock()
@@ -187,6 +229,51 @@ func (store *InMemoryStore) QueryRange(metricName string, labelMatchers map[stri
 	})
 
 	return allSamples, nil
+}
+
+// QueryRangePerSeries returns metric values over a time range, grouped by series key.
+// Each series key maps to that series' samples, preserving per-series ordering.
+// This is essential for accurate rate calculations on counter metrics.
+func (store *InMemoryStore) QueryRangePerSeries(metricName string, labelMatchers map[string]string, start, end time.Time) (map[string][]*MetricSample, error) {
+	store.mutex.RLock()
+	defer store.mutex.RUnlock()
+
+	seriesMap, exists := store.series[metricName]
+	if !exists {
+		return nil, fmt.Errorf("metric %s not found", metricName)
+	}
+
+	result := make(map[string][]*MetricSample)
+	startMs := start.UnixMilli()
+	endMs := end.UnixMilli()
+
+	for seriesKey, ts := range seriesMap {
+		if !store.matchesLabels(ts.Labels, labelMatchers) {
+			continue
+		}
+
+		var seriesSamples []*MetricSample
+		for _, sample := range ts.Samples {
+			if sample.Timestamp >= startMs && sample.Timestamp <= endMs {
+				sampleCopy := &MetricSample{
+					Timestamp: sample.Timestamp,
+					Value:     sample.Value,
+				}
+				seriesSamples = append(seriesSamples, sampleCopy)
+			}
+		}
+
+		// Only add if we have samples in this time range
+		if len(seriesSamples) > 0 {
+			// Sort by timestamp within this series
+			sort.Slice(seriesSamples, func(i, j int) bool {
+				return seriesSamples[i].Timestamp < seriesSamples[j].Timestamp
+			})
+			result[seriesKey] = seriesSamples
+		}
+	}
+
+	return result, nil
 }
 
 // GetMetricNames returns all available metric names

@@ -103,6 +103,11 @@ func (c *Controller) setupNodeHandler(ctx context.Context, handlerFunc RefreshNo
 }
 
 func (c *Controller) refreshNodes(ctx context.Context, handlerFunc RefreshNodesFunc) error {
+	// Skip refresh if API is disconnected - don't update UI with stale cached data
+	if c.healthTracker != nil && c.healthTracker.IsDisconnected() {
+		return nil
+	}
+
 	models, err := c.GetNodeModels(ctx)
 	if err != nil {
 		c.reportError(err)

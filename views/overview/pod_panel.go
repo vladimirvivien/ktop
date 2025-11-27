@@ -265,13 +265,8 @@ func (p *podPanel) DrawBody(data interface{}) {
 	var cpuGraph, memGraph string
 	var cpuMetrics, memMetrics string
 
-	// Update title with disconnected state if applicable
-	if p.app.IsAPIDisconnected() {
-		p.root.SetTitle(fmt.Sprintf("%s(%d) [red][DISCONNECTED - Press R to reconnect]", p.GetTitle(), len(pods)))
-	} else {
-		p.root.SetTitle(fmt.Sprintf("%s(%d) ", p.GetTitle(), len(pods)))
-	}
-	p.root.SetTitleAlign(tview.AlignLeft)
+	// Update title with scroll position indicator
+	p.updateTitle(len(pods))
 
 	for rowIdx, pod := range pods {
 		rowIdx++ // offset for header row
@@ -490,4 +485,46 @@ func (p *podPanel) GetRootView() tview.Primitive {
 
 func (p *podPanel) GetChildrenViews() []tview.Primitive {
 	return p.children
+}
+
+// updateTitle updates the panel title with scroll position indicator
+func (p *podPanel) updateTitle(totalRows int) {
+	// Get visible area dimensions
+	_, _, _, height := p.list.GetInnerRect()
+	visibleRows := height - 1 // Subtract header row
+
+	offset, _ := p.list.GetOffset()
+
+	// Handle disconnected state
+	var disconnectedSuffix string
+	if p.app.IsAPIDisconnected() {
+		disconnectedSuffix = " [red][DISCONNECTED - Press R to reconnect]"
+	}
+
+	if totalRows <= visibleRows || totalRows == 0 {
+		// All content visible - simple count
+		p.root.SetTitle(fmt.Sprintf(" %s Pods (%d)%s ", ui.Icons.Package, totalRows, disconnectedSuffix))
+		return
+	}
+
+	// Calculate visible range (1-indexed for display)
+	firstVisible := offset + 1 // Convert 0-indexed to 1-indexed
+	lastVisible := min(offset+visibleRows, totalRows)
+
+	// Determine scroll indicators
+	var scrollIndicator string
+	hasAbove := offset > 0
+	hasBelow := (offset + visibleRows) < totalRows
+
+	if hasAbove && hasBelow {
+		scrollIndicator = " ↑↓"
+	} else if hasAbove {
+		scrollIndicator = " ↑"
+	} else if hasBelow {
+		scrollIndicator = " ↓"
+	}
+
+	title := fmt.Sprintf(" %s Pods (%d-%d/%d)%s%s ",
+		ui.Icons.Package, firstVisible, lastVisible, totalRows, scrollIndicator, disconnectedSuffix)
+	p.root.SetTitle(title)
 }

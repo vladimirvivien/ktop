@@ -83,6 +83,11 @@ func (c *Controller) installPodsHandler(ctx context.Context, refreshFunc Refresh
 }
 
 func (c *Controller) refreshPods(ctx context.Context, refreshFunc RefreshPodsFunc) error {
+	// Skip refresh if API is disconnected - don't update UI with stale cached data
+	if c.healthTracker != nil && c.healthTracker.IsDisconnected() {
+		return nil
+	}
+
 	models, err := c.GetPodModels(ctx)
 	if err != nil {
 		c.reportError(err)

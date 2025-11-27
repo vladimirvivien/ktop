@@ -280,13 +280,8 @@ func (p *nodePanel) DrawBody(data interface{}) {
 	var cpuMetrics, memMetrics string
 	colorKeys := ui.ColorKeys{0: "olivedrab", 50: "yellow", 90: "red"}
 
-	// Update title with disconnected state if applicable
-	if p.app.IsAPIDisconnected() {
-		p.root.SetTitle(fmt.Sprintf("%s(%d) [red][DISCONNECTED - Press R to reconnect]", p.GetTitle(), len(nodes)))
-	} else {
-		p.root.SetTitle(fmt.Sprintf("%s(%d) ", p.GetTitle(), len(nodes)))
-	}
-	p.root.SetTitleAlign(tview.AlignLeft)
+	// Update title with scroll position indicator
+	p.updateTitle(len(nodes))
 
 	for rowIdx, node := range nodes {
 		rowIdx++ // offset for header-row
@@ -487,4 +482,46 @@ func (p *nodePanel) GetRootView() tview.Primitive {
 
 func (p *nodePanel) GetChildrenViews() []tview.Primitive {
 	return p.children
+}
+
+// updateTitle updates the panel title with scroll position indicator
+func (p *nodePanel) updateTitle(totalRows int) {
+	// Get visible area dimensions
+	_, _, _, height := p.list.GetInnerRect()
+	visibleRows := height - 1 // Subtract header row
+
+	offset, _ := p.list.GetOffset()
+
+	// Handle disconnected state
+	var disconnectedSuffix string
+	if p.app.IsAPIDisconnected() {
+		disconnectedSuffix = " [red][DISCONNECTED - Press R to reconnect]"
+	}
+
+	if totalRows <= visibleRows || totalRows == 0 {
+		// All content visible - simple count
+		p.root.SetTitle(fmt.Sprintf(" %s Nodes (%d)%s ", ui.Icons.Factory, totalRows, disconnectedSuffix))
+		return
+	}
+
+	// Calculate visible range (1-indexed for display)
+	firstVisible := offset + 1 // Convert 0-indexed to 1-indexed
+	lastVisible := min(offset+visibleRows, totalRows)
+
+	// Determine scroll indicators
+	var scrollIndicator string
+	hasAbove := offset > 0
+	hasBelow := (offset + visibleRows) < totalRows
+
+	if hasAbove && hasBelow {
+		scrollIndicator = " ↑↓"
+	} else if hasAbove {
+		scrollIndicator = " ↑"
+	} else if hasBelow {
+		scrollIndicator = " ↓"
+	}
+
+	title := fmt.Sprintf(" %s Nodes (%d-%d/%d)%s%s ",
+		ui.Icons.Factory, firstVisible, lastVisible, totalRows, scrollIndicator, disconnectedSuffix)
+	p.root.SetTitle(title)
 }
