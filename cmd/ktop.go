@@ -82,7 +82,7 @@ func NewKtopCmd() *cobra.Command {
 	// Metrics source flags
 	cmd.Flags().StringVar(&o.metricsSource, "metrics-source", "metrics-server",
 		"Metrics source: 'metrics-server' (default) or 'prometheus'")
-	cmd.Flags().StringVar(&o.prometheusScrapeInterval, "prometheus-scrape-interval", "15s",
+	cmd.Flags().StringVar(&o.prometheusScrapeInterval, "prometheus-scrape-interval", "5s",
 		"Prometheus scrape interval (e.g., 10s, 30s, 1m)")
 	cmd.Flags().StringVar(&o.prometheusRetention, "prometheus-retention", "1h",
 		"Prometheus metrics retention time (e.g., 30m, 1h, 2h)")

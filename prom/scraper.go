@@ -486,15 +486,15 @@ func (ks *KubernetesScraper) convertMetricFamily(name string, family *dto.Metric
 			}
 		}
 
-		// Create time series
+		// Create time series with ring buffer
+		samples := NewRingBuffer[MetricSample](1) // Initial capacity of 1
+		samples.Add(MetricSample{
+			Timestamp: timestamp,
+			Value:     value,
+		})
 		timeSeries := &TimeSeries{
-			Labels: lbls,
-			Samples: []MetricSample{
-				{
-					Timestamp: timestamp,
-					Value:     value,
-				},
-			},
+			Labels:  lbls,
+			Samples: samples,
 		}
 
 		metricFamily.TimeSeries = append(metricFamily.TimeSeries, timeSeries)

@@ -435,9 +435,12 @@ func TestControllerErrorHandling(t *testing.T) {
 	kubeConfig := &rest.Config{Host: "https://invalid-cluster"}
 	controller := NewCollectorController(kubeConfig, DefaultScrapeConfig())
 
+	var mu sync.Mutex
 	errorCount := 0
 	controller.SetErrorCallback(func(ComponentType, error) {
+		mu.Lock()
 		errorCount++
+		mu.Unlock()
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -453,6 +456,8 @@ func TestControllerErrorHandling(t *testing.T) {
 	// The controller should handle errors gracefully
 	// We can check that error callbacks were called if errors occurred
 	// But we don't require errors for the test to pass
-	_ = err        // Use the variable
+	mu.Lock()
 	_ = errorCount // Use the variable
+	mu.Unlock()
+	_ = err // Use the variable
 }

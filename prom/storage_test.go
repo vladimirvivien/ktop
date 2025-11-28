@@ -151,7 +151,7 @@ func TestMaxSamplesLimit(t *testing.T) {
 
 	// Add 5 samples (more than the limit of 3)
 	for i := 0; i < 5; i++ {
-		timeSeries.Samples = append(timeSeries.Samples, MetricSample{
+		timeSeries.Samples.Add(MetricSample{
 			Timestamp: time.Now().Add(time.Duration(i) * time.Second).UnixMilli(),
 			Value:     float64(i),
 		})
@@ -165,8 +165,8 @@ func TestMaxSamplesLimit(t *testing.T) {
 	// Verify only the last 3 samples are kept
 	seriesMap := store.series["test_gauge"]
 	for _, ts := range seriesMap {
-		if len(ts.Samples) > config.MaxSamples {
-			t.Errorf("Expected at most %d samples, got %d", config.MaxSamples, len(ts.Samples))
+		if ts.Samples.Len() > config.MaxSamples {
+			t.Errorf("Expected at most %d samples, got %d", config.MaxSamples, ts.Samples.Len())
 		}
 	}
 }
@@ -378,6 +378,18 @@ func TestGetMetricFamilyNames(t *testing.T) {
 
 // Helper functions for creating test data
 
+// createTestTimeSeries creates a TimeSeries with a RingBuffer containing the given samples
+func createTestTimeSeries(lbls labels.Labels, samples ...MetricSample) *TimeSeries {
+	rb := NewRingBuffer[MetricSample](100) // Default capacity
+	for _, s := range samples {
+		rb.Add(s)
+	}
+	return &TimeSeries{
+		Labels:  lbls,
+		Samples: rb,
+	}
+}
+
 func createTestScrapedMetrics() *ScrapedMetrics {
 	return createTestScrapedMetricsAtTime(time.Now())
 }
@@ -392,19 +404,14 @@ func createTestScrapedMetricsAtTime(timestamp time.Time) *ScrapedMetrics {
 		Help:        "A test counter metric",
 		LastUpdated: timestamp,
 		TimeSeries: []*TimeSeries{
-			{
-				Labels: labels.Labels{
+			createTestTimeSeries(
+				labels.Labels{
 					{Name: "__name__", Value: "test_counter"},
 					{Name: "instance", Value: "localhost:8080"},
 					{Name: "job", Value: "test-job"},
 				},
-				Samples: []MetricSample{
-					{
-						Timestamp: timestamp.UnixMilli(),
-						Value:     123.0,
-					},
-				},
-			},
+				MetricSample{Timestamp: timestamp.UnixMilli(), Value: 123.0},
+			),
 		},
 	}
 	families["test_counter"] = counterFamily
@@ -416,19 +423,14 @@ func createTestScrapedMetricsAtTime(timestamp time.Time) *ScrapedMetrics {
 		Help:        "A test gauge metric",
 		LastUpdated: timestamp,
 		TimeSeries: []*TimeSeries{
-			{
-				Labels: labels.Labels{
+			createTestTimeSeries(
+				labels.Labels{
 					{Name: "__name__", Value: "test_gauge"},
 					{Name: "instance", Value: "localhost:8080"},
 					{Name: "job", Value: "test-job"},
 				},
-				Samples: []MetricSample{
-					{
-						Timestamp: timestamp.UnixMilli(),
-						Value:     42.5,
-					},
-				},
-			},
+				MetricSample{Timestamp: timestamp.UnixMilli(), Value: 42.5},
+			),
 		},
 	}
 	families["test_gauge"] = gaugeFamily
@@ -451,18 +453,13 @@ func createTestKubeletMetrics() *ScrapedMetrics {
 		Help:        "Number of running pods",
 		LastUpdated: time.Now(),
 		TimeSeries: []*TimeSeries{
-			{
-				Labels: labels.Labels{
+			createTestTimeSeries(
+				labels.Labels{
 					{Name: "__name__", Value: "kubelet_running_pods"},
 					{Name: "instance", Value: "node1:10250"},
 				},
-				Samples: []MetricSample{
-					{
-						Timestamp: time.Now().UnixMilli(),
-						Value:     15.0,
-					},
-				},
-			},
+				MetricSample{Timestamp: time.Now().UnixMilli(), Value: 15.0},
+			),
 		},
 	}
 	families["kubelet_running_pods"] = family
@@ -485,19 +482,14 @@ func createTestCAdvisorMetrics() *ScrapedMetrics {
 		Help:        "Container memory usage",
 		LastUpdated: time.Now(),
 		TimeSeries: []*TimeSeries{
-			{
-				Labels: labels.Labels{
+			createTestTimeSeries(
+				labels.Labels{
 					{Name: "__name__", Value: "container_memory_usage_bytes"},
 					{Name: "instance", Value: "node1:10255"},
 					{Name: "container", Value: "test-container"},
 				},
-				Samples: []MetricSample{
-					{
-						Timestamp: time.Now().UnixMilli(),
-						Value:     1048576.0, // 1MB
-					},
-				},
-			},
+				MetricSample{Timestamp: time.Now().UnixMilli(), Value: 1048576.0}, // 1MB
+			),
 		},
 	}
 	families["container_memory_usage_bytes"] = family

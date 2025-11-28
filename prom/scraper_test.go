@@ -340,11 +340,14 @@ func TestConvertMetricFamily(t *testing.T) {
 	}
 
 	// Check samples
-	if len(timeSeries.Samples) != 1 {
-		t.Fatalf("Expected 1 sample, got %d", len(timeSeries.Samples))
+	if timeSeries.Samples.Len() != 1 {
+		t.Fatalf("Expected 1 sample, got %d", timeSeries.Samples.Len())
 	}
 
-	sample := timeSeries.Samples[0]
+	sample, ok := timeSeries.Samples.Last()
+	if !ok {
+		t.Fatal("Expected sample to be present")
+	}
 	if sample.Value != 123.45 {
 		t.Errorf("Expected value 123.45, got %f", sample.Value)
 	}

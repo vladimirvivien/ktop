@@ -20,8 +20,8 @@ func TestDefaultConfig(t *testing.T) {
 	}
 
 	// Verify Prometheus defaults
-	if cfg.Prometheus.ScrapeInterval != 15*time.Second {
-		t.Errorf("Expected default scrape interval 15s, got %v", cfg.Prometheus.ScrapeInterval)
+	if cfg.Prometheus.ScrapeInterval != 5*time.Second {
+		t.Errorf("Expected default scrape interval 5s, got %v", cfg.Prometheus.ScrapeInterval)
 	}
 
 	if cfg.Prometheus.RetentionTime != 1*time.Hour {

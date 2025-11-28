@@ -29,10 +29,11 @@ type MetricSample struct {
 	Value     float64
 }
 
-// TimeSeries represents a time series with labels and samples
+// TimeSeries represents a time series with labels and samples.
+// Uses a ring buffer for memory-efficient, fixed-size sample storage.
 type TimeSeries struct {
 	Labels  labels.Labels
-	Samples []MetricSample
+	Samples *RingBuffer[MetricSample]
 }
 
 // MetricFamily represents a group of related metrics

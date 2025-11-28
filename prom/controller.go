@@ -9,20 +9,28 @@ import (
 
 // Start initializes and starts the metrics collection controller
 func (cc *CollectorController) Start(ctx context.Context) error {
+	// First phase: check and initialize under lock
 	cc.mutex.Lock()
-	defer cc.mutex.Unlock()
-
 	if cc.running {
+		cc.mutex.Unlock()
 		return fmt.Errorf("controller is already running")
 	}
 
-	// Initialize components
+	// Initialize components (still under lock)
 	if err := cc.initialize(); err != nil {
+		cc.mutex.Unlock()
 		return fmt.Errorf("initializing controller: %w", err)
 	}
-
-	// Start background processes
 	cc.running = true
+	cc.mutex.Unlock()
+
+	// Run initial component discovery BEFORE starting collector
+	// This ensures components are available for the first collection
+	// Use a short timeout to avoid blocking startup if cluster is slow
+	// Note: Lock is released, discoverAvailableComponents will acquire its own
+	discoveryCtx, discoveryCancel := context.WithTimeout(ctx, cc.config.Timeout)
+	cc.discoverAvailableComponents(discoveryCtx)
+	discoveryCancel()
 
 	// Start the metrics collector
 	go cc.runCollector(ctx)
@@ -30,7 +38,7 @@ func (cc *CollectorController) Start(ctx context.Context) error {
 	// Start periodic cleanup
 	go cc.runPeriodicCleanup(ctx)
 
-	// Start component discovery
+	// Start component discovery (for periodic re-discovery)
 	go cc.runComponentDiscovery(ctx)
 
 	return nil
@@ -72,6 +80,9 @@ func (cc *CollectorController) runCollector(ctx context.Context) {
 		cc.setLastError(err)
 		return
 	}
+
+	// Run immediate first collection (don't wait for ticker)
+	cc.collectFromAllComponents(ctx)
 
 	ticker := time.NewTicker(cc.config.Interval)
 	defer ticker.Stop()
@@ -157,10 +168,8 @@ func (cc *CollectorController) runPeriodicCleanup(ctx context.Context) {
 // runComponentDiscovery periodically discovers available components
 func (cc *CollectorController) runComponentDiscovery(ctx context.Context) {
 	// Discovery every 5 minutes
+	// Note: Initial discovery is done in Start() before this goroutine starts
 	discoveryInterval := 5 * time.Minute
-
-	// Run initial discovery
-	cc.discoverAvailableComponents(ctx)
 
 	ticker := time.NewTicker(discoveryInterval)
 	defer ticker.Stop()
