@@ -43,7 +43,7 @@ type PromConfig struct {
 func DefaultPromConfig() *PromConfig {
 	return &PromConfig{
 		Enabled:        true,
-		ScrapeInterval: 15 * time.Second,
+		ScrapeInterval: 5 * time.Second,
 		RetentionTime:  1 * time.Hour,
 		MaxSamples:     10000,
 		Components: []prom.ComponentType{
@@ -219,16 +219,36 @@ func isWorkloadContainerCPUTotal(seriesKey string) bool {
 }
 
 // isWorkloadContainerMemory returns true if the seriesKey represents a valid
-// pod metric for memory. In containerd runtime (modern k8s), cAdvisor only
-// exports pod-level aggregates with container="". We include these because
-// they're the pod aggregate we need. We exclude container="POD" (pause container).
+// individual container metric for memory. This matches metrics-server behavior:
+// - Exclude container="" (pod-level aggregate to avoid double counting)
+// - Exclude container="POD" (pause container)
+// Only sum individual container metrics like metrics-server does.
 func isWorkloadContainerMemory(seriesKey string) bool {
 	// Exclude POD (pause) container - not useful for pod metrics
 	if strings.Contains(seriesKey, `container="POD"`) {
 		return false
 	}
 
+	// Exclude pod-level aggregate (container="") to avoid double counting
+	// when individual container metrics also exist.
+	// Metrics-server uses container!="" to get only individual containers.
+	if strings.Contains(seriesKey, `container=""`) {
+		return false
+	}
+
 	return true
+}
+
+// isPodAggregateMemory returns true if the seriesKey represents a pod-level
+// aggregate metric (container=""). Used as fallback for pods that don't expose
+// individual container metrics (e.g., static pods like kube-apiserver).
+func isPodAggregateMemory(seriesKey string) bool {
+	// Only accept container="" (pod aggregate)
+	// Exclude container="POD" (pause container)
+	if strings.Contains(seriesKey, `container="POD"`) {
+		return false
+	}
+	return strings.Contains(seriesKey, `container=""`)
 }
 
 // queryLatestSumFiltered queries latest values and sums them, applying a filter function
@@ -392,8 +412,14 @@ func (p *PromMetricsSource) GetPodMetrics(ctx context.Context, namespace, podNam
 
 	// Get memory usage (gauge - sum across workload containers only)
 	// Memory metrics don't have cpu label, so use simpler filter
+	// Strategy: Try individual containers first, fall back to pod aggregate for static pods
 	if memUsage, err := p.queryLatestSumFiltered("container_memory_working_set_bytes", labelMatchers, isWorkloadContainerMemory); err == nil {
 		containerMetrics.MemoryUsage = resource.NewQuantity(int64(memUsage), resource.BinarySI)
+	} else {
+		// Fallback: Some pods (static pods like kube-apiserver) only have aggregate metrics
+		if memUsage, err := p.queryLatestSumFiltered("container_memory_working_set_bytes", labelMatchers, isPodAggregateMemory); err == nil {
+			containerMetrics.MemoryUsage = resource.NewQuantity(int64(memUsage), resource.BinarySI)
+		}
 	}
 
 	// Only add container metrics if we got at least one metric
@@ -524,4 +550,307 @@ func (p *PromMetricsSource) recordError(err error) {
 	p.lastError = err
 	p.errorCount++
 	p.healthy = false
+}
+
+// GetNodeHistory retrieves historical data for a specific resource on a node.
+// For Prometheus, this queries the stored time series data.
+func (p *PromMetricsSource) GetNodeHistory(ctx context.Context, nodeName string, query metrics.HistoryQuery) (*metrics.ResourceHistory, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if !p.healthy {
+		return nil, fmt.Errorf("prometheus source is not healthy")
+	}
+
+	if p.store == nil {
+		return nil, fmt.Errorf("metrics store not initialized")
+	}
+
+	var metricName string
+	labelMatchers := map[string]string{"id": "/", "node": nodeName}
+
+	switch query.Resource {
+	case metrics.ResourceCPU:
+		metricName = "container_cpu_usage_seconds_total"
+	case metrics.ResourceMemory:
+		metricName = "container_memory_working_set_bytes"
+	default:
+		return nil, fmt.Errorf("unsupported resource type: %s", query.Resource)
+	}
+
+	now := time.Now()
+	start := now.Add(-query.Duration)
+
+	samples, err := p.store.QueryRange(metricName, labelMatchers, start, now)
+	if err != nil {
+		return nil, err
+	}
+
+	history := &metrics.ResourceHistory{
+		Resource:   query.Resource,
+		DataPoints: make([]metrics.HistoryDataPoint, 0, len(samples)),
+		MinValue:   math.MaxFloat64,
+		MaxValue:   -math.MaxFloat64,
+	}
+
+	// Convert samples to history data points
+	// For CPU counters, we need to calculate rates between consecutive points
+	if query.Resource == metrics.ResourceCPU && len(samples) >= 2 {
+		for i := 1; i < len(samples); i++ {
+			prev := samples[i-1]
+			curr := samples[i]
+
+			deltaValue := curr.Value - prev.Value
+			deltaTimeMs := curr.Timestamp - prev.Timestamp
+			deltaTimeSeconds := float64(deltaTimeMs) / 1000.0
+
+			if deltaTimeSeconds <= 0 {
+				continue
+			}
+
+			// Handle counter reset
+			if deltaValue < 0 {
+				deltaValue = curr.Value
+			}
+
+			// Rate in millicores
+			rate := (deltaValue / deltaTimeSeconds) * 1000
+
+			dp := metrics.HistoryDataPoint{
+				Timestamp: time.UnixMilli(curr.Timestamp),
+				Value:     rate,
+			}
+
+			history.DataPoints = append(history.DataPoints, dp)
+
+			if rate < history.MinValue {
+				history.MinValue = rate
+			}
+			if rate > history.MaxValue {
+				history.MaxValue = rate
+			}
+		}
+	} else {
+		// For gauges (memory), use raw values
+		for _, sample := range samples {
+			dp := metrics.HistoryDataPoint{
+				Timestamp: time.UnixMilli(sample.Timestamp),
+				Value:     sample.Value,
+			}
+
+			history.DataPoints = append(history.DataPoints, dp)
+
+			if sample.Value < history.MinValue {
+				history.MinValue = sample.Value
+			}
+			if sample.Value > history.MaxValue {
+				history.MaxValue = sample.Value
+			}
+		}
+	}
+
+	// Apply MaxPoints limit if specified
+	if query.MaxPoints > 0 && len(history.DataPoints) > query.MaxPoints {
+		history.DataPoints = downsampleDataPoints(history.DataPoints, query.MaxPoints)
+	}
+
+	// Reset min/max if no data points
+	if len(history.DataPoints) == 0 {
+		history.MinValue = 0
+		history.MaxValue = 0
+	}
+
+	return history, nil
+}
+
+// GetPodHistory retrieves historical data for a specific resource on a pod.
+// For Prometheus, this queries the stored time series data.
+func (p *PromMetricsSource) GetPodHistory(ctx context.Context, namespace, podName string, query metrics.HistoryQuery) (*metrics.ResourceHistory, error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if !p.healthy {
+		return nil, fmt.Errorf("prometheus source is not healthy")
+	}
+
+	if p.store == nil {
+		return nil, fmt.Errorf("metrics store not initialized")
+	}
+
+	var metricName string
+	labelMatchers := map[string]string{
+		"pod":       podName,
+		"namespace": namespace,
+	}
+
+	switch query.Resource {
+	case metrics.ResourceCPU:
+		metricName = "container_cpu_usage_seconds_total"
+	case metrics.ResourceMemory:
+		metricName = "container_memory_working_set_bytes"
+	default:
+		return nil, fmt.Errorf("unsupported resource type: %s", query.Resource)
+	}
+
+	now := time.Now()
+	start := now.Add(-query.Duration)
+
+	// Get samples per series to handle multiple containers correctly
+	seriesSamples, err := p.store.QueryRangePerSeries(metricName, labelMatchers, start, now)
+	if err != nil {
+		return nil, err
+	}
+
+	history := &metrics.ResourceHistory{
+		Resource:   query.Resource,
+		DataPoints: make([]metrics.HistoryDataPoint, 0),
+		MinValue:   math.MaxFloat64,
+		MaxValue:   -math.MaxFloat64,
+	}
+
+	// For pods, we need to aggregate across containers at each timestamp
+	// Build a map of timestamp -> aggregated value
+	timestampValues := make(map[int64]float64)
+
+	// For memory, determine the right filter based on available data
+	// Some pods (static pods) only have aggregate metrics (container="")
+	memoryFilter := isWorkloadContainerMemory
+	if query.Resource == metrics.ResourceMemory {
+		hasIndividualContainers := false
+		for seriesKey := range seriesSamples {
+			if isWorkloadContainerMemory(seriesKey) {
+				hasIndividualContainers = true
+				break
+			}
+		}
+		if !hasIndividualContainers {
+			// Fallback to aggregate for static pods
+			memoryFilter = isPodAggregateMemory
+		}
+	}
+
+	for seriesKey, samples := range seriesSamples {
+		// Apply filter for CPU (only workload containers, cpu="total")
+		if query.Resource == metrics.ResourceCPU && !isWorkloadContainerCPUTotal(seriesKey) {
+			continue
+		}
+		// Apply filter for memory (using determined filter)
+		if query.Resource == metrics.ResourceMemory && !memoryFilter(seriesKey) {
+			continue
+		}
+
+		if query.Resource == metrics.ResourceCPU && len(samples) >= 2 {
+			// Calculate rates for CPU counter
+			for i := 1; i < len(samples); i++ {
+				prev := samples[i-1]
+				curr := samples[i]
+
+				deltaValue := curr.Value - prev.Value
+				deltaTimeMs := curr.Timestamp - prev.Timestamp
+				deltaTimeSeconds := float64(deltaTimeMs) / 1000.0
+
+				if deltaTimeSeconds <= 0 {
+					continue
+				}
+
+				if deltaValue < 0 {
+					deltaValue = curr.Value
+				}
+
+				rate := (deltaValue / deltaTimeSeconds) * 1000
+				timestampValues[curr.Timestamp] += rate
+			}
+		} else {
+			// For memory gauges, sum across containers at each timestamp
+			for _, sample := range samples {
+				timestampValues[sample.Timestamp] += sample.Value
+			}
+		}
+	}
+
+	// Convert map to sorted slice
+	timestamps := make([]int64, 0, len(timestampValues))
+	for ts := range timestampValues {
+		timestamps = append(timestamps, ts)
+	}
+
+	// Sort timestamps
+	for i := 0; i < len(timestamps)-1; i++ {
+		for j := i + 1; j < len(timestamps); j++ {
+			if timestamps[i] > timestamps[j] {
+				timestamps[i], timestamps[j] = timestamps[j], timestamps[i]
+			}
+		}
+	}
+
+	for _, ts := range timestamps {
+		value := timestampValues[ts]
+		dp := metrics.HistoryDataPoint{
+			Timestamp: time.UnixMilli(ts),
+			Value:     value,
+		}
+		history.DataPoints = append(history.DataPoints, dp)
+
+		if value < history.MinValue {
+			history.MinValue = value
+		}
+		if value > history.MaxValue {
+			history.MaxValue = value
+		}
+	}
+
+	// Apply MaxPoints limit if specified
+	if query.MaxPoints > 0 && len(history.DataPoints) > query.MaxPoints {
+		history.DataPoints = downsampleDataPoints(history.DataPoints, query.MaxPoints)
+	}
+
+	// Reset min/max if no data points
+	if len(history.DataPoints) == 0 {
+		history.MinValue = 0
+		history.MaxValue = 0
+	}
+
+	return history, nil
+}
+
+// SupportsHistory returns true since Prometheus has historical data
+func (p *PromMetricsSource) SupportsHistory() bool {
+	return true
+}
+
+// downsampleDataPoints reduces the number of data points by averaging
+func downsampleDataPoints(points []metrics.HistoryDataPoint, maxPoints int) []metrics.HistoryDataPoint {
+	if len(points) <= maxPoints {
+		return points
+	}
+
+	result := make([]metrics.HistoryDataPoint, maxPoints)
+	bucketSize := float64(len(points)) / float64(maxPoints)
+
+	for i := 0; i < maxPoints; i++ {
+		startIdx := int(float64(i) * bucketSize)
+		endIdx := int(float64(i+1) * bucketSize)
+		if endIdx > len(points) {
+			endIdx = len(points)
+		}
+
+		// Average the values in this bucket
+		var sum float64
+		var count int
+		var lastTimestamp time.Time
+		for j := startIdx; j < endIdx; j++ {
+			sum += points[j].Value
+			lastTimestamp = points[j].Timestamp
+			count++
+		}
+
+		if count > 0 {
+			result[i] = metrics.HistoryDataPoint{
+				Timestamp: lastTimestamp,
+				Value:     sum / float64(count),
+			}
+		}
+	}
+
+	return result
 }

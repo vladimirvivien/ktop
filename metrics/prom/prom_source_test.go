@@ -204,8 +204,8 @@ func TestNewPromMetricsSource_WithNilConfig(t *testing.T) {
 	}
 
 	// Verify default config values
-	if source.config.ScrapeInterval != 15*time.Second {
-		t.Errorf("Expected default scrape interval 15s, got %v", source.config.ScrapeInterval)
+	if source.config.ScrapeInterval != 5*time.Second {
+		t.Errorf("Expected default scrape interval 5s, got %v", source.config.ScrapeInterval)
 	}
 
 	if source.config.RetentionTime != 1*time.Hour {
@@ -224,8 +224,8 @@ func TestDefaultPromConfig(t *testing.T) {
 		t.Error("Expected Enabled to be true")
 	}
 
-	if config.ScrapeInterval != 15*time.Second {
-		t.Errorf("Expected ScrapeInterval 15s, got %v", config.ScrapeInterval)
+	if config.ScrapeInterval != 5*time.Second {
+		t.Errorf("Expected ScrapeInterval 5s, got %v", config.ScrapeInterval)
 	}
 
 	if config.RetentionTime != 1*time.Hour {

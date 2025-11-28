@@ -41,6 +41,23 @@ type MetricsSource interface {
 	// GetSourceInfo returns metadata about the metrics source.
 	// Includes source type, version, last scrape time, and error counts.
 	GetSourceInfo() SourceInfo
+
+	// GetNodeHistory retrieves historical data for a specific resource on a node.
+	// Returns ResourceHistory with data points spanning the requested duration.
+	// For Prometheus: queries from stored time series data
+	// For Metrics Server: returns data from local ring buffer (limited history)
+	GetNodeHistory(ctx context.Context, nodeName string, query HistoryQuery) (*ResourceHistory, error)
+
+	// GetPodHistory retrieves historical data for a specific resource on a pod.
+	// Returns ResourceHistory with data points spanning the requested duration.
+	// For Prometheus: queries from stored time series data
+	// For Metrics Server: returns data from local ring buffer (limited history)
+	GetPodHistory(ctx context.Context, namespace, podName string, query HistoryQuery) (*ResourceHistory, error)
+
+	// SupportsHistory returns true if this source supports historical data queries.
+	// Prometheus sources always return true.
+	// Metrics Server sources return true only if local buffering is enabled.
+	SupportsHistory() bool
 }
 
 // NodeMetrics represents resource usage metrics for a Kubernetes node.
@@ -158,3 +175,41 @@ const (
 	SourceTypePrometheus    = "prometheus"
 	SourceTypeMetricsServer = "metrics-server"
 )
+
+// ResourceType identifies the type of resource for history queries
+type ResourceType string
+
+const (
+	ResourceCPU    ResourceType = "cpu"
+	ResourceMemory ResourceType = "memory"
+)
+
+// HistoryDataPoint represents a single data point in a time series
+type HistoryDataPoint struct {
+	// Timestamp when this value was recorded
+	Timestamp time.Time
+	// Value is the metric value at this timestamp (CPU in millicores, memory in bytes)
+	Value float64
+}
+
+// ResourceHistory contains historical data points for a specific resource
+type ResourceHistory struct {
+	// Resource identifies what metric this history is for
+	Resource ResourceType
+	// DataPoints contains the historical values, ordered from oldest to newest
+	DataPoints []HistoryDataPoint
+	// MinValue is the minimum value in the data points (for scaling)
+	MinValue float64
+	// MaxValue is the maximum value in the data points (for scaling)
+	MaxValue float64
+}
+
+// HistoryQuery specifies parameters for querying resource history
+type HistoryQuery struct {
+	// Resource is the type of resource to query
+	Resource ResourceType
+	// Duration is how far back to look (e.g., 5*time.Minute)
+	Duration time.Duration
+	// MaxPoints limits the number of data points returned (0 = no limit)
+	MaxPoints int
+}

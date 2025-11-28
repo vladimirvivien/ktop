@@ -34,7 +34,7 @@ func DefaultConfig() *Config {
 			Type: "metrics-server",
 		},
 		Prometheus: PrometheusConfig{
-			ScrapeInterval: 15 * time.Second,
+			ScrapeInterval: 5 * time.Second,
 			RetentionTime:  1 * time.Hour,
 			MaxSamples:     10000,
 			Components: []prom.ComponentType{

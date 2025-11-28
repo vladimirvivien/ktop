@@ -79,27 +79,26 @@ func (store *InMemoryStore) AddMetrics(metrics *ScrapedMetrics) error {
 			// Get or create time series
 			existingSeries, exists := store.series[metricName][seriesKey]
 			if !exists {
-				// Create new series
+				// Create new series with ring buffer
 				existingSeries = &TimeSeries{
 					Labels:  ts.Labels,
-					Samples: make([]MetricSample, 0, store.maxSamples),
+					Samples: NewRingBuffer[MetricSample](store.maxSamples),
 				}
 				store.series[metricName][seriesKey] = existingSeries
 				store.totalSeries++
 			}
 
-			// Add new samples
-			for _, sample := range ts.Samples {
-				existingSeries.Samples = append(existingSeries.Samples, sample)
-				store.totalSamples++
-			}
-
-			// Trim samples if exceeded max
-			if len(existingSeries.Samples) > store.maxSamples {
-				excess := len(existingSeries.Samples) - store.maxSamples
-				existingSeries.Samples = existingSeries.Samples[excess:]
-				store.totalSamples -= int64(excess)
-			}
+			// Add new samples - ring buffer handles overflow automatically
+			ts.Samples.Range(func(_ int, sample MetricSample) bool {
+				// Track if we're overwriting (buffer was full)
+				wasFull := existingSeries.Samples.IsFull()
+				existingSeries.Samples.Add(sample)
+				if !wasFull {
+					store.totalSamples++
+				}
+				// If buffer was full, totalSamples stays same (overwrite)
+				return true // continue iteration
+			})
 		}
 	}
 
@@ -133,12 +132,15 @@ func (store *InMemoryStore) QueryLatest(metricName string, labelMatchers map[str
 			continue
 		}
 
-		if len(ts.Samples) == 0 {
+		if ts.Samples.IsEmpty() {
 			continue
 		}
 
-		// Get the latest sample
-		sample := ts.Samples[len(ts.Samples)-1]
+		// Get the latest sample from ring buffer
+		sample, ok := ts.Samples.Last()
+		if !ok {
+			continue
+		}
 		if !found || sample.Timestamp > latestTime {
 			latestValue = sample.Value
 			latestTime = sample.Timestamp
@@ -173,12 +175,15 @@ func (store *InMemoryStore) QueryLatestSum(metricName string, labelMatchers map[
 			continue
 		}
 
-		if len(ts.Samples) == 0 {
+		if ts.Samples.IsEmpty() {
 			continue
 		}
 
 		// Get the latest sample from this series and add to total
-		sample := ts.Samples[len(ts.Samples)-1]
+		sample, ok := ts.Samples.Last()
+		if !ok {
+			continue
+		}
 		totalValue += sample.Value
 		found = true
 	}
@@ -211,7 +216,8 @@ func (store *InMemoryStore) QueryRange(metricName string, labelMatchers map[stri
 			continue
 		}
 
-		for _, sample := range ts.Samples {
+		// Iterate over ring buffer samples
+		ts.Samples.Range(func(_ int, sample MetricSample) bool {
 			if sample.Timestamp >= startMs && sample.Timestamp <= endMs {
 				// Create a copy to avoid mutations
 				sampleCopy := &MetricSample{
@@ -220,7 +226,8 @@ func (store *InMemoryStore) QueryRange(metricName string, labelMatchers map[stri
 				}
 				allSamples = append(allSamples, sampleCopy)
 			}
-		}
+			return true // continue iteration
+		})
 	}
 
 	// Sort by timestamp
@@ -253,7 +260,8 @@ func (store *InMemoryStore) QueryRangePerSeries(metricName string, labelMatchers
 		}
 
 		var seriesSamples []*MetricSample
-		for _, sample := range ts.Samples {
+		// Iterate over ring buffer samples
+		ts.Samples.Range(func(_ int, sample MetricSample) bool {
 			if sample.Timestamp >= startMs && sample.Timestamp <= endMs {
 				sampleCopy := &MetricSample{
 					Timestamp: sample.Timestamp,
@@ -261,7 +269,8 @@ func (store *InMemoryStore) QueryRangePerSeries(metricName string, labelMatchers
 				}
 				seriesSamples = append(seriesSamples, sampleCopy)
 			}
-		}
+			return true // continue iteration
+		})
 
 		// Only add if we have samples in this time range
 		if len(seriesSamples) > 0 {
@@ -318,25 +327,20 @@ func (store *InMemoryStore) Cleanup() error {
 	return nil
 }
 
-// cleanupExpiredSamples removes samples older than retention time (must be called with write lock)
+// cleanupExpiredSamples removes stale time series (must be called with write lock).
+// With ring buffers, individual samples are automatically evicted by new additions.
+// This cleanup removes entire time series where even the newest sample is too old,
+// indicating the series is no longer being updated.
 func (store *InMemoryStore) cleanupExpiredSamples() {
 	cutoffTime := time.Now().Add(-store.retentionTime).UnixMilli()
 
 	for metricName, seriesMap := range store.series {
 		for seriesKey, ts := range seriesMap {
-			// Remove expired samples
-			validSamples := ts.Samples[:0] // Keep same underlying array
-			for _, sample := range ts.Samples {
-				if sample.Timestamp >= cutoffTime {
-					validSamples = append(validSamples, sample)
-				} else {
-					store.totalSamples--
-				}
-			}
-			ts.Samples = validSamples
-
-			// Remove empty time series
-			if len(ts.Samples) == 0 {
+			// Check if the series is stale (newest sample is too old)
+			newest, ok := ts.Samples.Last()
+			if !ok || newest.Timestamp < cutoffTime {
+				// Series is empty or stale - remove it entirely
+				store.totalSamples -= int64(ts.Samples.Len())
 				delete(seriesMap, seriesKey)
 				store.totalSeries--
 			}
