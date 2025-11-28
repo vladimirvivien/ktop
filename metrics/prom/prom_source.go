@@ -3,6 +3,8 @@ package prom
 import (
 	"context"
 	"fmt"
+	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -119,6 +121,11 @@ func (p *PromMetricsSource) Stop() error {
 // This is essential for pods with multiple containers, where each container
 // has its own container_cpu_usage_seconds_total time series.
 func (p *PromMetricsSource) calculateCPURate(metricName string, labelMatchers map[string]string, window time.Duration) (float64, error) {
+	return p.calculateCPURateWithFilter(metricName, labelMatchers, window, nil)
+}
+
+// calculateCPURateWithFilter calculates CPU rate with optional series filter function
+func (p *PromMetricsSource) calculateCPURateWithFilter(metricName string, labelMatchers map[string]string, window time.Duration, filterFn func(seriesKey string) bool) (float64, error) {
 	now := time.Now()
 	start := now.Add(-window)
 
@@ -137,7 +144,12 @@ func (p *PromMetricsSource) calculateCPURate(metricName string, labelMatchers ma
 	var totalRate float64
 	validSeriesCount := 0
 
-	for _, samples := range seriesSamples {
+	for seriesKey, samples := range seriesSamples {
+		// Apply filter if provided
+		if filterFn != nil && !filterFn(seriesKey) {
+			continue
+		}
+
 		if len(samples) < 2 {
 			// Skip series with insufficient samples
 			continue
@@ -177,6 +189,90 @@ func (p *PromMetricsSource) calculateCPURate(metricName string, labelMatchers ma
 	return totalRate, nil
 }
 
+// isWorkloadContainerCPUTotal returns true if the seriesKey represents:
+// 1. A valid pod metric (container="" is the pod aggregate, which is what we want)
+// 2. The total CPU metric (not per-CPU breakdown)
+//
+// In containerd runtime (modern k8s), cAdvisor only exports pod-level aggregates
+// with container="". Individual container metrics don't exist.
+// We include container="" because it's the pod aggregate we need.
+// We exclude container="POD" because that's the pause container.
+//
+// cAdvisor emits metrics with cpu="total" plus per-CPU metrics (cpu="0", cpu="1", etc.)
+// We only want cpu="total" to avoid double-counting.
+//
+// The series key format from labels.Labels.String() is:
+// {__name__="metric", container="", cpu="total", namespace="ns", pod="pod-name", ...}
+func isWorkloadContainerCPUTotal(seriesKey string) bool {
+	// Exclude POD (pause) container - not useful for pod metrics
+	if strings.Contains(seriesKey, `container="POD"`) {
+		return false
+	}
+
+	// For CPU metrics, only include cpu="total", not per-CPU breakdowns
+	// If cpu label exists but is not "total", exclude it
+	if strings.Contains(seriesKey, `cpu="`) && !strings.Contains(seriesKey, `cpu="total"`) {
+		return false
+	}
+
+	return true
+}
+
+// isWorkloadContainerMemory returns true if the seriesKey represents a valid
+// pod metric for memory. In containerd runtime (modern k8s), cAdvisor only
+// exports pod-level aggregates with container="". We include these because
+// they're the pod aggregate we need. We exclude container="POD" (pause container).
+func isWorkloadContainerMemory(seriesKey string) bool {
+	// Exclude POD (pause) container - not useful for pod metrics
+	if strings.Contains(seriesKey, `container="POD"`) {
+		return false
+	}
+
+	return true
+}
+
+// queryLatestSumFiltered queries latest values and sums them, applying a filter function
+// This is used for memory metrics where we need to sum across workload containers only
+func (p *PromMetricsSource) queryLatestSumFiltered(metricName string, labelMatchers map[string]string, filterFn func(seriesKey string) bool) (float64, error) {
+	// Query with a recent time range to get all matching series
+	now := time.Now()
+	start := now.Add(-5 * time.Minute) // Look back 5 minutes for latest data
+
+	seriesSamples, err := p.store.QueryRangePerSeries(metricName, labelMatchers, start, now)
+	if err != nil {
+		return 0, err
+	}
+
+	if len(seriesSamples) == 0 {
+		return 0, fmt.Errorf("no matching series found")
+	}
+
+	var totalValue float64
+	found := false
+
+	for seriesKey, samples := range seriesSamples {
+		// Apply filter if provided
+		if filterFn != nil && !filterFn(seriesKey) {
+			continue
+		}
+
+		if len(samples) == 0 {
+			continue
+		}
+
+		// Get the latest sample from this series
+		latestSample := samples[len(samples)-1]
+		totalValue += latestSample.Value
+		found = true
+	}
+
+	if !found {
+		return 0, fmt.Errorf("no matching series found after filtering")
+	}
+
+	return totalValue, nil
+}
+
 // GetNodeMetrics retrieves metrics for a specific node from Prometheus
 func (p *PromMetricsSource) GetNodeMetrics(ctx context.Context, nodeName string) (*metrics.NodeMetrics, error) {
 	p.mu.RLock()
@@ -196,12 +292,15 @@ func (p *PromMetricsSource) GetNodeMetrics(ctx context.Context, nodeName string)
 	}
 
 	// Node-level metrics from cAdvisor root container (id="/")
-	labelMatchers := map[string]string{"id": "/"}
+	// IMPORTANT: Must include "node" label to get metrics for the specific node
+	// The "node" label is added by the scraper when collecting from each node
+	labelMatchers := map[string]string{"id": "/", "node": nodeName}
 
 	// Query CPU usage: container_cpu_usage_seconds_total (counter - needs rate calculation)
 	if cpuRate, err := p.calculateCPURate("container_cpu_usage_seconds_total", labelMatchers, 40*time.Second); err == nil {
 		// Convert CPU cores to millicores
-		nodeMetrics.CPUUsage = resource.NewMilliQuantity(int64(cpuRate*1000), resource.DecimalSI)
+		// Use Ceil to avoid truncating sub-millicores to 0
+		nodeMetrics.CPUUsage = resource.NewMilliQuantity(int64(math.Ceil(cpuRate*1000)), resource.DecimalSI)
 	}
 
 	// Query Memory usage: container_memory_working_set_bytes (gauge - use latest value)
@@ -272,25 +371,28 @@ func (p *PromMetricsSource) GetPodMetrics(ctx context.Context, namespace, podNam
 	}
 
 	// Query container metrics from cAdvisor
-	// Include all containers (including pause containers if they emit metrics)
+	// Filter to only include actual workload containers by excluding:
+	// - container="" (pod-level aggregate that would cause double-counting)
+	// - container="POD" (pause container)
 	labelMatchers := map[string]string{
 		"pod":       podName,
 		"namespace": namespace,
 	}
 
-	// Get CPU usage for containers (counter - needs rate calculation)
 	containerMetrics := metrics.ContainerMetrics{
 		Name: "main", // TODO: Get actual container name from labels
 	}
 
-	if cpuRate, err := p.calculateCPURate("container_cpu_usage_seconds_total", labelMatchers, 40*time.Second); err == nil {
-		// Convert CPU cores to millicores
-		containerMetrics.CPUUsage = resource.NewMilliQuantity(int64(cpuRate*1000), resource.DecimalSI)
+	// Get CPU usage for containers (counter - needs rate calculation)
+	// Filter to: workload containers only + cpu="total" only (not per-CPU breakdown)
+	if cpuRate, err := p.calculateCPURateWithFilter("container_cpu_usage_seconds_total", labelMatchers, 40*time.Second, isWorkloadContainerCPUTotal); err == nil {
+		// Use Ceil to avoid truncating sub-millicores to 0 (e.g., 0.7m → 1m, not 0m)
+		containerMetrics.CPUUsage = resource.NewMilliQuantity(int64(math.Ceil(cpuRate*1000)), resource.DecimalSI)
 	}
 
-	// Get memory usage (gauge - sum across all containers in the pod)
-	// Use QueryLatestSum to aggregate memory from multiple containers
-	if memUsage, err := p.store.QueryLatestSum("container_memory_working_set_bytes", labelMatchers); err == nil {
+	// Get memory usage (gauge - sum across workload containers only)
+	// Memory metrics don't have cpu label, so use simpler filter
+	if memUsage, err := p.queryLatestSumFiltered("container_memory_working_set_bytes", labelMatchers, isWorkloadContainerMemory); err == nil {
 		containerMetrics.MemoryUsage = resource.NewQuantity(int64(memUsage), resource.BinarySI)
 	}
 

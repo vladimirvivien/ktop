@@ -77,6 +77,8 @@ func (ks *KubernetesScraper) Stop() error {
 }
 
 // ScrapeComponent manually triggers a scrape for a specific component
+// For node-based components (kubelet, cAdvisor), this scrapes ALL nodes
+// and merges the results with proper node labels added.
 func (ks *KubernetesScraper) ScrapeComponent(ctx context.Context, component ComponentType) (*ScrapedMetrics, error) {
 	ks.targetsMutex.RLock()
 	targets, exists := ks.targets[component]
@@ -85,9 +87,82 @@ func (ks *KubernetesScraper) ScrapeComponent(ctx context.Context, component Comp
 		return nil, fmt.Errorf("no targets found for component %s", component)
 	}
 
-	// For now, scrape the first available target
+	// For node-based components, scrape all nodes and merge results
+	if component == ComponentKubelet || component == ComponentCAdvisor {
+		return ks.scrapeAllTargets(ctx, targets)
+	}
+
+	// For other components, scrape the first available target
 	target := targets[0]
 	return ks.scrapeTarget(ctx, target)
+}
+
+// scrapeAllTargets scrapes all targets and merges results into a single ScrapedMetrics
+// This is used for node-based components where we need metrics from all nodes
+func (ks *KubernetesScraper) scrapeAllTargets(ctx context.Context, targets []*ScrapeTarget) (*ScrapedMetrics, error) {
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("no targets to scrape")
+	}
+
+	// Merged result
+	mergedFamilies := make(map[string]*MetricFamily)
+	var firstEndpoint string
+	var totalDuration time.Duration
+	startTime := time.Now()
+	var lastErr error
+
+	for _, target := range targets {
+		metrics, err := ks.scrapeTarget(ctx, target)
+		if err != nil {
+			lastErr = err
+			continue // Skip failed targets but continue with others
+		}
+
+		if firstEndpoint == "" {
+			firstEndpoint = metrics.Endpoint
+		}
+		totalDuration += metrics.ScrapeDuration
+
+		// Merge families, adding node label to each time series
+		for name, family := range metrics.Families {
+			// Add node label to each time series in this family
+			for _, ts := range family.TimeSeries {
+				// Add node label if this is a node-based target
+				if target.NodeName != "" {
+					ts.Labels = append(ts.Labels, labels.Label{
+						Name:  "node",
+						Value: target.NodeName,
+					})
+				}
+			}
+
+			// Merge into existing family or create new
+			if existing, ok := mergedFamilies[name]; ok {
+				existing.TimeSeries = append(existing.TimeSeries, family.TimeSeries...)
+			} else {
+				mergedFamilies[name] = family
+			}
+		}
+	}
+
+	// Return error only if ALL targets failed
+	if len(mergedFamilies) == 0 && lastErr != nil {
+		return &ScrapedMetrics{
+			Component:      targets[0].Component,
+			Endpoint:       firstEndpoint,
+			ScrapedAt:      startTime,
+			ScrapeDuration: time.Since(startTime),
+			Error:          lastErr,
+		}, lastErr
+	}
+
+	return &ScrapedMetrics{
+		Component:      targets[0].Component,
+		Endpoint:       firstEndpoint + " (all nodes)",
+		Families:       mergedFamilies,
+		ScrapedAt:      startTime,
+		ScrapeDuration: totalDuration,
+	}, nil
 }
 
 // GetLastScrape returns the last scrape result for a component
