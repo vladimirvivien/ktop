@@ -24,6 +24,7 @@ type nodePanel struct {
 	sortColumn  string            // Current sort column
 	sortAsc     bool              // Sort direction: true=ascending, false=descending
 	currentData []model.NodeModel // Store current data for re-sorting
+	filter      *ui.FilterState   // Filter state for row filtering
 }
 
 func NewNodePanel(app *application.Application, title string) ui.Panel {
@@ -32,6 +33,7 @@ func NewNodePanel(app *application.Application, title string) ui.Panel {
 		title:      title,
 		sortColumn: "NAME", // Default sort by NAME
 		sortAsc:    true,   // Default ascending
+		filter:     &ui.FilterState{},
 	}
 	p.Layout(nil)
 	return p
@@ -54,14 +56,55 @@ func (p *nodePanel) Layout(_ interface{}) {
 			p.list.SetSelectable(false, false)
 		})
 
-		// Capture keyboard events for sorting shortcuts
+		// Capture keyboard events for filtering and sorting
+		// ESC handling: panels consume ESC when they have state (filter),
+		// otherwise pass through to let global handler quit the app
 		p.list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			// Handle filter edit mode input
+			if p.filter.Editing {
+				switch event.Key() {
+				case tcell.KeyEscape:
+					p.filter.Cancel()
+					p.redrawWithFilter()
+					return nil // Consume - don't bubble to global handler
+				case tcell.KeyEnter:
+					p.filter.Confirm()
+					p.redrawWithFilter()
+					return nil
+				case tcell.KeyBackspace, tcell.KeyBackspace2:
+					if p.filter.HandleBackspace() {
+						p.redrawWithFilter()
+					}
+					return nil
+				case tcell.KeyRune:
+					p.filter.AppendChar(event.Rune())
+					p.redrawWithFilter()
+					return nil
+				}
+				return nil // Consume all keys in edit mode
+			}
+
+			// Normal mode - ESC clears active filter
+			if event.Key() == tcell.KeyEscape && p.filter.Active {
+				p.filter.Clear()
+				p.redrawWithFilter()
+				return nil // Consume - don't quit app
+			}
+
+			// Filter trigger
+			if event.Key() == tcell.KeyRune && event.Rune() == '/' {
+				p.filter.StartEditing()
+				p.redrawWithFilter()
+				return nil
+			}
+
+			// Handle sorting shortcuts
 			if event.Key() == tcell.KeyRune {
 				if p.handleSortKey(event.Rune()) {
 					return nil // Event consumed
 				}
 			}
-			return event // Pass through unhandled events
+			return event // Pass through - let it bubble to global handler
 		})
 
 		p.root = tview.NewFlex().SetDirection(tview.FlexRow).
@@ -280,10 +323,29 @@ func (p *nodePanel) DrawBody(data interface{}) {
 	var cpuMetrics, memMetrics string
 	colorKeys := ui.ColorKeys{0: "olivedrab", 50: "yellow", 90: "red"}
 
-	// Update title with scroll position indicator
-	p.updateTitle(len(nodes))
+	// Apply filter and track counts
+	p.filter.TotalRows = len(nodes)
+	p.filter.MatchRows = 0
 
-	for rowIdx, node := range nodes {
+	// Filter nodes if filter is active or editing
+	var filteredNodes []model.NodeModel
+	if p.filter.IsFiltering() && p.filter.Text != "" {
+		for _, node := range nodes {
+			if p.filter.MatchesRow(p.getNodeCells(node)) {
+				filteredNodes = append(filteredNodes, node)
+			}
+		}
+		p.filter.MatchRows = len(filteredNodes)
+	} else {
+		filteredNodes = nodes
+		p.filter.MatchRows = len(nodes)
+	}
+
+	// Update title with scroll position indicator
+	p.updateTitle(len(filteredNodes))
+
+	rowIdx := 0
+	for _, node := range filteredNodes {
 		rowIdx++ // offset for header-row
 
 		// Determine row color based on node status
@@ -484,7 +546,59 @@ func (p *nodePanel) GetChildrenViews() []tview.Primitive {
 	return p.children
 }
 
-// updateTitle updates the panel title with scroll position indicator
+// getNodeCells extracts text values from a node model for filter matching
+func (p *nodePanel) getNodeCells(node model.NodeModel) []string {
+	return []string{
+		node.Name,
+		node.Status,
+		node.TimeSinceStart,
+		node.KubeletVersion,
+		node.InternalIP,
+		node.ExternalIP,
+		node.OSImage,
+		node.Architecture,
+	}
+}
+
+// redrawWithFilter redraws the table with current filter applied
+func (p *nodePanel) redrawWithFilter() {
+	if len(p.currentData) > 0 {
+		p.list.Clear()
+		p.DrawHeader(p.listCols)
+		p.DrawBody(p.currentData)
+		if p.app != nil {
+			p.app.Refresh()
+		}
+	} else {
+		// No data yet, just update title
+		p.updateTitle(0)
+		if p.app != nil {
+			p.app.Refresh()
+		}
+	}
+}
+
+// HasEscapableState implements ui.EscapablePanel
+func (p *nodePanel) HasEscapableState() bool {
+	return p.filter.HasEscapableState()
+}
+
+// HandleEscape implements ui.EscapablePanel - handles ESC key press
+func (p *nodePanel) HandleEscape() bool {
+	if p.filter.Editing {
+		p.filter.Cancel()
+		p.redrawWithFilter()
+		return true
+	}
+	if p.filter.Active {
+		p.filter.Clear()
+		p.redrawWithFilter()
+		return true
+	}
+	return false
+}
+
+// updateTitle updates the panel title with scroll position indicator and filter state
 func (p *nodePanel) updateTitle(totalRows int) {
 	// Get visible area dimensions
 	_, _, _, height := p.list.GetInnerRect()
@@ -495,18 +609,16 @@ func (p *nodePanel) updateTitle(totalRows int) {
 	// Handle disconnected state
 	var disconnectedSuffix string
 	if p.app.IsAPIDisconnected() {
-		disconnectedSuffix = " [red][DISCONNECTED - Press R to reconnect]"
-	}
-
-	if totalRows <= visibleRows || totalRows == 0 {
-		// All content visible - simple count
-		p.root.SetTitle(fmt.Sprintf(" %s Nodes (%d)%s ", ui.Icons.Factory, totalRows, disconnectedSuffix))
-		return
+		disconnectedSuffix = " [red][DISCONNECTED - Press R to reconnect][-]"
 	}
 
 	// Calculate visible range (1-indexed for display)
 	firstVisible := offset + 1 // Convert 0-indexed to 1-indexed
 	lastVisible := min(offset+visibleRows, totalRows)
+	if totalRows == 0 {
+		firstVisible = 0
+		lastVisible = 0
+	}
 
 	// Determine scroll indicators
 	var scrollIndicator string
@@ -521,7 +633,7 @@ func (p *nodePanel) updateTitle(totalRows int) {
 		scrollIndicator = " ↓"
 	}
 
-	title := fmt.Sprintf(" %s Nodes (%d-%d/%d)%s%s ",
-		ui.Icons.Factory, firstVisible, lastVisible, totalRows, scrollIndicator, disconnectedSuffix)
+	// Use filter-aware title formatting
+	title := p.filter.FormatTitleWithScroll("Nodes", ui.Icons.Factory, firstVisible, lastVisible, totalRows, scrollIndicator, disconnectedSuffix)
 	p.root.SetTitle(title)
 }

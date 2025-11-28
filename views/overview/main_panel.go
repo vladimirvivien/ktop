@@ -112,6 +112,40 @@ func (p *MainPanel) GetChildrenViews() []tview.Primitive {
 	return p.children
 }
 
+// HasEscapableState implements ui.EscapablePanel by checking child panels
+func (p *MainPanel) HasEscapableState() bool {
+	// Check node panel
+	if escapable, ok := p.nodePanel.(ui.EscapablePanel); ok {
+		if escapable.HasEscapableState() {
+			return true
+		}
+	}
+	// Check pod panel
+	if escapable, ok := p.podPanel.(ui.EscapablePanel); ok {
+		if escapable.HasEscapableState() {
+			return true
+		}
+	}
+	return false
+}
+
+// HandleEscape implements ui.EscapablePanel by delegating to child panels
+func (p *MainPanel) HandleEscape() bool {
+	// Try node panel first
+	if escapable, ok := p.nodePanel.(ui.EscapablePanel); ok {
+		if escapable.HandleEscape() {
+			return true
+		}
+	}
+	// Try pod panel
+	if escapable, ok := p.podPanel.(ui.EscapablePanel); ok {
+		if escapable.HandleEscape() {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *MainPanel) Run(ctx context.Context) error {
 	p.Layout(nil)
 	ctrl := p.app.GetK8sClient().Controller()

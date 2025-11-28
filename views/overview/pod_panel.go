@@ -23,6 +23,7 @@ type podPanel struct {
 	sortColumn  string           // Current sort column
 	sortAsc     bool             // Sort direction: true=ascending, false=descending
 	currentData []model.PodModel // Store current data for re-sorting
+	filter      *ui.FilterState  // Filter state for row filtering
 }
 
 func NewPodPanel(app *application.Application, title string) ui.Panel {
@@ -31,6 +32,7 @@ func NewPodPanel(app *application.Application, title string) ui.Panel {
 		title:      title,
 		sortColumn: "NAMESPACE", // Default sort by NAMESPACE then NAME
 		sortAsc:    true,        // Default ascending
+		filter:     &ui.FilterState{},
 	}
 	p.Layout(nil)
 
@@ -56,14 +58,55 @@ func (p *podPanel) Layout(_ interface{}) {
 			p.list.SetSelectable(false, false)
 		})
 
-		// Capture keyboard events for sorting shortcuts
+		// Capture keyboard events for filtering and sorting
+		// ESC handling: panels consume ESC when they have state (filter),
+		// otherwise pass through to let global handler quit the app
 		p.list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			// Handle filter edit mode input
+			if p.filter.Editing {
+				switch event.Key() {
+				case tcell.KeyEscape:
+					p.filter.Cancel()
+					p.redrawWithFilter()
+					return nil // Consume - don't bubble to global handler
+				case tcell.KeyEnter:
+					p.filter.Confirm()
+					p.redrawWithFilter()
+					return nil
+				case tcell.KeyBackspace, tcell.KeyBackspace2:
+					if p.filter.HandleBackspace() {
+						p.redrawWithFilter()
+					}
+					return nil
+				case tcell.KeyRune:
+					p.filter.AppendChar(event.Rune())
+					p.redrawWithFilter()
+					return nil
+				}
+				return nil // Consume all keys in edit mode
+			}
+
+			// Normal mode - ESC clears active filter
+			if event.Key() == tcell.KeyEscape && p.filter.Active {
+				p.filter.Clear()
+				p.redrawWithFilter()
+				return nil // Consume - don't quit app
+			}
+
+			// Filter trigger
+			if event.Key() == tcell.KeyRune && event.Rune() == '/' {
+				p.filter.StartEditing()
+				p.redrawWithFilter()
+				return nil
+			}
+
+			// Handle sorting shortcuts
 			if event.Key() == tcell.KeyRune {
 				if p.handleSortKey(event.Rune()) {
 					return nil // Event consumed
 				}
 			}
-			return event // Pass through unhandled events
+			return event // Pass through - let it bubble to global handler
 		})
 
 		p.root = tview.NewFlex().SetDirection(tview.FlexRow).
@@ -265,10 +308,29 @@ func (p *podPanel) DrawBody(data interface{}) {
 	var cpuGraph, memGraph string
 	var cpuMetrics, memMetrics string
 
-	// Update title with scroll position indicator
-	p.updateTitle(len(pods))
+	// Apply filter and track counts
+	p.filter.TotalRows = len(pods)
+	p.filter.MatchRows = 0
 
-	for rowIdx, pod := range pods {
+	// Filter pods if filter is active or editing
+	var filteredPods []model.PodModel
+	if p.filter.IsFiltering() && p.filter.Text != "" {
+		for _, pod := range pods {
+			if p.filter.MatchesRow(p.getPodCells(pod)) {
+				filteredPods = append(filteredPods, pod)
+			}
+		}
+		p.filter.MatchRows = len(filteredPods)
+	} else {
+		filteredPods = pods
+		p.filter.MatchRows = len(pods)
+	}
+
+	// Update title with scroll position indicator
+	p.updateTitle(len(filteredPods))
+
+	rowIdx := 0
+	for _, pod := range filteredPods {
 		rowIdx++ // offset for header row
 
 		// Determine row color based on pod status
@@ -487,7 +549,57 @@ func (p *podPanel) GetChildrenViews() []tview.Primitive {
 	return p.children
 }
 
-// updateTitle updates the panel title with scroll position indicator
+// getPodCells extracts text values from a pod model for filter matching
+func (p *podPanel) getPodCells(pod model.PodModel) []string {
+	return []string{
+		pod.Namespace,
+		pod.Name,
+		pod.Status,
+		pod.IP,
+		pod.Node,
+		pod.TimeSince,
+	}
+}
+
+// redrawWithFilter redraws the table with current filter applied
+func (p *podPanel) redrawWithFilter() {
+	if len(p.currentData) > 0 {
+		p.list.Clear()
+		p.DrawHeader(p.listCols)
+		p.DrawBody(p.currentData)
+		if p.app != nil {
+			p.app.Refresh()
+		}
+	} else {
+		// No data yet, just update title
+		p.updateTitle(0)
+		if p.app != nil {
+			p.app.Refresh()
+		}
+	}
+}
+
+// HasEscapableState implements ui.EscapablePanel
+func (p *podPanel) HasEscapableState() bool {
+	return p.filter.HasEscapableState()
+}
+
+// HandleEscape implements ui.EscapablePanel - handles ESC key press
+func (p *podPanel) HandleEscape() bool {
+	if p.filter.Editing {
+		p.filter.Cancel()
+		p.redrawWithFilter()
+		return true
+	}
+	if p.filter.Active {
+		p.filter.Clear()
+		p.redrawWithFilter()
+		return true
+	}
+	return false
+}
+
+// updateTitle updates the panel title with scroll position indicator and filter state
 func (p *podPanel) updateTitle(totalRows int) {
 	// Get visible area dimensions
 	_, _, _, height := p.list.GetInnerRect()
@@ -498,18 +610,16 @@ func (p *podPanel) updateTitle(totalRows int) {
 	// Handle disconnected state
 	var disconnectedSuffix string
 	if p.app.IsAPIDisconnected() {
-		disconnectedSuffix = " [red][DISCONNECTED - Press R to reconnect]"
-	}
-
-	if totalRows <= visibleRows || totalRows == 0 {
-		// All content visible - simple count
-		p.root.SetTitle(fmt.Sprintf(" %s Pods (%d)%s ", ui.Icons.Package, totalRows, disconnectedSuffix))
-		return
+		disconnectedSuffix = " [red][DISCONNECTED - Press R to reconnect][-]"
 	}
 
 	// Calculate visible range (1-indexed for display)
 	firstVisible := offset + 1 // Convert 0-indexed to 1-indexed
 	lastVisible := min(offset+visibleRows, totalRows)
+	if totalRows == 0 {
+		firstVisible = 0
+		lastVisible = 0
+	}
 
 	// Determine scroll indicators
 	var scrollIndicator string
@@ -524,7 +634,7 @@ func (p *podPanel) updateTitle(totalRows int) {
 		scrollIndicator = " ↓"
 	}
 
-	title := fmt.Sprintf(" %s Pods (%d-%d/%d)%s%s ",
-		ui.Icons.Package, firstVisible, lastVisible, totalRows, scrollIndicator, disconnectedSuffix)
+	// Use filter-aware title formatting
+	title := p.filter.FormatTitleWithScroll("Pods", ui.Icons.Package, firstVisible, lastVisible, totalRows, scrollIndicator, disconnectedSuffix)
 	p.root.SetTitle(title)
 }

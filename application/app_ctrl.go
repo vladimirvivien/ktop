@@ -257,8 +257,19 @@ func (app *Application) setup(ctx context.Context) error {
 			return event // Pass through to modal
 		}
 
-		// Handle ESC to quit (only when no modal is shown)
+		// Handle ESC - check if visible panel has state to clear first
+		// Global handler runs BEFORE focused widget, so we must check panels here
 		if event.Key() == tcell.KeyEsc {
+			// Check if the currently visible panel has escapable state
+			if app.visibleView >= 0 && app.visibleView < len(app.pages) {
+				if escapable, ok := app.pages[app.visibleView].Panel.(ui.EscapablePanel); ok {
+					if escapable.HandleEscape() {
+						app.Refresh()
+						return nil // Panel handled ESC, don't quit
+					}
+				}
+			}
+			// No panel had state to clear - quit the app
 			app.Stop()
 			return nil
 		}
