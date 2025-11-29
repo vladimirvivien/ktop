@@ -30,6 +30,10 @@ var Icons = struct {
 	Info      string
 	Unknown   string
 	Completed string
+	// Trend indicators for sparklines
+	TrendUp   string
+	TrendDown string
+	TrendFlat string
 }{
 	BargraphFull:  "⣿",
 	BargraphEmpty: "⠀",
@@ -59,4 +63,8 @@ var Icons = struct {
 	Info:      "ℹ️",
 	Unknown:   "⛔️",
 	Completed: "✅",
+	// Trend indicators for sparklines
+	TrendUp:    "⬆",
+	TrendDown:  "⬇",
+	TrendFlat:  "→",
 }

@@ -24,15 +24,21 @@ type podPanel struct {
 	sortAsc     bool             // Sort direction: true=ascending, false=descending
 	currentData []model.PodModel // Store current data for re-sorting
 	filter      *ui.FilterState  // Filter state for row filtering
+
+	// Stateful sparklines for smooth sliding animation
+	cpuSparklines map[string]*ui.SparklineState // key: "namespace/podname"
+	memSparklines map[string]*ui.SparklineState
 }
 
 func NewPodPanel(app *application.Application, title string) ui.Panel {
 	p := &podPanel{
-		app:        app,
-		title:      title,
-		sortColumn: "NAMESPACE", // Default sort by NAMESPACE then NAME
-		sortAsc:    true,        // Default ascending
-		filter:     &ui.FilterState{},
+		app:           app,
+		title:         title,
+		sortColumn:    "NAMESPACE", // Default sort by NAMESPACE then NAME
+		sortAsc:       true,        // Default ascending
+		filter:        &ui.FilterState{},
+		cpuSparklines: make(map[string]*ui.SparklineState),
+		memSparklines: make(map[string]*ui.SparklineState),
 	}
 	p.Layout(nil)
 
@@ -41,6 +47,16 @@ func NewPodPanel(app *application.Application, title string) ui.Panel {
 
 func (p *podPanel) GetTitle() string {
 	return p.title
+}
+
+// getSparkline returns an existing sparkline or creates a new one
+func (p *podPanel) getSparkline(sparklines map[string]*ui.SparklineState, key string, width int, colors ui.ColorKeys) *ui.SparklineState {
+	if spark, ok := sparklines[key]; ok {
+		return spark
+	}
+	spark := ui.NewSparklineState(width, colors)
+	sparklines[key] = spark
+	return spark
 }
 
 func (p *podPanel) Layout(_ interface{}) {
@@ -438,34 +454,42 @@ func (p *podPanel) DrawBody(data interface{}) {
 				)
 
 			case "CPU":
+				graphWidth := 10
 				// Check if we have actual usage metrics (non-zero values)
 				hasUsageMetrics := pod.PodUsageCpuQty != nil && pod.PodUsageCpuQty.MilliValue() > 0
 				hasRequestMetrics := pod.PodRequestedCpuQty != nil && pod.PodRequestedCpuQty.MilliValue() > 0
 				hasAllocatable := pod.NodeAllocatableCpuQty != nil && pod.NodeAllocatableCpuQty.MilliValue() > 0
 
+				// Get or create stateful sparkline for this pod
+				podKey := pod.Namespace + "/" + pod.Name
+				cpuSparkline := p.getSparkline(p.cpuSparklines, podKey, graphWidth, colorKeys)
+
 				if hasUsageMetrics && hasAllocatable {
-					// Display usage with graph: [||        ] 150m 3.8%
 					cpuRatio = ui.GetRatio(float64(pod.PodUsageCpuQty.MilliValue()), float64(pod.NodeAllocatableCpuQty.MilliValue()))
-					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
 					cpuPercentage := float64(cpuRatio) * 100
 					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
+					// Push current value to sparkline (smooth sliding)
+					cpuSparkline.Push(float64(cpuRatio))
+					cpuGraph = cpuSparkline.Render()
 					cpuMetrics = fmt.Sprintf(
 						"[white][%s[white]] %dm [%s]%.1f%%[white]",
 						cpuGraph, pod.PodUsageCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
 					)
 				} else if hasRequestMetrics && hasAllocatable {
-					// Fallback: show requested with graph: [|         ] 100m 2.5%
 					cpuRatio = ui.GetRatio(float64(pod.PodRequestedCpuQty.MilliValue()), float64(pod.NodeAllocatableCpuQty.MilliValue()))
-					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
 					cpuPercentage := float64(cpuRatio) * 100
 					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
+					// Push current value to sparkline (smooth sliding)
+					cpuSparkline.Push(float64(cpuRatio))
+					cpuGraph = cpuSparkline.Render()
 					cpuMetrics = fmt.Sprintf(
 						"[white][%s[white]] %dm [%s]%.1f%%[white]",
 						cpuGraph, pod.PodRequestedCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
 					)
 				} else {
-					// Zero or unavailable: show empty graph with 0m 0.0%
-					cpuGraph = ui.BarGraph(10, 0, colorKeys)
+					// Zero or unavailable: push zero to sparkline
+					cpuSparkline.Push(0)
+					cpuGraph = cpuSparkline.Render()
 					cpuMetrics = fmt.Sprintf(
 						"[white][%s[white]] 0m [green]0.0%%[white]",
 						cpuGraph,
@@ -482,17 +506,23 @@ func (p *podPanel) DrawBody(data interface{}) {
 				)
 
 			case "MEMORY":
+				graphWidth := 10
 				// Check if we have actual usage metrics (non-zero values)
 				hasUsageMetrics := pod.PodUsageMemQty != nil && pod.PodUsageMemQty.Value() > 0
 				hasRequestMetrics := pod.PodRequestedMemQty != nil && pod.PodRequestedMemQty.Value() > 0
 				hasAllocatable := pod.NodeAllocatableMemQty != nil && pod.NodeAllocatableMemQty.Value() > 0
 
+				// Get or create stateful sparkline for this pod's memory
+				podKey := pod.Namespace + "/" + pod.Name
+				memSparkline := p.getSparkline(p.memSparklines, podKey, graphWidth, colorKeys)
+
 				if hasUsageMetrics && hasAllocatable {
-					// Display usage with graph: [||        ] 366Mi 0.5%
 					memRatio = ui.GetRatio(float64(pod.PodUsageMemQty.Value()), float64(pod.NodeAllocatableMemQty.Value()))
-					memGraph = ui.BarGraph(10, memRatio, colorKeys)
 					memPercentage := float64(memRatio) * 100
 					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
+					// Push current value to sparkline (smooth sliding)
+					memSparkline.Push(float64(memRatio))
+					memGraph = memSparkline.Render()
 					memMetrics = fmt.Sprintf(
 						"[white][%s[white]] %s [%s]%.1f%%[white]",
 						memGraph,
@@ -500,11 +530,12 @@ func (p *podPanel) DrawBody(data interface{}) {
 						memPercentageColor, memPercentage,
 					)
 				} else if hasRequestMetrics && hasAllocatable {
-					// Fallback: show requested with graph: [|         ] 512Mi 0.5%
 					memRatio = ui.GetRatio(float64(pod.PodRequestedMemQty.Value()), float64(pod.NodeAllocatableMemQty.Value()))
-					memGraph = ui.BarGraph(10, memRatio, colorKeys)
 					memPercentage := float64(memRatio) * 100
 					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
+					// Push current value to sparkline (smooth sliding)
+					memSparkline.Push(float64(memRatio))
+					memGraph = memSparkline.Render()
 					memMetrics = fmt.Sprintf(
 						"[white][%s[white]] %s [%s]%.1f%%[white]",
 						memGraph,
@@ -512,8 +543,9 @@ func (p *podPanel) DrawBody(data interface{}) {
 						memPercentageColor, memPercentage,
 					)
 				} else {
-					// Zero or unavailable: show empty graph with 0Mi 0.0%
-					memGraph = ui.BarGraph(10, 0, colorKeys)
+					// Zero or unavailable: push zero to sparkline
+					memSparkline.Push(0)
+					memGraph = memSparkline.Render()
 					memMetrics = fmt.Sprintf(
 						"[white][%s[white]] 0Mi [green]0.0%%[white]",
 						memGraph,

@@ -21,6 +21,10 @@ type clusterSummaryPanel struct {
 	listCols     []string
 	graphTable   *tview.Table
 	summaryTable *tview.Table
+
+	// Stateful sparklines for smooth sliding animation
+	cpuSparkline *ui.SparklineState
+	memSparkline *ui.SparklineState
 }
 
 func NewClusterSummaryPanel(app *application.Application, title string) ui.Panel {
@@ -71,24 +75,32 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 	switch summary := data.(type) {
 	case model.ClusterSummary:
 		var cpuRatio, memRatio ui.Ratio
-		var cpuGraph, memGraph string
 		var cpuMetrics, memMetrics string
 
 		// Check if usage metrics are actually available (non-zero)
-		// If usage is 0, fall back to showing requested resources
 		hasUsageMetrics := summary.UsageNodeCpuTotal.MilliValue() > 0 || summary.UsageNodeMemTotal.MilliValue() > 0
+
+		// Initialize sparklines if needed
+		if p.cpuSparkline == nil {
+			p.cpuSparkline = ui.NewSparklineState(graphSize, colorKeys)
+		}
+		if p.memSparkline == nil {
+			p.memSparkline = ui.NewSparklineState(graphSize, colorKeys)
+		}
 
 		if !hasUsageMetrics {
 			// Show requested resources (fallback mode)
 			cpuRatio = ui.GetRatio(float64(summary.RequestedPodCpuTotal.MilliValue()), float64(summary.AllocatableNodeCpuTotal.MilliValue()))
-			cpuGraph = ui.BarGraph(graphSize, cpuRatio, colorKeys)
+			p.cpuSparkline.Push(float64(cpuRatio))
+			cpuGraph := p.cpuSparkline.Render()
 			cpuMetrics = fmt.Sprintf(
 				"CPU: [white][%s[white]] %dm/%dm (%02.1f%% requested)",
 				cpuGraph, summary.RequestedPodCpuTotal.MilliValue(), summary.AllocatableNodeCpuTotal.MilliValue(), cpuRatio*100,
 			)
 
 			memRatio = ui.GetRatio(float64(summary.RequestedPodMemTotal.MilliValue()), float64(summary.AllocatableNodeMemTotal.MilliValue()))
-			memGraph = ui.BarGraph(graphSize, memRatio, colorKeys)
+			p.memSparkline.Push(float64(memRatio))
+			memGraph := p.memSparkline.Render()
 			memMetrics = fmt.Sprintf(
 				"Memory: [white][%s[white]] %s/%s (%02.1f%% requested)",
 				memGraph, ui.FormatMemory(summary.RequestedPodMemTotal), ui.FormatMemory(summary.AllocatableNodeMemTotal), memRatio*100,
@@ -96,14 +108,16 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 		} else {
 			// Show actual usage (metrics available)
 			cpuRatio = ui.GetRatio(float64(summary.UsageNodeCpuTotal.MilliValue()), float64(summary.AllocatableNodeCpuTotal.MilliValue()))
-			cpuGraph = ui.BarGraph(graphSize, cpuRatio, colorKeys)
+			p.cpuSparkline.Push(float64(cpuRatio))
+			cpuGraph := p.cpuSparkline.Render()
 			cpuMetrics = fmt.Sprintf(
 				"CPU: [white][%s[white]] %dm/%dm (%02.1f%% used)",
 				cpuGraph, summary.UsageNodeCpuTotal.MilliValue(), summary.AllocatableNodeCpuTotal.MilliValue(), cpuRatio*100,
 			)
 
 			memRatio = ui.GetRatio(float64(summary.UsageNodeMemTotal.MilliValue()), float64(summary.AllocatableNodeMemTotal.MilliValue()))
-			memGraph = ui.BarGraph(graphSize, memRatio, colorKeys)
+			p.memSparkline.Push(float64(memRatio))
+			memGraph := p.memSparkline.Render()
 			memMetrics = fmt.Sprintf(
 				"Memory: [white][%s[white]] %s/%s (%02.1f%% used)",
 				memGraph, ui.FormatMemory(summary.UsageNodeMemTotal), ui.FormatMemory(summary.AllocatableNodeMemTotal), memRatio*100,
