@@ -64,6 +64,10 @@ var Theme = struct {
 	TrendHighColor     string  // Color when percentage >= 80% (red)
 	TrendThreshold     float64 // Percentage change threshold (0.05 = 5%)
 	TrendHighThreshold float64 // Percentage threshold for red arrow (0.80 = 80%)
+
+	// Panel focus colors
+	FocusBorderColor   string // Border color when panel is focused (yellow)
+	UnfocusBorderColor string // Border color when panel is unfocused (white)
 }{
 	// Header colors
 	HeaderBackground:    "darkgreen",
@@ -124,6 +128,10 @@ var Theme = struct {
 	TrendHighColor:     "red",       // Red when percentage >= 80%
 	TrendThreshold:     0.05,        // 5% change triggers arrow
 	TrendHighThreshold: 0.80,        // 80% threshold for red arrow
+
+	// Panel focus colors
+	FocusBorderColor:   "yellow", // Border color when panel is focused
+	UnfocusBorderColor: "white",  // Border color when panel is unfocused
 }
 
 // FormatTag returns a tview color/style tag string

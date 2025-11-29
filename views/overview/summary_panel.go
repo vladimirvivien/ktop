@@ -226,3 +226,8 @@ func (p *clusterSummaryPanel) GetRootView() tview.Primitive {
 func (p *clusterSummaryPanel) GetChildrenViews() []tview.Primitive {
 	return p.children
 }
+
+// SetFocused implements ui.FocusablePanel - updates visual focus state
+func (p *clusterSummaryPanel) SetFocused(focused bool) {
+	ui.SetFlexFocused(p.root, focused)
+}
