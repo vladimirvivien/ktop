@@ -30,7 +30,7 @@ type Application struct {
 	pages         []AppPage
 	modals        []tview.Primitive
 	pageIdx       int
-	tabIdx        int
+	tabIdx        int // -1 = header, 0+ = children panels
 	visibleView   int
 	panel         *appPanel
 	refreshQ      chan struct{}
@@ -43,8 +43,11 @@ type Application struct {
 	loadingToastStartTime time.Time
 
 	// API health tracking
-	apiHealthTracker   *health.APIHealthTracker
-	apiHealthToastID   string // Persistent toast for API health issues
+	apiHealthTracker *health.APIHealthTracker
+	apiHealthToastID string // Persistent toast for API health issues
+
+	// Namespace filter callback for pod filtering
+	namespaceFilterCallback func(namespace string)
 }
 
 func New(k8sC *k8s.Client, metricsSource metrics.MetricsSource) *Application {
@@ -57,7 +60,7 @@ func New(k8sC *k8s.Client, metricsSource metrics.MetricsSource) *Application {
 		panel:         newPanel(tapp),
 		refreshQ:      make(chan struct{}, 1),
 		pageIdx:       -1,
-		tabIdx:        -1,
+		tabIdx:        -1, // -1 = header (default focus), 0+ = children panels
 	}
 
 	// Initialize API health tracker with persistent toast callback
@@ -168,6 +171,68 @@ func (app *Application) Refresh() {
 	app.refreshQ <- struct{}{}
 }
 
+// QueueUpdateDraw safely queues a UI update function to run on the main goroutine.
+// Use this when updating UI from background goroutines (e.g., controller callbacks).
+// The function will be executed and followed by a screen redraw.
+func (app *Application) QueueUpdateDraw(f func()) {
+	app.tviewApp.QueueUpdateDraw(f)
+}
+
+// SetNamespaceFilterCallback sets the callback for namespace filter changes
+func (app *Application) SetNamespaceFilterCallback(callback func(namespace string)) {
+	app.namespaceFilterCallback = callback
+	// Also set it on the panel so it can notify when user types
+	app.panel.setNamespaceFilterCallback(callback)
+}
+
+// GetNamespaceFilter returns the current namespace filter text
+func (app *Application) GetNamespaceFilter() string {
+	return app.panel.getNamespaceFilter()
+}
+
+// updatePanelFocus updates focus state for all child panels based on tabIdx
+func (app *Application) updatePanelFocus(views []tview.Primitive) {
+	// Get the main panel to access child panels with FocusablePanel interface
+	if len(app.pages) == 0 {
+		return
+	}
+
+	mainPanel := app.pages[0].Panel
+	children := mainPanel.GetChildrenViews()
+
+	for i, child := range children {
+		// Try to get the underlying panel that implements FocusablePanel
+		// We need to check if the panel (not the view) implements the interface
+		if focusable, ok := app.getPanelForView(child).(ui.FocusablePanel); ok {
+			focusable.SetFocused(i == app.tabIdx)
+		}
+	}
+}
+
+// getPanelForView returns the panel for a given view (helper for focus management)
+// This is a workaround since we store views but need access to panel methods
+func (app *Application) getPanelForView(view tview.Primitive) interface{} {
+	// The views are children of the main panel, so we need to match them
+	// to the actual panel objects. For now, we'll use a simple approach
+	// since the MainPanel stores references to its child panels.
+	if len(app.pages) == 0 {
+		return nil
+	}
+	mainPanel := app.pages[0].Panel
+	children := mainPanel.GetChildrenViews()
+
+	for i, child := range children {
+		if child == view {
+			// Return the panel that owns this view
+			// This requires MainPanel to expose its child panels
+			if provider, ok := mainPanel.(interface{ GetChildPanel(int) ui.Panel }); ok {
+				return provider.GetChildPanel(i)
+			}
+		}
+	}
+	return nil
+}
+
 func (app *Application) ShowPanel(i int) {
 	app.visibleView = i
 }
@@ -199,28 +264,39 @@ func (app *Application) setup(ctx context.Context) error {
 	// continue setup rest of UI
 	app.panel.Layout(app.pages)
 
-	var hdr strings.Builder
-	hdr.WriteString("%s [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green]metrics:")
-	// Check MetricsSource health instead of blocking network call
-	// This provides accurate status for both metrics-server and prometheus sources
-	if app.metricsSource != nil && app.metricsSource.IsHealthy() {
-		sourceInfo := app.metricsSource.GetSourceInfo()
-		hdr.WriteString(fmt.Sprintf(" [white]%s", sourceInfo.Type))
-	} else {
-		hdr.WriteString(" [red]not connected")
-	}
-
-	namespace := app.k8sClient.Namespace()
-	if namespace == k8s.AllNamespaces {
-		namespace = "[orange](all)"
-	}
-	client := app.GetK8sClient()
-	app.panel.DrawHeader(fmt.Sprintf(
-		hdr.String(),
-		ui.Icons.Rocket, client.RESTConfig().Host, client.GetServerVersion(), client.ClusterContext(), client.Username(), namespace,
-	))
+	// Draw initial header using shared helper functions
+	nsDisplay := app.getNamespaceDisplay()
+	app.panel.DrawHeader(app.buildHeaderString(nsDisplay))
 
 	app.panel.DrawFooter(app.getPageTitles()[app.visibleView])
+
+	// Set initial focus to header panel and unfocus all child panels
+	app.panel.setHeaderFocused(true)
+	if len(app.pages) > 0 {
+		views := app.pages[0].Panel.GetChildrenViews()
+		app.updatePanelFocus(views) // With tabIdx=-1, this unfocuses all children
+	}
+	// Explicitly focus header to prevent tview from auto-focusing first child
+	app.Focus(app.panel.getHeader())
+
+	// Set up focus restoration callback for toast dismissal
+	// This ensures proper focus is restored based on tabIdx after toast goes away
+	app.panel.setFocusRestorationCallback(func() {
+		views := app.pages[0].Panel.GetChildrenViews()
+		// Restore focus based on current tabIdx
+		if app.tabIdx == -1 {
+			// Header was focused - must explicitly focus header to prevent
+			// tview from auto-focusing the first focusable child (cluster summary)
+			app.panel.setHeaderFocused(true)
+			app.updatePanelFocus(views) // Ensure children are unfocused
+			app.tviewApp.SetFocus(app.panel.getHeader())
+		} else if app.tabIdx >= 0 && app.tabIdx < len(views) {
+			// A child panel was focused
+			app.panel.setHeaderFocused(false)
+			app.updatePanelFocus(views)
+			app.tviewApp.SetFocus(views[app.tabIdx])
+		}
+	})
 
 	// Show loading toast immediately when source is initializing
 	if app.metricsSource != nil {
@@ -257,9 +333,19 @@ func (app *Application) setup(ctx context.Context) error {
 			return event // Pass through to modal
 		}
 
-		// Handle ESC - check if visible panel has state to clear first
+		// Handle ESC - check if header or visible panel has state to clear first
 		// Global handler runs BEFORE focused widget, so we must check panels here
 		if event.Key() == tcell.KeyEsc {
+			// Check if header has escapable state first (when header is focused)
+			if app.tabIdx == -1 && app.panel.hasEscapableHeaderState() {
+				if app.panel.handleHeaderEscape() {
+					// Use updateHeaderDirect (not updateHeader) because we're
+					// already on the main goroutine. QueueUpdateDraw would deadlock.
+					app.updateHeaderDirect()
+					app.Refresh()
+					return nil // Header handled ESC, don't quit
+				}
+			}
 			// Check if the currently visible panel has escapable state
 			if app.visibleView >= 0 && app.visibleView < len(app.pages) {
 				if escapable, ok := app.pages[app.visibleView].Panel.(ui.EscapablePanel); ok {
@@ -284,10 +370,38 @@ func (app *Application) setup(ctx context.Context) error {
 
 		if event.Key() == tcell.KeyTAB {
 			views := app.pages[0].Panel.GetChildrenViews()
+			// Cycle: -1 (header) -> 0 -> 1 -> 2 -> -1 (header) ...
+			// -2 = no focus (initial state)
 			app.tabIdx++
-			app.Focus(views[app.tabIdx])
-			if app.tabIdx == len(views)-1 {
-				app.tabIdx = -1
+			if app.tabIdx >= len(views) {
+				app.tabIdx = -1 // Back to header
+			}
+
+			// Update focus visuals for all panels
+			app.updatePanelFocus(views)
+
+			// Set tview focus
+			if app.tabIdx == -1 {
+				// Header focused - must explicitly focus header to prevent
+				// tview from auto-focusing the first focusable child
+				app.panel.setHeaderFocused(true)
+				app.Focus(app.panel.getHeader())
+			} else {
+				app.panel.setHeaderFocused(false)
+				app.Focus(views[app.tabIdx])
+			}
+			app.Refresh()
+			return nil
+		}
+
+		// Handle keyboard input when header is focused
+		if app.tabIdx == -1 {
+			if app.panel.handleHeaderKey(event) {
+				// Use updateHeaderDirect (not updateHeader) because we're
+				// already on the main goroutine. QueueUpdateDraw would deadlock.
+				app.updateHeaderDirect()
+				app.Refresh()
+				return nil
 			}
 		}
 
@@ -364,10 +478,12 @@ func (app *Application) refreshHeaderPeriodically(ctx context.Context) {
 	}
 }
 
-// updateHeader refreshes the header with current metrics status
-func (app *Application) updateHeader() {
+// buildHeaderString constructs the header text with current metrics status
+// namespaceDisplay is the namespace value to show (may include filter styling)
+func (app *Application) buildHeaderString(namespaceDisplay string) string {
 	var hdr strings.Builder
-	hdr.WriteString("%s [green]API server: [white]%s [green]Version: [white]%s [green]context: [white]%s [green]User: [white]%s [green]namespace: [white]%s [green]metrics:")
+	// Format: Context: name | K8s: version | User: user | Namespace: value | Metrics: status
+	hdr.WriteString("[green]Context: [white]%s [green]| K8s: [white]%s [green]| User: [white]%s [green]| Namespace: [white]%s [green]| Metrics:")
 
 	// Check MetricsSource health
 	if app.metricsSource != nil && app.metricsSource.IsHealthy() {
@@ -377,20 +493,56 @@ func (app *Application) updateHeader() {
 		hdr.WriteString(" [red]not connected")
 	}
 
-	namespace := app.k8sClient.Namespace()
-	if namespace == k8s.AllNamespaces {
-		namespace = "[orange](all)"
-	}
 	client := app.GetK8sClient()
 
-	// Queue a UI update
+	return fmt.Sprintf(
+		hdr.String(),
+		client.ClusterName(), client.GetServerVersion(), client.Username(), namespaceDisplay,
+	)
+}
+
+// getNamespaceDisplay returns the namespace display string based on filter state
+func (app *Application) getNamespaceDisplay() string {
+	// Check if filter is editing or active
+	if app.panel.isNamespaceFilterEditing() {
+		// Show filter input with cursor
+		filterText := app.panel.getNamespaceFilter()
+		if filterText == "" {
+			return "[yellow]▌[-]"
+		}
+		return fmt.Sprintf("[yellow]%s▌[-]", filterText)
+	}
+
+	// Check if filter is active (has confirmed filter text)
+	filterText := app.panel.getNamespaceFilter()
+	if filterText != "" {
+		return filterText // White to match header style
+	}
+
+	// No filter - show actual namespace
+	namespace := app.k8sClient.Namespace()
+	if namespace == k8s.AllNamespaces {
+		return "[orange](all)[-]"
+	}
+	return namespace
+}
+
+// updateHeader refreshes the header with current metrics status
+// Uses QueueUpdateDraw - safe to call from any goroutine
+func (app *Application) updateHeader() {
+	nsDisplay := app.getNamespaceDisplay()
+	headerStr := app.buildHeaderString(nsDisplay)
 	app.tviewApp.QueueUpdateDraw(func() {
-		app.panel.DrawHeader(fmt.Sprintf(
-			hdr.String(),
-			ui.Icons.Rocket, client.RESTConfig().Host, client.GetServerVersion(),
-			client.ClusterContext(), client.Username(), namespace,
-		))
+		app.panel.DrawHeader(headerStr)
 	})
+}
+
+// updateHeaderDirect refreshes the header directly without QueueUpdateDraw
+// MUST only be called from the main UI goroutine (e.g., inside SetInputCapture)
+func (app *Application) updateHeaderDirect() {
+	nsDisplay := app.getNamespaceDisplay()
+	headerStr := app.buildHeaderString(nsDisplay)
+	app.panel.DrawHeader(headerStr)
 }
 
 // checkHealthTransition detects when metrics source transitions between healthy/unhealthy

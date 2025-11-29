@@ -32,10 +32,22 @@ type appPanel struct {
 	currentToastID      string
 	toastMutex          sync.Mutex
 	toastButtonCallback ui.ToastCallback // Callback for toast button presses
+
+	// Namespace filter
+	namespaceFilter         *ui.FilterState
+	namespaceFilterCallback func(namespace string) // Callback when namespace filter changes
+	headerFocused           bool                   // Whether header panel has focus
+
+	// Focus restoration callback - called after toast is dismissed
+	focusRestorationCallback func()
 }
 
 func newPanel(app *tview.Application) *appPanel {
-	p := &appPanel{title: "ktop", tviewApp: app}
+	p := &appPanel{
+		title:           "ktop",
+		tviewApp:        app,
+		namespaceFilter: &ui.FilterState{},
+	}
 	return p
 }
 
@@ -55,8 +67,8 @@ func (p *appPanel) Layout(data interface{}) {
 
 	// Existing layout
 	mainLayout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.header, 3, 1, false). // header
-		AddItem(p.pages, 0, 1, true)    // body
+		AddItem(p.header, 3, 1, true). // header - focusable for input handling
+		AddItem(p.pages, 0, 1, true)   // body
 		// TODO show footer when multi-page is implemented
 		//AddItem(p.footer, 3, 1, false)  // footer
 
@@ -93,6 +105,7 @@ func (p *appPanel) DrawHeader(data interface{}) {
 		panic(fmt.Sprintf("application.Drawheader got unexpected type %T", data))
 	}
 
+	// Header string already includes namespace filter state (handled by getNamespaceDisplay)
 	p.header.SetCell(
 		0, 0,
 		tview.NewTableCell(header).
@@ -103,7 +116,7 @@ func (p *appPanel) DrawHeader(data interface{}) {
 
 	p.header.SetCell(
 		0, 1,
-		tview.NewTableCell(buildinfo.Version).
+		tview.NewTableCell("ktop: "+buildinfo.Version).
 			SetTextColor(tcell.ColorWhite).
 			SetAlign(tview.AlignRight).
 			SetExpansion(100),
@@ -232,10 +245,22 @@ func (p *appPanel) dismissToastInternal(toastID string) {
 	if p.currentToastID == toastID {
 		p.root.RemovePage(toastID)
 		p.currentToastID = ""
-		// Switch back to main page and restore focus
+		// Switch back to main page
 		p.root.SwitchToPage("main")
-		p.tviewApp.SetFocus(p.root)
+		// Call focus restoration callback to restore proper panel focus
+		// This avoids tview's auto-focus propagation which would focus the first child
+		if p.focusRestorationCallback != nil {
+			p.focusRestorationCallback()
+		} else {
+			// Fallback: focus root (may trigger undesired focus propagation)
+			p.tviewApp.SetFocus(p.root)
+		}
 	}
+}
+
+// setFocusRestorationCallback sets the callback to restore focus after toast dismissal
+func (p *appPanel) setFocusRestorationCallback(callback func()) {
+	p.focusRestorationCallback = callback
 }
 
 // hasActiveToast returns true if a toast is currently displayed
@@ -243,4 +268,105 @@ func (p *appPanel) hasActiveToast() bool {
 	p.toastMutex.Lock()
 	defer p.toastMutex.Unlock()
 	return p.currentToastID != ""
+}
+
+// setHeaderFocused updates the header panel's visual focus state
+func (p *appPanel) setHeaderFocused(focused bool) {
+	p.headerFocused = focused
+	if focused {
+		p.header.SetBorderColor(ui.FocusBorderColor())
+	} else {
+		p.header.SetBorderColor(ui.UnfocusBorderColor())
+	}
+}
+
+// isHeaderFocused returns whether the header has focus
+func (p *appPanel) isHeaderFocused() bool {
+	return p.headerFocused
+}
+
+// getHeader returns the header table primitive for focus management
+func (p *appPanel) getHeader() tview.Primitive {
+	return p.header
+}
+
+// setNamespaceFilterCallback sets the callback for namespace filter changes
+func (p *appPanel) setNamespaceFilterCallback(callback func(namespace string)) {
+	p.namespaceFilterCallback = callback
+}
+
+// getNamespaceFilter returns the current namespace filter text
+func (p *appPanel) getNamespaceFilter() string {
+	return p.namespaceFilter.Text
+}
+
+// isNamespaceFilterEditing returns whether the namespace filter is in edit mode
+func (p *appPanel) isNamespaceFilterEditing() bool {
+	return p.namespaceFilter.Editing
+}
+
+// handleHeaderKey processes keyboard input when header is focused
+// Returns true if the key was handled
+func (p *appPanel) handleHeaderKey(event *tcell.EventKey) bool {
+	// Handle namespace filter edit mode
+	if p.namespaceFilter.Editing {
+		switch event.Key() {
+		case tcell.KeyEscape:
+			p.namespaceFilter.Cancel()
+			return true
+		case tcell.KeyEnter:
+			p.namespaceFilter.Confirm()
+			// Notify callback of filter change
+			if p.namespaceFilterCallback != nil {
+				p.namespaceFilterCallback(p.namespaceFilter.Text)
+			}
+			return true
+		case tcell.KeyBackspace, tcell.KeyBackspace2:
+			if p.namespaceFilter.HandleBackspace() {
+				// Live update: notify callback as user types
+				if p.namespaceFilterCallback != nil {
+					p.namespaceFilterCallback(p.namespaceFilter.Text)
+				}
+			}
+			return true
+		case tcell.KeyRune:
+			p.namespaceFilter.AppendChar(event.Rune())
+			// Live update: notify callback as user types
+			if p.namespaceFilterCallback != nil {
+				p.namespaceFilterCallback(p.namespaceFilter.Text)
+			}
+			return true
+		}
+		return true // Consume all keys in edit mode
+	}
+
+	// Normal mode - '/' starts namespace filter editing
+	if event.Key() == tcell.KeyRune && event.Rune() == '/' {
+		p.namespaceFilter.StartEditing()
+		return true
+	}
+
+	return false
+}
+
+// hasEscapableHeaderState returns true if header has state that ESC should clear
+func (p *appPanel) hasEscapableHeaderState() bool {
+	return p.namespaceFilter.HasEscapableState()
+}
+
+// handleHeaderEscape handles ESC when header is focused
+func (p *appPanel) handleHeaderEscape() bool {
+	if p.namespaceFilter.Editing {
+		p.namespaceFilter.Cancel()
+		return true
+	}
+	if p.namespaceFilter.Active {
+		p.namespaceFilter.Clear()
+		// Notify callback of filter cleared
+		if p.namespaceFilterCallback != nil {
+			p.namespaceFilterCallback("")
+		}
+		return true
+	}
+	return false
 }
