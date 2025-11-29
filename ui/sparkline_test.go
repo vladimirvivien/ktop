@@ -161,41 +161,58 @@ func TestSparkline_TrendIndicator(t *testing.T) {
 	tests := []struct {
 		name           string
 		data           []float64
+		percentage     float64
 		expectContains string
+		expectEmpty    bool
 	}{
 		{
-			name:           "Increasing trend",
+			name:           "Increasing trend normal",
 			data:           []float64{10, 20, 30, 40, 50, 60, 70, 80, 90, 100},
+			percentage:     50,
+			expectContains: Icons.TrendUp,
+		},
+		{
+			name:           "Increasing trend high percentage",
+			data:           []float64{10, 20, 30, 40, 50, 60, 70, 80, 90, 100},
+			percentage:     85,
 			expectContains: Icons.TrendUp,
 		},
 		{
 			name:           "Decreasing trend",
 			data:           []float64{100, 90, 80, 70, 60, 50, 40, 30, 20, 10},
+			percentage:     30,
 			expectContains: Icons.TrendDown,
 		},
 		{
-			name:           "Flat trend",
-			data:           []float64{50, 51, 49, 50, 51, 49, 50, 51, 49, 50},
-			expectContains: Icons.TrendFlat,
+			name:        "Flat trend",
+			data:        []float64{50, 51, 49, 50, 51, 49, 50, 51, 49, 50},
+			percentage:  50,
+			expectEmpty: true, // Stable returns empty
 		},
 		{
-			name:           "Too few points",
-			data:           []float64{50},
-			expectContains: Icons.TrendFlat,
+			name:        "Too few points",
+			data:        []float64{50},
+			percentage:  50,
+			expectEmpty: true, // Insufficient data returns empty
 		},
 		{
-			name:           "Empty data",
-			data:           []float64{},
-			expectContains: Icons.TrendFlat,
+			name:        "Empty data",
+			data:        []float64{},
+			percentage:  0,
+			expectEmpty: true, // No data returns empty
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			spark := NewSparkline(tc.data, 10, 1)
-			result := spark.TrendIndicator()
+			result := spark.TrendIndicator(tc.percentage)
 
-			if !strings.Contains(result, tc.expectContains) {
+			if tc.expectEmpty {
+				if result != "" {
+					t.Errorf("Expected empty string, got: %s", result)
+				}
+			} else if !strings.Contains(result, tc.expectContains) {
 				t.Errorf("Expected trend indicator to contain %s, got: %s", tc.expectContains, result)
 			}
 		})

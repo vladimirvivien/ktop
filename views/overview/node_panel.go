@@ -487,9 +487,10 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
 					cpuSparkline.Push(float64(cpuRatio))
 					cpuGraph = cpuSparkline.Render()
+					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dm ([%s]%1.0f%%[white])",
-						cpuGraph, node.RequestedPodCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
+						"[white][%s[white]] %5dm [%s]%5.1f%%[white] %s",
+						cpuGraph, node.RequestedPodCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage, cpuTrend,
 					)
 				} else {
 					cpuRatio = ui.GetRatio(float64(node.UsageCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
@@ -497,9 +498,10 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
 					cpuSparkline.Push(float64(cpuRatio))
 					cpuGraph = cpuSparkline.Render()
+					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dm ([%s]%1.0f%%[white])",
-						cpuGraph, node.UsageCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
+						"[white][%s[white]] %5dm [%s]%5.1f%%[white] %s",
+						cpuGraph, node.UsageCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage, cpuTrend,
 					)
 				}
 
@@ -524,9 +526,10 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
 					memSparkline.Push(float64(memRatio))
 					memGraph = memSparkline.Render()
+					memTrend := memSparkline.TrendIndicator(memPercentage)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s ([%s]%1.0f%%[white])",
-						memGraph, ui.FormatMemory(node.RequestedPodMemQty), memPercentageColor, memPercentage,
+						"[white][%s[white]] %s [%s]%5.1f%%[white] %s",
+						memGraph, ui.FormatMemory(node.RequestedPodMemQty), memPercentageColor, memPercentage, memTrend,
 					)
 				} else {
 					memRatio = ui.GetRatio(float64(node.UsageMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
@@ -534,9 +537,10 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
 					memSparkline.Push(float64(memRatio))
 					memGraph = memSparkline.Render()
+					memTrend := memSparkline.TrendIndicator(memPercentage)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s ([%s]%1.0f%%[white])",
-						memGraph, ui.FormatMemory(node.UsageMemQty), memPercentageColor, memPercentage,
+						"[white][%s[white]] %s [%s]%5.1f%%[white] %s",
+						memGraph, ui.FormatMemory(node.UsageMemQty), memPercentageColor, memPercentage, memTrend,
 					)
 				}
 

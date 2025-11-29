@@ -118,7 +118,7 @@ func SortPodModelsBy(pods []PodModel, column string, ascending bool) {
 			return priI < priJ
 		}
 
-	case "RESTARTS":
+	case "RST":
 		sortFunc = func(i, j int) bool {
 			if pods[i].Restarts == pods[j].Restarts {
 				return pods[i].Name < pods[j].Name
@@ -310,9 +310,11 @@ func podIsReady(conds []v1.PodCondition) bool {
 
 func timeSince(ts metav1.Time) string {
 	if ts.IsZero() {
-		return "..."
+		return "...   "
 	}
-	return duration.HumanDuration(time.Since(ts.Time))
+	d := duration.HumanDuration(time.Since(ts.Time))
+	// Right-align with 6-character width for values like "2m40s" or "120d"
+	return fmt.Sprintf("%-6s", d)
 }
 
 func GetPodContainerSummary(pod *v1.Pod) PodContainerSummary {

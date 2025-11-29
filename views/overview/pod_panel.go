@@ -146,7 +146,7 @@ func (p *podPanel) formatColumnHeader(col string) string {
 		"POD":       'p',
 		"READY":     'r',
 		"STATUS":    's',
-		"RESTARTS":  't', // Uses 't' at position 3
+		"RST":  't', // Uses 't' at position 3
 		"AGE":       'a',
 		"VOLS":      'v',
 		"IP":        'i',
@@ -275,7 +275,7 @@ func (p *podPanel) handleSortKey(key rune) bool {
 		'p': "POD",
 		'r': "READY",
 		's': "STATUS",
-		't': "RESTARTS",
+		't': "RST",
 		'a': "AGE",
 		'v': "VOLS",
 		'i': "IP",
@@ -403,11 +403,11 @@ func (p *podPanel) DrawBody(data interface{}) {
 					},
 				)
 
-			case "RESTARTS":
+			case "RST":
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%d", pod.Restarts),
+						Text:  fmt.Sprintf("%-4d", pod.Restarts),
 						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
@@ -471,9 +471,10 @@ func (p *podPanel) DrawBody(data interface{}) {
 					// Push current value to sparkline (smooth sliding)
 					cpuSparkline.Push(float64(cpuRatio))
 					cpuGraph = cpuSparkline.Render()
+					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dm [%s]%.1f%%[white]",
-						cpuGraph, pod.PodUsageCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
+						"[white][%s[white]] %5dm [%s]%5.1f%%[white] %s",
+						cpuGraph, pod.PodUsageCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage, cpuTrend,
 					)
 				} else if hasRequestMetrics && hasAllocatable {
 					cpuRatio = ui.GetRatio(float64(pod.PodRequestedCpuQty.MilliValue()), float64(pod.NodeAllocatableCpuQty.MilliValue()))
@@ -482,17 +483,19 @@ func (p *podPanel) DrawBody(data interface{}) {
 					// Push current value to sparkline (smooth sliding)
 					cpuSparkline.Push(float64(cpuRatio))
 					cpuGraph = cpuSparkline.Render()
+					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dm [%s]%.1f%%[white]",
-						cpuGraph, pod.PodRequestedCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
+						"[white][%s[white]] %5dm [%s]%5.1f%%[white] %s",
+						cpuGraph, pod.PodRequestedCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage, cpuTrend,
 					)
 				} else {
 					// Zero or unavailable: push zero to sparkline
 					cpuSparkline.Push(0)
 					cpuGraph = cpuSparkline.Render()
+					cpuTrend := cpuSparkline.TrendIndicator(0) // 0% when no data
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] 0m [green]0.0%%[white]",
-						cpuGraph,
+						"[white][%s[white]] %5dm [green]%5.1f%%[white] %s",
+						cpuGraph, 0, 0.0, cpuTrend,
 					)
 				}
 
@@ -523,11 +526,12 @@ func (p *podPanel) DrawBody(data interface{}) {
 					// Push current value to sparkline (smooth sliding)
 					memSparkline.Push(float64(memRatio))
 					memGraph = memSparkline.Render()
+					memTrend := memSparkline.TrendIndicator(memPercentage)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s [%s]%.1f%%[white]",
+						"[white][%s[white]] %s [%s]%5.1f%%[white] %s",
 						memGraph,
 						ui.FormatMemory(pod.PodUsageMemQty),
-						memPercentageColor, memPercentage,
+						memPercentageColor, memPercentage, memTrend,
 					)
 				} else if hasRequestMetrics && hasAllocatable {
 					memRatio = ui.GetRatio(float64(pod.PodRequestedMemQty.Value()), float64(pod.NodeAllocatableMemQty.Value()))
@@ -536,19 +540,21 @@ func (p *podPanel) DrawBody(data interface{}) {
 					// Push current value to sparkline (smooth sliding)
 					memSparkline.Push(float64(memRatio))
 					memGraph = memSparkline.Render()
+					memTrend := memSparkline.TrendIndicator(memPercentage)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s [%s]%.1f%%[white]",
+						"[white][%s[white]] %s [%s]%5.1f%%[white] %s",
 						memGraph,
 						ui.FormatMemory(pod.PodRequestedMemQty),
-						memPercentageColor, memPercentage,
+						memPercentageColor, memPercentage, memTrend,
 					)
 				} else {
 					// Zero or unavailable: push zero to sparkline
 					memSparkline.Push(0)
 					memGraph = memSparkline.Render()
+					memTrend := memSparkline.TrendIndicator(0) // 0% when no data
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] 0Mi [green]0.0%%[white]",
-						memGraph,
+						"[white][%s[white]] %s [green]%5.1f%%[white] %s",
+						memGraph, "   0Mi", 0.0, memTrend,
 					)
 				}
 

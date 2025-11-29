@@ -247,3 +247,61 @@ func (s *SparklineState) Clear() {
 		s.values[i] = 0
 	}
 }
+
+// TrendIndicator returns a colored trend arrow (↑/↓) or empty string for stable.
+// Compares first 20% of buffer to last 20% to determine trend direction.
+// percentage is used to determine color: red if >= 80%, white otherwise.
+// Returns empty string when trend is stable or there's insufficient data.
+func (s *SparklineState) TrendIndicator(percentage float64) string {
+	// Need minimum data points for meaningful comparison
+	if len(s.values) < 5 {
+		return ""
+	}
+
+	// Compare first 20% average to last 20% average
+	window := len(s.values) / 5
+	if window < 1 {
+		window = 1
+	}
+
+	var startAvg, endAvg float64
+	for i := 0; i < window; i++ {
+		startAvg += s.values[i]
+		endAvg += s.values[len(s.values)-1-i]
+	}
+	startAvg /= float64(window)
+	endAvg /= float64(window)
+
+	// Determine trend direction
+	var trendUp, trendDown bool
+
+	if startAvg < 0.001 {
+		// Starting from near-zero
+		if endAvg > Theme.TrendThreshold {
+			trendUp = true
+		}
+	} else {
+		diff := (endAvg - startAvg) / startAvg
+		if diff > Theme.TrendThreshold {
+			trendUp = true
+		} else if diff < -Theme.TrendThreshold {
+			trendDown = true
+		}
+	}
+
+	// Return empty for stable
+	if !trendUp && !trendDown {
+		return ""
+	}
+
+	// Determine color: red if percentage >= 80%, white otherwise
+	color := Theme.TrendNormalColor
+	if percentage >= Theme.TrendHighThreshold*100 {
+		color = Theme.TrendHighColor
+	}
+
+	if trendUp {
+		return "[" + color + "]" + Icons.TrendUp + "[-]"
+	}
+	return "[" + color + "]" + Icons.TrendDown + "[-]"
+}

@@ -58,6 +58,12 @@ var Theme = struct {
 	SparklineHigh      string  // High usage (red)
 	SparklineEmpty     string  // Zero/empty values (gray)
 	SparklineThreshold float64 // Threshold for high color (0.70 = 70%)
+
+	// Trend arrow colors (↑/↓)
+	TrendNormalColor   string  // Normal color for trend arrows (olivedrab)
+	TrendHighColor     string  // Color when percentage >= 80% (red)
+	TrendThreshold     float64 // Percentage change threshold (0.05 = 5%)
+	TrendHighThreshold float64 // Percentage threshold for red arrow (0.80 = 80%)
 }{
 	// Header colors
 	HeaderBackground:    "darkgreen",
@@ -112,6 +118,12 @@ var Theme = struct {
 	SparklineHigh:      "red",       // High usage (>= 70%)
 	SparklineEmpty:     "gray",      // Zero/empty values
 	SparklineThreshold: 0.70,        // 70% threshold for high color
+
+	// Trend arrow colors
+	TrendNormalColor:   "olivedrab", // Normal trend arrows (matches table text)
+	TrendHighColor:     "red",       // Red when percentage >= 80%
+	TrendThreshold:     0.05,        // 5% change triggers arrow
+	TrendHighThreshold: 0.80,        // 80% threshold for red arrow
 }
 
 // FormatTag returns a tview color/style tag string
@@ -230,13 +242,12 @@ func GetRestartsColor(restarts int) string {
 }
 
 // GetResourcePercentageColor returns color based on resource usage percentage
+// Uses same 2-color scheme as sparklines for consistency (olivedrab < 70%, red >= 70%)
 func GetResourcePercentageColor(percentage float64) string {
-	if percentage < Theme.ResourceLowThreshold {
-		return Theme.ResourceLowColor
-	} else if percentage < Theme.ResourceMediumThreshold {
-		return Theme.ResourceMediumColor
+	if percentage >= Theme.SparklineThreshold*100 {
+		return Theme.SparklineHigh
 	}
-	return Theme.ResourceHighColor
+	return Theme.SparklineNormal
 }
 
 // GetReadyColor returns color based on ready/total ratio

@@ -93,34 +93,38 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 			cpuRatio = ui.GetRatio(float64(summary.RequestedPodCpuTotal.MilliValue()), float64(summary.AllocatableNodeCpuTotal.MilliValue()))
 			p.cpuSparkline.Push(float64(cpuRatio))
 			cpuGraph := p.cpuSparkline.Render()
+			cpuTrend := p.cpuSparkline.TrendIndicator(float64(cpuRatio) * 100)
 			cpuMetrics = fmt.Sprintf(
-				"CPU: [white][%s[white]] %dm/%dm (%02.1f%% requested)",
-				cpuGraph, summary.RequestedPodCpuTotal.MilliValue(), summary.AllocatableNodeCpuTotal.MilliValue(), cpuRatio*100,
+				"CPU: [white][%s[white]] %dm/%dm (%02.1f%% requested) %s",
+				cpuGraph, summary.RequestedPodCpuTotal.MilliValue(), summary.AllocatableNodeCpuTotal.MilliValue(), cpuRatio*100, cpuTrend,
 			)
 
 			memRatio = ui.GetRatio(float64(summary.RequestedPodMemTotal.MilliValue()), float64(summary.AllocatableNodeMemTotal.MilliValue()))
 			p.memSparkline.Push(float64(memRatio))
 			memGraph := p.memSparkline.Render()
+			memTrend := p.memSparkline.TrendIndicator(float64(memRatio) * 100)
 			memMetrics = fmt.Sprintf(
-				"Memory: [white][%s[white]] %s/%s (%02.1f%% requested)",
-				memGraph, ui.FormatMemory(summary.RequestedPodMemTotal), ui.FormatMemory(summary.AllocatableNodeMemTotal), memRatio*100,
+				"Memory: [white][%s[white]] %s/%s (%02.1f%% requested) %s",
+				memGraph, ui.FormatMemory(summary.RequestedPodMemTotal), ui.FormatMemory(summary.AllocatableNodeMemTotal), memRatio*100, memTrend,
 			)
 		} else {
 			// Show actual usage (metrics available)
 			cpuRatio = ui.GetRatio(float64(summary.UsageNodeCpuTotal.MilliValue()), float64(summary.AllocatableNodeCpuTotal.MilliValue()))
 			p.cpuSparkline.Push(float64(cpuRatio))
 			cpuGraph := p.cpuSparkline.Render()
+			cpuTrend := p.cpuSparkline.TrendIndicator(float64(cpuRatio) * 100)
 			cpuMetrics = fmt.Sprintf(
-				"CPU: [white][%s[white]] %dm/%dm (%02.1f%% used)",
-				cpuGraph, summary.UsageNodeCpuTotal.MilliValue(), summary.AllocatableNodeCpuTotal.MilliValue(), cpuRatio*100,
+				"CPU: [white][%s[white]] %dm/%dm (%02.1f%% used) %s",
+				cpuGraph, summary.UsageNodeCpuTotal.MilliValue(), summary.AllocatableNodeCpuTotal.MilliValue(), cpuRatio*100, cpuTrend,
 			)
 
 			memRatio = ui.GetRatio(float64(summary.UsageNodeMemTotal.MilliValue()), float64(summary.AllocatableNodeMemTotal.MilliValue()))
 			p.memSparkline.Push(float64(memRatio))
 			memGraph := p.memSparkline.Render()
+			memTrend := p.memSparkline.TrendIndicator(float64(memRatio) * 100)
 			memMetrics = fmt.Sprintf(
-				"Memory: [white][%s[white]] %s/%s (%02.1f%% used)",
-				memGraph, ui.FormatMemory(summary.UsageNodeMemTotal), ui.FormatMemory(summary.AllocatableNodeMemTotal), memRatio*100,
+				"Memory: [white][%s[white]] %s/%s (%02.1f%% used) %s",
+				memGraph, ui.FormatMemory(summary.UsageNodeMemTotal), ui.FormatMemory(summary.AllocatableNodeMemTotal), memRatio*100, memTrend,
 			)
 		}
 
