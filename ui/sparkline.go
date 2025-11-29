@@ -315,10 +315,12 @@ func (s *Sparkline) Render() string {
 	return result.String()
 }
 
-// TrendIndicator returns a colored trend arrow based on recent data slope
-func (s *Sparkline) TrendIndicator() string {
+// TrendIndicator returns a colored trend arrow (↑/↓) or empty string for stable.
+// percentage is used to determine color: red if >= 80%, white otherwise.
+// Returns empty string when trend is stable or there's insufficient data.
+func (s *Sparkline) TrendIndicator(percentage float64) string {
 	if len(s.Data) < 2 {
-		return "[white]" + Icons.TrendFlat + "[white]"
+		return ""
 	}
 
 	// Compare last 20% of data to first 20%
@@ -338,24 +340,37 @@ func (s *Sparkline) TrendIndicator() string {
 	startAvg /= float64(window)
 	endAvg /= float64(window)
 
-	// Avoid division by zero
+	// Determine trend direction
+	var trendUp, trendDown bool
+
 	if startAvg == 0 {
-		if endAvg > 0 {
-			return "[red]" + Icons.TrendUp + "[white]"
+		if endAvg > Theme.TrendThreshold {
+			trendUp = true
 		}
-		return "[white]" + Icons.TrendFlat + "[white]"
+	} else {
+		diff := (endAvg - startAvg) / startAvg
+		if diff > Theme.TrendThreshold {
+			trendUp = true
+		} else if diff < -Theme.TrendThreshold {
+			trendDown = true
+		}
 	}
 
-	diff := (endAvg - startAvg) / startAvg
-
-	switch {
-	case diff > 0.05:
-		return "[red]" + Icons.TrendUp + "[white]" // Increasing >5%
-	case diff < -0.05:
-		return "[green]" + Icons.TrendDown + "[white]" // Decreasing >5%
-	default:
-		return "[white]" + Icons.TrendFlat + "[white]" // Stable
+	// Return empty for stable
+	if !trendUp && !trendDown {
+		return ""
 	}
+
+	// Determine color: red if percentage >= 80%, white otherwise
+	color := Theme.TrendNormalColor
+	if percentage >= Theme.TrendHighThreshold*100 {
+		color = Theme.TrendHighColor
+	}
+
+	if trendUp {
+		return "[" + color + "]" + Icons.TrendUp + "[-]"
+	}
+	return "[" + color + "]" + Icons.TrendDown + "[-]"
 }
 
 // LastValue returns the most recent data point
@@ -639,6 +654,7 @@ func sparkGraphEmpty(width int) string {
 }
 
 // SparkGraphTrend returns a trend indicator for the given history
+// Uses 0 as percentage since historical data doesn't have current percentage context
 func SparkGraphTrend(history *metrics.ResourceHistory) string {
 	if history == nil || len(history.DataPoints) < 2 {
 		return ""
@@ -650,5 +666,10 @@ func SparkGraphTrend(history *metrics.ResourceHistory) string {
 	}
 
 	spark := &Sparkline{Data: data}
-	return spark.TrendIndicator()
+	// Use last value as percentage for color determination
+	lastPercentage := 0.0
+	if len(data) > 0 {
+		lastPercentage = data[len(data)-1] * 100
+	}
+	return spark.TrendIndicator(lastPercentage)
 }

@@ -7,6 +7,7 @@ import (
 )
 
 func TestFormatMemory(t *testing.T) {
+	// FormatMemory returns fixed-width strings (4 digits + unit) for column alignment
 	tests := []struct {
 		name     string
 		input    string
@@ -15,27 +16,27 @@ func TestFormatMemory(t *testing.T) {
 		{
 			name:     "nil quantity",
 			input:    "",
-			expected: "0Mi",
+			expected: "   0Mi",
 		},
 		{
 			name:     "zero bytes",
 			input:    "0",
-			expected: "0Mi",
+			expected: "   0Mi",
 		},
 		{
 			name:     "small value in Mi",
 			input:    "56Mi",
-			expected: "56Mi",
+			expected: "  56Mi",
 		},
 		{
 			name:     "medium value in Mi",
 			input:    "366Mi",
-			expected: "366Mi",
+			expected: " 366Mi",
 		},
 		{
 			name:     "large value in Mi",
 			input:    "512Mi",
-			expected: "512Mi",
+			expected: " 512Mi",
 		},
 		{
 			name:     "exactly 1Gi",
@@ -60,12 +61,12 @@ func TestFormatMemory(t *testing.T) {
 		{
 			name:     "15Gi should display as Gi",
 			input:    "15Gi",
-			expected: "15Gi",
+			expected: "  15Gi",
 		},
 		{
 			name:     "value in Ki should convert to Mi",
 			input:    "102400Ki", // 100Mi
-			expected: "100Mi",
+			expected: " 100Mi",
 		},
 		{
 			name:     "value in bytes (1Gi)",
@@ -75,7 +76,7 @@ func TestFormatMemory(t *testing.T) {
 		{
 			name:     "value in bytes (20Gi)",
 			input:    "21474836480", // 20Gi in bytes
-			expected: "20Gi",
+			expected: "  20Gi",
 		},
 	}
 
