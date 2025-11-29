@@ -25,21 +25,38 @@ type nodePanel struct {
 	sortAsc     bool              // Sort direction: true=ascending, false=descending
 	currentData []model.NodeModel // Store current data for re-sorting
 	filter      *ui.FilterState   // Filter state for row filtering
+
+	// Stateful sparklines for smooth sliding animation
+	cpuSparklines map[string]*ui.SparklineState // key: node name
+	memSparklines map[string]*ui.SparklineState
 }
 
 func NewNodePanel(app *application.Application, title string) ui.Panel {
 	p := &nodePanel{
-		app:        app,
-		title:      title,
-		sortColumn: "NAME", // Default sort by NAME
-		sortAsc:    true,   // Default ascending
-		filter:     &ui.FilterState{},
+		app:           app,
+		title:         title,
+		sortColumn:    "NAME", // Default sort by NAME
+		sortAsc:       true,   // Default ascending
+		filter:        &ui.FilterState{},
+		cpuSparklines: make(map[string]*ui.SparklineState),
+		memSparklines: make(map[string]*ui.SparklineState),
 	}
 	p.Layout(nil)
 	return p
 }
+
 func (p *nodePanel) GetTitle() string {
 	return p.title
+}
+
+// getSparkline returns an existing sparkline or creates a new one
+func (p *nodePanel) getSparkline(sparklines map[string]*ui.SparklineState, key string, width int, colors ui.ColorKeys) *ui.SparklineState {
+	if spark, ok := sparklines[key]; ok {
+		return spark
+	}
+	spark := ui.NewSparklineState(width, colors)
+	sparklines[key] = spark
+	return spark
 }
 func (p *nodePanel) Layout(_ interface{}) {
 	if !p.laidout {
@@ -459,27 +476,30 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				)
 
 			case "CPU":
+				graphWidth := 10
+				// Get or create stateful sparkline for this node
+				cpuSparkline := p.getSparkline(p.cpuSparklines, node.Name, graphWidth, colorKeys)
+
 				// Calculate CPU metrics
-				// Check if usage metrics are actually available (nil check for graceful degradation)
 				if metricsDisabled || node.UsageCpuQty == nil {
 					cpuRatio = ui.GetRatio(float64(node.RequestedPodCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
-					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
-					// Color the percentage based on usage threshold
 					cpuPercentage := float64(cpuRatio) * 100
 					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
+					cpuSparkline.Push(float64(cpuRatio))
+					cpuGraph = cpuSparkline.Render()
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dm/%dm ([%s]%1.0f%%[white])",
-						cpuGraph, node.RequestedPodCpuQty.MilliValue(), node.AllocatableCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
+						"[white][%s[white]] %dm ([%s]%1.0f%%[white])",
+						cpuGraph, node.RequestedPodCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
 					)
 				} else {
 					cpuRatio = ui.GetRatio(float64(node.UsageCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
-					cpuGraph = ui.BarGraph(10, cpuRatio, colorKeys)
-					// Color the percentage based on usage threshold
 					cpuPercentage := float64(cpuRatio) * 100
 					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
+					cpuSparkline.Push(float64(cpuRatio))
+					cpuGraph = cpuSparkline.Render()
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %dm/%dm ([%s]%1.0f%%[white])",
-						cpuGraph, node.UsageCpuQty.MilliValue(), node.AllocatableCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
+						"[white][%s[white]] %dm ([%s]%1.0f%%[white])",
+						cpuGraph, node.UsageCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage,
 					)
 				}
 
@@ -493,27 +513,30 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				)
 
 			case "MEM":
+				graphWidth := 10
+				// Get or create stateful sparkline for this node's memory
+				memSparkline := p.getSparkline(p.memSparklines, node.Name, graphWidth, colorKeys)
+
 				// Calculate memory metrics
-				// Check if usage metrics are actually available (nil check for graceful degradation)
 				if metricsDisabled || node.UsageMemQty == nil {
 					memRatio = ui.GetRatio(float64(node.RequestedPodMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
-					memGraph = ui.BarGraph(10, memRatio, colorKeys)
-					// Color the percentage based on usage threshold
 					memPercentage := float64(memRatio) * 100
 					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
+					memSparkline.Push(float64(memRatio))
+					memGraph = memSparkline.Render()
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s/%s ([%s]%1.0f%%[white])",
-						memGraph, ui.FormatMemory(node.RequestedPodMemQty), ui.FormatMemory(node.AllocatableMemQty), memPercentageColor, memPercentage,
+						"[white][%s[white]] %s ([%s]%1.0f%%[white])",
+						memGraph, ui.FormatMemory(node.RequestedPodMemQty), memPercentageColor, memPercentage,
 					)
 				} else {
 					memRatio = ui.GetRatio(float64(node.UsageMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
-					memGraph = ui.BarGraph(10, memRatio, colorKeys)
-					// Color the percentage based on usage threshold
 					memPercentage := float64(memRatio) * 100
 					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
+					memSparkline.Push(float64(memRatio))
+					memGraph = memSparkline.Render()
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s/%s ([%s]%1.0f%%[white])",
-						memGraph, ui.FormatMemory(node.UsageMemQty), ui.FormatMemory(node.AllocatableMemQty), memPercentageColor, memPercentage,
+						"[white][%s[white]] %s ([%s]%1.0f%%[white])",
+						memGraph, ui.FormatMemory(node.UsageMemQty), memPercentageColor, memPercentage,
 					)
 				}
 

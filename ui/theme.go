@@ -51,6 +51,13 @@ var Theme = struct {
 	RestartsLowColor        string
 	RestartsMediumColor     string
 	RestartsHighColor       string
+
+	// Sparkline colors (single-line uses 2 colors, multi-line uses 3)
+	SparklineNormal    string  // Normal/low usage (olivedrab)
+	SparklineMedium    string  // Medium usage (multi-line only)
+	SparklineHigh      string  // High usage (red)
+	SparklineEmpty     string  // Zero/empty values (gray)
+	SparklineThreshold float64 // Threshold for high color (0.70 = 70%)
 }{
 	// Header colors
 	HeaderBackground:    "darkgreen",
@@ -98,6 +105,13 @@ var Theme = struct {
 	RestartsLowColor:        "green",
 	RestartsMediumColor:     "yellow",
 	RestartsHighColor:       "red",
+
+	// Sparkline colors
+	SparklineNormal:    "olivedrab", // Normal/low usage (< 70%)
+	SparklineMedium:    "yellow",    // Medium usage (multi-line only)
+	SparklineHigh:      "red",       // High usage (>= 70%)
+	SparklineEmpty:     "gray",      // Zero/empty values
+	SparklineThreshold: 0.70,        // 70% threshold for high color
 }
 
 // FormatTag returns a tview color/style tag string
