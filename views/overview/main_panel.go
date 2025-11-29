@@ -24,6 +24,7 @@ type MainPanel struct {
 	refresh             func()
 	root                *tview.Flex
 	children            []tview.Primitive
+	childPanels         []ui.Panel // Ordered list of child panels for focus management
 	selPanelIndex       int
 	nodePanel           ui.Panel
 	podPanel            ui.Panel
@@ -31,6 +32,8 @@ type MainPanel struct {
 	showAllColumns      bool
 	nodeColumns         []string
 	podColumns          []string
+	namespaceFilter     string            // Current namespace filter
+	cachedPodModels     []model.PodModel  // Cached pod models for immediate re-filtering
 }
 
 func New(app *application.Application, title string) *MainPanel {
@@ -89,6 +92,13 @@ func (p *MainPanel) Layout(data interface{}) {
 		p.podPanel.GetRootView(),
 	}
 
+	// Store panels in order for focus management
+	p.childPanels = []ui.Panel{
+		p.clusterSummaryPanel,
+		p.nodePanel,
+		p.podPanel,
+	}
+
 	view := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(p.clusterSummaryPanel.GetRootView(), 4, 1, true).
 		AddItem(p.nodePanel.GetRootView(), 15, 1, true).
@@ -110,6 +120,14 @@ func (p *MainPanel) GetRootView() tview.Primitive {
 }
 func (p *MainPanel) GetChildrenViews() []tview.Primitive {
 	return p.children
+}
+
+// GetChildPanel returns the panel at the given index (for focus management)
+func (p *MainPanel) GetChildPanel(index int) ui.Panel {
+	if index < 0 || index >= len(p.childPanels) {
+		return nil
+	}
+	return p.childPanels[index]
 }
 
 // HasEscapableState implements ui.EscapablePanel by checking child panels
@@ -153,6 +171,13 @@ func (p *MainPanel) Run(ctx context.Context) error {
 	ctrl.SetClusterSummaryRefreshFunc(p.refreshWorkloadSummary)
 	ctrl.SetNodeRefreshFunc(p.refreshNodeView)
 	ctrl.SetPodRefreshFunc(p.refreshPods)
+
+	// Set up namespace filter callback to update filtering and immediately refresh pods
+	p.app.SetNamespaceFilterCallback(func(namespace string) {
+		p.namespaceFilter = namespace
+		// Immediately re-filter and display pods with the new filter
+		p.displayFilteredPods()
+	})
 
 	if err := ctrl.Start(ctx, time.Second*10); err != nil {
 		panic(fmt.Sprintf("main panel: controller start: %s", err))
@@ -212,57 +237,74 @@ func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) er
 		allPodMetrics, err = p.metricsSource.GetAllPodMetrics(ctx)
 	}
 
-	if p.metricsSource == nil || err != nil {
-		// Fallback: if metrics source is nil or batch fetch fails, use existing models without metrics updates
-		// Sorting is now handled by the panel itself in DrawBody
-		p.podPanel.Clear()
-		p.podPanel.DrawBody(models)
-		if p.refresh != nil {
-			p.refresh()
+	// Update models with metrics first (before caching)
+	updatedModels := models
+	if p.metricsSource != nil && err == nil {
+		// Build a map for fast lookup: namespace/name -> PodMetrics
+		metricsMap := make(map[string]*metrics.PodMetrics, len(allPodMetrics))
+		for _, pm := range allPodMetrics {
+			key := pm.Namespace + "/" + pm.PodName
+			metricsMap[key] = pm
 		}
-		return nil
+
+		// Update models with metrics from the map
+		updatedModels = make([]model.PodModel, 0, len(models))
+		for _, existingModel := range models {
+			key := existingModel.Namespace + "/" + existingModel.Name
+			if podMetrics, found := metricsMap[key]; found {
+				// Convert metrics and sum up CPU/Memory for all containers
+				v1PodMetrics := convertToV1Beta1PodMetrics(podMetrics)
+
+				// Update the model's usage metrics only if we got actual metrics
+				totalCpu, totalMem := podMetricsTotals(v1PodMetrics)
+
+				// If metrics are available (non-zero), use them
+				// Otherwise keep the existing model which may have requests/limits
+				if totalCpu.Value() > 0 || totalMem.Value() > 0 {
+					existingModel.PodUsageCpuQty = totalCpu
+					existingModel.PodUsageMemQty = totalMem
+				}
+			}
+			updatedModels = append(updatedModels, existingModel)
+		}
 	}
 
-	// Build a map for fast lookup: namespace/name -> PodMetrics
-	metricsMap := make(map[string]*metrics.PodMetrics, len(allPodMetrics))
-	for _, pm := range allPodMetrics {
-		key := pm.Namespace + "/" + pm.PodName
-		metricsMap[key] = pm
+	// Cache the updated models (with metrics) for immediate re-filtering
+	p.cachedPodModels = updatedModels
+
+	// Apply namespace filter and display
+	p.displayFilteredPods()
+
+	return nil
+}
+
+// displayFilteredPods filters cached pod models and displays them
+// Called both from refreshPods and when namespace filter changes
+func (p *MainPanel) displayFilteredPods() {
+	if p.cachedPodModels == nil {
+		return
 	}
 
-	// Update models with metrics from the map
-	podModels := make([]model.PodModel, 0, len(models))
-	for _, existingModel := range models {
-		key := existingModel.Namespace + "/" + existingModel.Name
-		if podMetrics, found := metricsMap[key]; found {
-			// Convert metrics and sum up CPU/Memory for all containers
-			v1PodMetrics := convertToV1Beta1PodMetrics(podMetrics)
-
-			// Update the model's usage metrics only if we got actual metrics
-			totalCpu, totalMem := podMetricsTotals(v1PodMetrics)
-
-			// If metrics are available (non-zero), use them
-			// Otherwise keep the existing model which may have requests/limits
-			if totalCpu.Value() > 0 || totalMem.Value() > 0 {
-				existingModel.PodUsageCpuQty = totalCpu
-				existingModel.PodUsageMemQty = totalMem
+	// Apply namespace filter
+	filteredModels := p.cachedPodModels
+	if p.namespaceFilter != "" {
+		filteredModels = make([]model.PodModel, 0, len(p.cachedPodModels))
+		filterLower := strings.ToLower(p.namespaceFilter)
+		for _, m := range p.cachedPodModels {
+			if strings.Contains(strings.ToLower(m.Namespace), filterLower) {
+				filteredModels = append(filteredModels, m)
 			}
 		}
-		// If no metrics found in map, keep existing model's values (requests/limits from controller)
-
-		podModels = append(podModels, existingModel)
 	}
 
 	// Sorting is now handled by the panel itself in DrawBody
-	// refresh pod list
 	p.podPanel.Clear()
-	p.podPanel.DrawBody(podModels)
+	p.podPanel.DrawBody(filteredModels)
 
-	// required: always refresh screen
+	// Refresh screen
 	if p.refresh != nil {
 		p.refresh()
 	}
-	return nil
 }
 
 // podMetricsTotals sums up CPU and memory usage across all containers in a pod

@@ -587,6 +587,11 @@ func (p *podPanel) GetChildrenViews() []tview.Primitive {
 	return p.children
 }
 
+// SetFocused implements ui.FocusablePanel - updates visual focus state
+func (p *podPanel) SetFocused(focused bool) {
+	ui.SetFlexFocused(p.root, focused)
+}
+
 // getPodCells extracts text values from a pod model for filter matching
 func (p *podPanel) getPodCells(pod model.PodModel) []string {
 	return []string{
