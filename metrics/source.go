@@ -42,6 +42,12 @@ type MetricsSource interface {
 	// Includes source type, version, last scrape time, and error counts.
 	GetSourceInfo() SourceInfo
 
+	// SetHealthCallback registers a callback for health state changes.
+	// The callback is invoked whenever IsHealthy() would return a different value.
+	// This enables event-driven health monitoring instead of polling.
+	// Pass nil to unregister the callback.
+	SetHealthCallback(callback func(healthy bool, info SourceInfo))
+
 	// GetNodeHistory retrieves historical data for a specific resource on a node.
 	// Returns ResourceHistory with data points spanning the requested duration.
 	// For Prometheus: queries from stored time series data

@@ -298,21 +298,47 @@ func (app *Application) setup(ctx context.Context) error {
 		}
 	})
 
-	// Show loading toast immediately when source is initializing
+	// Set up event-driven metrics health monitoring (replaces polling)
 	if app.metricsSource != nil {
 		sourceInfo := app.metricsSource.GetSourceInfo()
-		app.loadingToastStartTime = time.Now()
-		app.loadingToastID = app.ShowToast(
-			fmt.Sprintf("Waiting for metrics: %s...", sourceInfo.Type),
-			ui.ToastInfo,
-			0, // No timeout - dismiss when healthy or timeout
-		)
-		app.lastHealthyState = false
 		app.lastMetricsSource = sourceInfo.Type
-	}
 
-	// Start periodic header refresh to update metrics status
-	go app.refreshHeaderPeriodically(ctx)
+		// Register health callback for instant updates
+		app.metricsSource.SetHealthCallback(func(healthy bool, info metrics.SourceInfo) {
+			app.tviewApp.QueueUpdateDraw(func() {
+				app.handleMetricsHealthChange(healthy, info)
+			})
+		})
+
+		// Show loading toast if source isn't healthy yet
+		if !app.metricsSource.IsHealthy() {
+			app.loadingToastStartTime = time.Now()
+			app.loadingToastID = app.ShowToast(
+				fmt.Sprintf("Waiting for metrics: %s...", sourceInfo.Type),
+				ui.ToastInfo,
+				0, // No timeout - dismiss when healthy or timeout
+			)
+			app.lastHealthyState = false
+
+			// One-shot timeout check (15 seconds) instead of polling
+			time.AfterFunc(15*time.Second, func() {
+				app.tviewApp.QueueUpdateDraw(func() {
+					if app.loadingToastID != "" && app.metricsSource != nil && !app.metricsSource.IsHealthy() {
+						app.DismissToast(app.loadingToastID)
+						app.loadingToastID = ""
+						sourceInfo := app.metricsSource.GetSourceInfo()
+						app.ShowToast(
+							fmt.Sprintf("%s metrics unavailable", sourceInfo.Type),
+							ui.ToastError,
+							5*time.Second,
+						)
+					}
+				})
+			})
+		} else {
+			app.lastHealthyState = true
+		}
+	}
 
 	// Set toast button callback to handle Retry and Quit buttons
 	app.panel.setToastButtonCallback(func(buttonLabel string) {
@@ -454,28 +480,47 @@ func (app *Application) getPageTitles() (titles []string) {
 	return
 }
 
-// refreshHeaderPeriodically updates the header to reflect current metrics status
-// It does an immediate check after 2 seconds (to catch the first metrics fetch),
-// then checks every 10 seconds thereafter
-func (app *Application) refreshHeaderPeriodically(ctx context.Context) {
-	// Do an immediate check after 2 seconds to catch the first metrics fetch
-	time.Sleep(2 * time.Second)
-	app.updateHeader()
-	app.checkHealthTransition() // Check for health transitions
-
-	// Then check periodically every 10 seconds
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			app.updateHeader()
-			app.checkHealthTransition() // Check for health transitions
+// handleMetricsHealthChange is called via callback when metrics source health changes
+// This replaces the polling-based refreshHeaderPeriodically for instant responsiveness
+func (app *Application) handleMetricsHealthChange(healthy bool, info metrics.SourceInfo) {
+	// IMPORTANT: If API server is unhealthy/disconnected, don't show metrics toasts
+	// The API health tracker handles all connection-related notifications
+	if !app.IsAPIHealthy() {
+		app.lastHealthyState = healthy
+		if app.loadingToastID != "" {
+			app.DismissToast(app.loadingToastID)
+			app.loadingToastID = ""
 		}
+		return
 	}
+
+	// Update header immediately
+	nsDisplay := app.getNamespaceDisplay()
+	app.panel.DrawHeader(app.buildHeaderString(nsDisplay))
+
+	// Detect transition from unhealthy -> healthy
+	if healthy && !app.lastHealthyState {
+		if app.loadingToastID != "" {
+			app.DismissToast(app.loadingToastID)
+			app.loadingToastID = ""
+		}
+		app.ShowToast(
+			fmt.Sprintf("%s metrics connected", info.Type),
+			ui.ToastSuccess,
+			3*time.Second,
+		)
+	}
+
+	// Detect transition from healthy -> unhealthy
+	if !healthy && app.lastHealthyState {
+		app.ShowToast(
+			fmt.Sprintf("%s error: connection failed", info.Type),
+			ui.ToastError,
+			5*time.Second,
+		)
+	}
+
+	app.lastHealthyState = healthy
 }
 
 // buildHeaderString constructs the header text with current metrics status
@@ -545,74 +590,3 @@ func (app *Application) updateHeaderDirect() {
 	app.panel.DrawHeader(headerStr)
 }
 
-// checkHealthTransition detects when metrics source transitions between healthy/unhealthy
-// and displays appropriate toast notifications
-// NOTE: Metrics toasts are suppressed when API server is unhealthy to reduce noise
-func (app *Application) checkHealthTransition() {
-	if app.metricsSource == nil {
-		// No metrics source (fallback mode) - no toasts
-		return
-	}
-
-	// IMPORTANT: If API server is unhealthy/disconnected, don't show metrics toasts
-	// The API health tracker handles all connection-related notifications
-	if !app.IsAPIHealthy() {
-		// Just track the state silently without showing toasts
-		app.lastHealthyState = app.metricsSource.IsHealthy()
-		// Dismiss any pending loading toast
-		if app.loadingToastID != "" {
-			app.DismissToast(app.loadingToastID)
-			app.loadingToastID = ""
-		}
-		return
-	}
-
-	currentHealthy := app.metricsSource.IsHealthy()
-	sourceInfo := app.metricsSource.GetSourceInfo()
-
-	// Check for loading timeout (15 seconds)
-	if !app.lastHealthyState && !currentHealthy && app.loadingToastID != "" {
-		elapsed := time.Since(app.loadingToastStartTime)
-		if elapsed > 15*time.Second {
-			// Dismiss loading toast
-			app.DismissToast(app.loadingToastID)
-			app.loadingToastID = ""
-
-			// Show error toast with auto-dismiss
-			app.ShowToast(
-				fmt.Sprintf("%s metrics unavailable", sourceInfo.Type),
-				ui.ToastError,
-				5*time.Second,
-			)
-		}
-		return // Don't process other transitions while in loading state
-	}
-
-	// Detect transition from unhealthy -> healthy
-	if !app.lastHealthyState && currentHealthy {
-		// Dismiss loading toast
-		if app.loadingToastID != "" {
-			app.DismissToast(app.loadingToastID)
-			app.loadingToastID = ""
-		}
-
-		// Show success toast
-		app.ShowToast(
-			fmt.Sprintf("%s metrics connected", sourceInfo.Type),
-			ui.ToastSuccess,
-			3*time.Second,
-		)
-		app.lastHealthyState = true
-	}
-
-	// Detect transition from healthy -> unhealthy
-	if app.lastHealthyState && !currentHealthy {
-		// Show error toast (only on critical errors)
-		app.ShowToast(
-			fmt.Sprintf("%s error: connection failed", sourceInfo.Type),
-			ui.ToastError,
-			5*time.Second,
-		)
-		app.lastHealthyState = false
-	}
-}
