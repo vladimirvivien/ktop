@@ -329,33 +329,31 @@ func (p *PromMetricsSource) GetNodeMetrics(ctx context.Context, nodeName string)
 		nodeMetrics.MemoryUsage = resource.NewQuantity(int64(memUsage), resource.BinarySI)
 	}
 
-	// Query Network RX: kubelet_node_network_receive_bytes_total
-	if netRx, err := p.store.QueryLatest("kubelet_node_network_receive_bytes_total",
-		map[string]string{"node": nodeName}); err == nil {
-		nodeMetrics.NetworkRxBytes = resource.NewQuantity(int64(netRx), resource.BinarySI)
+	// Query Network RX rate: container_network_receive_bytes_total (counter - needs rate calculation)
+	// Use cAdvisor root container metrics aggregated across all interfaces
+	if netRxRate, err := p.calculateCPURate("container_network_receive_bytes_total", labelMatchers, 40*time.Second); err == nil {
+		nodeMetrics.NetworkRxRate = netRxRate // bytes/sec
+		nodeMetrics.NetworkRxBytes = resource.NewQuantity(int64(netRxRate), resource.BinarySI)
 	}
 
-	// Query Network TX: kubelet_node_network_transmit_bytes_total
-	if netTx, err := p.store.QueryLatest("kubelet_node_network_transmit_bytes_total",
-		map[string]string{"node": nodeName}); err == nil {
-		nodeMetrics.NetworkTxBytes = resource.NewQuantity(int64(netTx), resource.BinarySI)
+	// Query Network TX rate: container_network_transmit_bytes_total (counter - needs rate calculation)
+	if netTxRate, err := p.calculateCPURate("container_network_transmit_bytes_total", labelMatchers, 40*time.Second); err == nil {
+		nodeMetrics.NetworkTxRate = netTxRate // bytes/sec
+		nodeMetrics.NetworkTxBytes = resource.NewQuantity(int64(netTxRate), resource.BinarySI)
 	}
 
-	// Query Load averages: kubelet_node_load1, kubelet_node_load5, kubelet_node_load15
-	if load1, err := p.store.QueryLatest("kubelet_node_load1",
-		map[string]string{"node": nodeName}); err == nil {
-		nodeMetrics.LoadAverage1m = load1
+	// Query Disk Read rate: container_fs_reads_bytes_total (counter - needs rate calculation)
+	if diskReadRate, err := p.calculateCPURate("container_fs_reads_bytes_total", labelMatchers, 40*time.Second); err == nil {
+		nodeMetrics.DiskReadRate = diskReadRate // bytes/sec
 	}
 
-	if load5, err := p.store.QueryLatest("kubelet_node_load5",
-		map[string]string{"node": nodeName}); err == nil {
-		nodeMetrics.LoadAverage5m = load5
+	// Query Disk Write rate: container_fs_writes_bytes_total (counter - needs rate calculation)
+	if diskWriteRate, err := p.calculateCPURate("container_fs_writes_bytes_total", labelMatchers, 40*time.Second); err == nil {
+		nodeMetrics.DiskWriteRate = diskWriteRate // bytes/sec
 	}
 
-	if load15, err := p.store.QueryLatest("kubelet_node_load15",
-		map[string]string{"node": nodeName}); err == nil {
-		nodeMetrics.LoadAverage15m = load15
-	}
+	// Note: Load averages (node_load1/5/15) are not exposed by kubelet/cAdvisor
+	// They require node_exporter. Values will remain 0.
 
 	// Query Pod count: kubelet_running_pods
 	if podCount, err := p.store.QueryLatest("kubelet_running_pods",

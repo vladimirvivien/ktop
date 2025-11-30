@@ -32,3 +32,35 @@ func FormatMemory(qty *resource.Quantity) string {
 	// Display in Mi for everything else
 	return fmt.Sprintf("%4dMi", mi) // Fixed width: 4 digits + "Mi"
 }
+
+// FormatBytesRate formats bytes/sec as human-readable (e.g., "1.2M/s")
+// Uses K/M/G suffixes for compact display
+func FormatBytesRate(bytesPerSec float64) string {
+	if bytesPerSec < 0 {
+		bytesPerSec = 0
+	}
+	if bytesPerSec < 1024 {
+		return fmt.Sprintf("%.0fB/s", bytesPerSec)
+	} else if bytesPerSec < 1024*1024 {
+		return fmt.Sprintf("%.1fK/s", bytesPerSec/1024)
+	} else if bytesPerSec < 1024*1024*1024 {
+		return fmt.Sprintf("%.1fM/s", bytesPerSec/(1024*1024))
+	}
+	return fmt.Sprintf("%.1fG/s", bytesPerSec/(1024*1024*1024))
+}
+
+// FormatBytes formats bytes as human-readable (e.g., "1.2G")
+// Uses K/M/G suffixes for compact display
+func FormatBytes(bytes int64) string {
+	if bytes < 0 {
+		bytes = 0
+	}
+	if bytes < 1024 {
+		return fmt.Sprintf("%dB", bytes)
+	} else if bytes < 1024*1024 {
+		return fmt.Sprintf("%.1fK", float64(bytes)/1024)
+	} else if bytes < 1024*1024*1024 {
+		return fmt.Sprintf("%.1fM", float64(bytes)/(1024*1024))
+	}
+	return fmt.Sprintf("%.1fG", float64(bytes)/(1024*1024*1024))
+}

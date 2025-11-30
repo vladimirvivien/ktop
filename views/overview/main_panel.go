@@ -12,6 +12,7 @@ import (
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/model"
 	v1 "k8s.io/api/core/v1"
+	// metrics package imported for SourceTypePrometheus constant
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
@@ -99,8 +100,17 @@ func (p *MainPanel) Layout(data interface{}) {
 		p.podPanel,
 	}
 
+	// Determine summary panel height based on metrics source
+	summaryHeight := 12 // Default for Metrics Server
+	if p.metricsSource != nil {
+		info := p.metricsSource.GetSourceInfo()
+		if info.Type == metrics.SourceTypePrometheus {
+			summaryHeight = 14 // Prometheus: stats + 4 sparklines + enhanced stats
+		}
+	}
+
 	view := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.clusterSummaryPanel.GetRootView(), 12, 0, false).
+		AddItem(p.clusterSummaryPanel.GetRootView(), summaryHeight, 0, false).
 		AddItem(p.nodePanel.GetRootView(), 0, 3, true). // 30% of remaining
 		AddItem(p.podPanel.GetRootView(), 0, 7, true)   // 70% of remaining
 

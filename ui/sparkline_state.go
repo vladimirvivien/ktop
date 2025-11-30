@@ -78,6 +78,11 @@ func (s *SparklineState) SetStyle(style SparklineStyle) {
 	s.style = style
 }
 
+// Height returns the current height of the sparkline
+func (s *SparklineState) Height() int {
+	return s.height
+}
+
 // Push adds a new value (0.0 to 1.0) to the right, shifting all values left.
 // The oldest value (leftmost) is discarded.
 func (s *SparklineState) Push(value float64) {
@@ -104,6 +109,25 @@ func (s *SparklineState) Render() string {
 		return s.renderSingleLine()
 	}
 	return s.renderMultiLine()
+}
+
+// RenderBottomAligned returns the sparkline padded to totalHeight with empty lines at top.
+// This makes the sparkline appear bottom-aligned within a container of totalHeight rows.
+// If totalHeight <= s.height, behaves the same as Render().
+func (s *SparklineState) RenderBottomAligned(totalHeight int) string {
+	content := s.Render()
+	if totalHeight <= s.height {
+		return content
+	}
+
+	// Add empty lines at the top to push content to bottom
+	padding := totalHeight - s.height
+	var result strings.Builder
+	for i := 0; i < padding; i++ {
+		result.WriteString("\n")
+	}
+	result.WriteString(content)
+	return result.String()
 }
 
 // renderSingleLine renders a single-line sparkline with partial block characters
