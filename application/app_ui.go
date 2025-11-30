@@ -270,6 +270,32 @@ func (p *appPanel) hasActiveToast() bool {
 	return p.currentToastID != ""
 }
 
+// handleToastEsc handles ESC key for active toast at the application level.
+// This is needed because tview.Modal with no buttons cannot receive focus,
+// so its SetInputCapture never receives key events. This method simulates
+// what the modal's ESC handler would do.
+func (p *appPanel) handleToastEsc() {
+	p.toastMutex.Lock()
+	toastID := p.currentToastID
+	callback := p.toastButtonCallback
+	p.toastMutex.Unlock()
+
+	if toastID != "" {
+		// Run in goroutine to avoid blocking input handler
+		// This mirrors the behavior in wrappedCallback
+		go func() {
+			// Dismiss toast first
+			p.tviewApp.QueueUpdateDraw(func() {
+				p.dismissToastInternal(toastID)
+			})
+			// Then call the user callback with "Quit"
+			if callback != nil {
+				callback("Quit")
+			}
+		}()
+	}
+}
+
 // setHeaderFocused updates the header panel's visual focus state
 func (p *appPanel) setHeaderFocused(focused bool) {
 	p.headerFocused = focused

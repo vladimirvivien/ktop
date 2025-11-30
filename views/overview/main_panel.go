@@ -100,9 +100,9 @@ func (p *MainPanel) Layout(data interface{}) {
 	}
 
 	view := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.clusterSummaryPanel.GetRootView(), 4, 1, true).
-		AddItem(p.nodePanel.GetRootView(), 15, 1, true).
-		AddItem(p.podPanel.GetRootView(), 0, 1, true)
+		AddItem(p.clusterSummaryPanel.GetRootView(), 12, 0, false).
+		AddItem(p.nodePanel.GetRootView(), 0, 3, true). // 30% of remaining
+		AddItem(p.podPanel.GetRootView(), 0, 7, true)   // 70% of remaining
 
 	p.root = view
 }

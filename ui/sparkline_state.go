@@ -149,17 +149,21 @@ func (s *SparklineState) renderSingleLine() string {
 	return graph.String()
 }
 
-// renderMultiLine renders a multi-line sparkline with stacked full blocks
-// Uses 3-color scheme from ColorKeys for more detail at higher resolution
+// renderMultiLine renders a multi-line sparkline with improved resolution.
+// Uses partial block characters (▁▂▃▄▅▆▇█) to show finer gradation within each row.
+// This gives height × 8 effective resolution levels instead of just height levels.
+// Uses 3-color scheme from ColorKeys for color coding.
 func (s *SparklineState) renderMultiLine() string {
 	colorKeys := s.colors.Keys()
 	lines := make([]strings.Builder, s.height)
+	rowHeight := 1.0 / float64(s.height)
 
 	// Build each row from top (highest) to bottom (lowest)
 	for row := 0; row < s.height; row++ {
-		// This row represents values from (height-row-1)/height to (height-row)/height
+		// Row boundaries: rowLower to rowUpper
 		// Row 0 (top) = highest values, Row height-1 (bottom) = lowest values
-		rowThreshold := float64(s.height-row-1) / float64(s.height)
+		rowUpper := float64(s.height-row) / float64(s.height)
+		rowLower := float64(s.height-row-1) / float64(s.height)
 
 		for _, val := range s.values {
 			// Determine color based on percentage value using ColorKeys
@@ -171,18 +175,28 @@ func (s *SparklineState) renderMultiLine() string {
 				}
 			}
 
-			if val > rowThreshold {
-				// Value reaches this row - draw filled block
-				if val <= 0 {
-					lines[row].WriteString("[")
-					lines[row].WriteString(Theme.SparklineEmpty)
-					lines[row].WriteString("]")
-				} else {
-					lines[row].WriteString("[")
-					lines[row].WriteString(color)
-					lines[row].WriteString("]")
-				}
+			if val >= rowUpper {
+				// Value exceeds this row's upper bound - draw full block
+				lines[row].WriteString("[")
+				lines[row].WriteString(color)
+				lines[row].WriteString("]")
 				lines[row].WriteRune('█')
+			} else if val > rowLower {
+				// Value is within this row's range - draw partial block
+				// Calculate how much of this row is filled (0-1)
+				fraction := (val - rowLower) / rowHeight
+				// Map to block level (1-8), level 0 is baseline
+				level := int(fraction * 8)
+				if level > 8 {
+					level = 8
+				}
+				if level < 1 {
+					level = 1 // At least show minimal block if val > rowLower
+				}
+				lines[row].WriteString("[")
+				lines[row].WriteString(color)
+				lines[row].WriteString("]")
+				lines[row].WriteRune(blockBarChars[level])
 			} else {
 				// Value doesn't reach this row - draw space
 				lines[row].WriteString(" ")
@@ -246,6 +260,25 @@ func (s *SparklineState) Clear() {
 	for i := range s.values {
 		s.values[i] = 0
 	}
+}
+
+// Resize changes the sparkline width, preserving recent data.
+// When width increases: old data stays right-aligned, zeros pad on left.
+// When width decreases: old data truncated from left, recent data preserved.
+func (s *SparklineState) Resize(newWidth int) {
+	if newWidth == s.width || newWidth <= 0 {
+		return
+	}
+	newValues := make([]float64, newWidth)
+	if newWidth > s.width {
+		// Larger: pad left with zeros, copy all old data to right
+		copy(newValues[newWidth-s.width:], s.values)
+	} else {
+		// Smaller: truncate old data, keep most recent
+		copy(newValues, s.values[s.width-newWidth:])
+	}
+	s.values = newValues
+	s.width = newWidth
 }
 
 // TrendIndicator returns a colored trend arrow (↑/↓) or empty string for stable.
