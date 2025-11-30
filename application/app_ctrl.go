@@ -42,6 +42,10 @@ type Application struct {
 	loadingToastID        string
 	loadingToastStartTime time.Time
 
+	// Metrics health debouncing (prevents flapping during server restart)
+	metricsConsecOK      int       // Consecutive successful health checks
+	metricsLastErrorTime time.Time // Time of last error (for minimum unhealthy duration)
+
 	// API health tracking
 	apiHealthTracker *health.APIHealthTracker
 	apiHealthToastID string // Persistent toast for API health issues
@@ -353,10 +357,15 @@ func (app *Application) setup(ctx context.Context) error {
 	})
 
 	app.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// When a toast modal is displayed, let it handle all input
-		// Don't process global shortcuts here - the modal handles them
+		// When a toast modal is displayed, handle ESC at app level
+		// This is necessary because tview.Modal with no buttons cannot receive focus,
+		// so the modal's SetInputCapture never gets called for key events.
 		if app.HasActiveToast() {
-			return event // Pass through to modal
+			if event.Key() == tcell.KeyEsc {
+				app.panel.handleToastEsc()
+				return nil // Consume the event
+			}
+			return event // Pass other keys through
 		}
 
 		// Handle ESC - check if header or visible panel has state to clear first
@@ -487,6 +496,7 @@ func (app *Application) handleMetricsHealthChange(healthy bool, info metrics.Sou
 	// The API health tracker handles all connection-related notifications
 	if !app.IsAPIHealthy() {
 		app.lastHealthyState = healthy
+		app.metricsConsecOK = 0
 		if app.loadingToastID != "" {
 			app.DismissToast(app.loadingToastID)
 			app.loadingToastID = ""
@@ -494,33 +504,65 @@ func (app *Application) handleMetricsHealthChange(healthy bool, info metrics.Sou
 		return
 	}
 
+	// Debouncing constants (prevents flapping during server restart)
+	const requiredConsecOK = 2            // Require 2 consecutive successes
+	const minUnhealthyTime = 5 * time.Second // Must be unhealthy for at least 5s before recovery
+
 	// Update header immediately
 	nsDisplay := app.getNamespaceDisplay()
 	app.panel.DrawHeader(app.buildHeaderString(nsDisplay))
 
-	// Detect transition from unhealthy -> healthy
-	if healthy && !app.lastHealthyState {
-		if app.loadingToastID != "" {
-			app.DismissToast(app.loadingToastID)
-			app.loadingToastID = ""
+	if healthy {
+		app.metricsConsecOK++
+
+		// Check debouncing conditions before declaring recovered
+		if !app.lastHealthyState {
+			// For initial startup (never had an error), accept first success immediately.
+			// For recovery after error, apply debouncing to prevent flapping.
+			// The health callback only fires on state changes, so debouncing that
+			// requires multiple callbacks won't work for initial startup.
+			isInitialStartup := app.metricsLastErrorTime.IsZero()
+
+			if !isInitialStartup {
+				// Recovery case: apply debouncing
+				// Must have enough consecutive successes
+				if app.metricsConsecOK < requiredConsecOK {
+					return // Wait for more successes
+				}
+
+				// Must have been unhealthy long enough (prevents flapping from cached responses)
+				if time.Since(app.metricsLastErrorTime) < minUnhealthyTime {
+					return // Too soon after last error
+				}
+			}
+
+			// Declare healthy - either initial startup or debouncing passed
+			if app.loadingToastID != "" {
+				app.DismissToast(app.loadingToastID)
+				app.loadingToastID = ""
+			}
+			app.ShowToast(
+				fmt.Sprintf("%s metrics connected", info.Type),
+				ui.ToastSuccess,
+				3*time.Second,
+			)
+			app.lastHealthyState = true
 		}
-		app.ShowToast(
-			fmt.Sprintf("%s metrics connected", info.Type),
-			ui.ToastSuccess,
-			3*time.Second,
-		)
-	}
+	} else {
+		// Reset consecutive OK counter on error
+		app.metricsConsecOK = 0
+		app.metricsLastErrorTime = time.Now()
 
-	// Detect transition from healthy -> unhealthy
-	if !healthy && app.lastHealthyState {
-		app.ShowToast(
-			fmt.Sprintf("%s error: connection failed", info.Type),
-			ui.ToastError,
-			5*time.Second,
-		)
+		// Detect transition from healthy -> unhealthy
+		if app.lastHealthyState {
+			app.ShowToast(
+				fmt.Sprintf("%s error: connection failed", info.Type),
+				ui.ToastError,
+				5*time.Second,
+			)
+			app.lastHealthyState = false
+		}
 	}
-
-	app.lastHealthyState = healthy
 }
 
 // buildHeaderString constructs the header text with current metrics status
