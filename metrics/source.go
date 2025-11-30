@@ -95,6 +95,14 @@ type NodeMetrics struct {
 	// DiskUsage is the current disk usage in bytes
 	DiskUsage *resource.Quantity
 
+	// Network rates (bytes/sec) - calculated from counter deltas
+	NetworkRxRate float64
+	NetworkTxRate float64
+
+	// Disk I/O rates (bytes/sec) - calculated from counter deltas
+	DiskReadRate  float64
+	DiskWriteRate float64
+
 	// LoadAverage1m is the 1-minute load average
 	LoadAverage1m float64
 

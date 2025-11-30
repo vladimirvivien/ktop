@@ -490,11 +490,14 @@ func TestGetNodeMetrics_WithMockStore(t *testing.T) {
 	// CPU: Set to 104.0 (counter value), QueryRange will return samples that calculate to 0.1 cores = 100m
 	mockStore.SetMetric("container_cpu_usage_seconds_total", "id:/", 104.0)
 	mockStore.SetMetric("container_memory_working_set_bytes", "id:/", 1024*1024*1024) // 1GB
-	mockStore.SetMetric("kubelet_node_network_receive_bytes_total", "node:test-node", 1024*1024)   // 1MB
-	mockStore.SetMetric("kubelet_node_network_transmit_bytes_total", "node:test-node", 512*1024)   // 512KB
-	mockStore.SetMetric("kubelet_node_load1", "node:test-node", 1.5)
-	mockStore.SetMetric("kubelet_node_load5", "node:test-node", 1.2)
-	mockStore.SetMetric("kubelet_node_load15", "node:test-node", 0.9)
+	// Network metrics: cAdvisor counters, rate = 4.0/40s = 0.1 bytes/sec
+	mockStore.SetMetric("container_network_receive_bytes_total", "id:/", 1024.0)
+	mockStore.SetMetric("container_network_transmit_bytes_total", "id:/", 512.0)
+	// Disk I/O metrics: cAdvisor counters, rate = 4.0/40s = 0.1 bytes/sec
+	mockStore.SetMetric("container_fs_reads_bytes_total", "id:/", 2048.0)
+	mockStore.SetMetric("container_fs_writes_bytes_total", "id:/", 1024.0)
+	// Note: Load averages (node_load1/5/15) are NOT available from kubelet/cAdvisor
+	// They require node_exporter, so we don't set them here and expect 0 values
 	mockStore.SetMetric("kubelet_running_pods", "node:test-node", 15)
 	mockStore.SetMetric("container_count", "node:test-node", 42)
 
@@ -529,29 +532,35 @@ func TestGetNodeMetrics_WithMockStore(t *testing.T) {
 		t.Errorf("Expected Memory 1GB, got %d", metrics.MemoryUsage.Value())
 	}
 
-	// Verify Network RX
-	if metrics.NetworkRxBytes == nil {
-		t.Error("Expected NetworkRxBytes to be set")
-	} else if metrics.NetworkRxBytes.Value() != 1024*1024 {
-		t.Errorf("Expected NetworkRx 1MB, got %d", metrics.NetworkRxBytes.Value())
+	// Verify Network RX rate (calculated from counter: 4.0 delta / 40s = 0.1 bytes/sec)
+	if metrics.NetworkRxRate != 0.1 {
+		t.Errorf("Expected NetworkRxRate 0.1 bytes/sec, got %f", metrics.NetworkRxRate)
 	}
 
-	// Verify Network TX
-	if metrics.NetworkTxBytes == nil {
-		t.Error("Expected NetworkTxBytes to be set")
-	} else if metrics.NetworkTxBytes.Value() != 512*1024 {
-		t.Errorf("Expected NetworkTx 512KB, got %d", metrics.NetworkTxBytes.Value())
+	// Verify Network TX rate (calculated from counter: 4.0 delta / 40s = 0.1 bytes/sec)
+	if metrics.NetworkTxRate != 0.1 {
+		t.Errorf("Expected NetworkTxRate 0.1 bytes/sec, got %f", metrics.NetworkTxRate)
 	}
 
-	// Verify Load averages
-	if metrics.LoadAverage1m != 1.5 {
-		t.Errorf("Expected LoadAverage1m 1.5, got %f", metrics.LoadAverage1m)
+	// Verify Disk Read rate (calculated from counter: 4.0 delta / 40s = 0.1 bytes/sec)
+	if metrics.DiskReadRate != 0.1 {
+		t.Errorf("Expected DiskReadRate 0.1 bytes/sec, got %f", metrics.DiskReadRate)
 	}
-	if metrics.LoadAverage5m != 1.2 {
-		t.Errorf("Expected LoadAverage5m 1.2, got %f", metrics.LoadAverage5m)
+
+	// Verify Disk Write rate (calculated from counter: 4.0 delta / 40s = 0.1 bytes/sec)
+	if metrics.DiskWriteRate != 0.1 {
+		t.Errorf("Expected DiskWriteRate 0.1 bytes/sec, got %f", metrics.DiskWriteRate)
 	}
-	if metrics.LoadAverage15m != 0.9 {
-		t.Errorf("Expected LoadAverage15m 0.9, got %f", metrics.LoadAverage15m)
+
+	// Verify Load averages are 0 (not available from kubelet/cAdvisor without node_exporter)
+	if metrics.LoadAverage1m != 0 {
+		t.Errorf("Expected LoadAverage1m 0 (not available), got %f", metrics.LoadAverage1m)
+	}
+	if metrics.LoadAverage5m != 0 {
+		t.Errorf("Expected LoadAverage5m 0 (not available), got %f", metrics.LoadAverage5m)
+	}
+	if metrics.LoadAverage15m != 0 {
+		t.Errorf("Expected LoadAverage15m 0 (not available), got %f", metrics.LoadAverage15m)
 	}
 
 	// Verify Pod count

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/views/model"
 	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -35,6 +36,12 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	}
 
 	var summary model.ClusterSummary
+
+	// Set metrics source type for dynamic UI layout
+	if c.metricsSource != nil {
+		info := c.metricsSource.GetSourceInfo()
+		summary.MetricsSourceType = info.Type
+	}
 
 	// extract namespace summary
 	namespaces, err := c.GetNamespaceList(ctx)
@@ -94,6 +101,12 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	for _, pod := range pods {
 		if pod.Status.Phase == coreV1.PodRunning {
 			summary.PodsRunning++
+			// Count running containers
+			for _, cs := range pod.Status.ContainerStatuses {
+				if cs.State.Running != nil {
+					summary.ContainerCount++
+				}
+			}
 		}
 		containerSummary := model.GetPodContainerSummary(pod)
 		summary.RequestedPodMemTotal.Add(*containerSummary.RequestedMemQty)
@@ -176,8 +189,65 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 		}
 	}
 
+	// === Prometheus-Enhanced Metrics Collection ===
+	// When using Prometheus source, collect additional cluster-wide metrics
+	if c.metricsSource != nil && summary.MetricsSourceType == metrics.SourceTypePrometheus {
+		c.collectPrometheusEnhancedMetrics(ctx, &summary, nodes, pods)
+	}
+
 	// Report success after all data is collected
 	c.reportSuccess()
 	handlerFunc(ctx, summary)
 	return nil
+}
+
+// collectPrometheusEnhancedMetrics populates Prometheus-specific cluster summary fields
+func (c *Controller) collectPrometheusEnhancedMetrics(ctx context.Context, summary *model.ClusterSummary, nodes []*coreV1.Node, pods []*coreV1.Pod) {
+	// Aggregate enhanced metrics from all nodes
+	// These come from the NodeMetrics returned by GetNodeMetrics when using Prometheus source
+
+	for _, node := range nodes {
+		nodeMetrics, err := c.metricsSource.GetNodeMetrics(ctx, node.Name)
+		if err != nil {
+			continue
+		}
+
+		// Network I/O rates (sum across nodes)
+		summary.NetworkRxRate += nodeMetrics.NetworkRxRate
+		summary.NetworkTxRate += nodeMetrics.NetworkTxRate
+
+		// Disk I/O rates (sum across nodes)
+		summary.DiskReadRate += nodeMetrics.DiskReadRate
+		summary.DiskWriteRate += nodeMetrics.DiskWriteRate
+
+		// Load averages (compute cluster average)
+		// Note: Load averages are not exposed by kubelet/cAdvisor (require node_exporter)
+		summary.LoadAverage1m += nodeMetrics.LoadAverage1m
+		summary.LoadAverage5m += nodeMetrics.LoadAverage5m
+		summary.LoadAverage15m += nodeMetrics.LoadAverage15m
+	}
+
+	// Average the load across nodes (will be 0 without node_exporter)
+	if len(nodes) > 0 {
+		summary.LoadAverage1m /= float64(len(nodes))
+		summary.LoadAverage5m /= float64(len(nodes))
+		summary.LoadAverage15m /= float64(len(nodes))
+	}
+
+	// Count container restarts from pod status (available from all sources)
+	for _, pod := range pods {
+		for _, cs := range pod.Status.ContainerStatuses {
+			// Only count recent restarts (rough approximation - actual time filtering
+			// would require tracking restart timestamps)
+			summary.ContainerRestarts1h += int(cs.RestartCount)
+		}
+	}
+
+	// Count node pressures
+	for _, node := range nodes {
+		pressures := model.GetNodePressures(node)
+		if len(pressures) > 0 {
+			summary.NodePressureCount++
+		}
+	}
 }
