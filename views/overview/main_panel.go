@@ -24,6 +24,7 @@ type MainPanel struct {
 	refresh             func()
 	root                *tview.Flex
 	children            []tview.Primitive
+	childPanels         []ui.Panel // Ordered list of child panels for focus management
 	selPanelIndex       int
 	nodePanel           ui.Panel
 	podPanel            ui.Panel
@@ -31,6 +32,8 @@ type MainPanel struct {
 	showAllColumns      bool
 	nodeColumns         []string
 	podColumns          []string
+	namespaceFilter     string            // Current namespace filter
+	cachedPodModels     []model.PodModel  // Cached pod models for immediate re-filtering
 }
 
 func New(app *application.Application, title string) *MainPanel {
@@ -89,6 +92,13 @@ func (p *MainPanel) Layout(data interface{}) {
 		p.podPanel.GetRootView(),
 	}
 
+	// Store panels in order for focus management
+	p.childPanels = []ui.Panel{
+		p.clusterSummaryPanel,
+		p.nodePanel,
+		p.podPanel,
+	}
+
 	view := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(p.clusterSummaryPanel.GetRootView(), 4, 1, true).
 		AddItem(p.nodePanel.GetRootView(), 15, 1, true).
@@ -110,6 +120,14 @@ func (p *MainPanel) GetRootView() tview.Primitive {
 }
 func (p *MainPanel) GetChildrenViews() []tview.Primitive {
 	return p.children
+}
+
+// GetChildPanel returns the panel at the given index (for focus management)
+func (p *MainPanel) GetChildPanel(index int) ui.Panel {
+	if index < 0 || index >= len(p.childPanels) {
+		return nil
+	}
+	return p.childPanels[index]
 }
 
 // HasEscapableState implements ui.EscapablePanel by checking child panels
@@ -154,6 +172,13 @@ func (p *MainPanel) Run(ctx context.Context) error {
 	ctrl.SetNodeRefreshFunc(p.refreshNodeView)
 	ctrl.SetPodRefreshFunc(p.refreshPods)
 
+	// Set up namespace filter callback to update filtering and immediately refresh pods
+	p.app.SetNamespaceFilterCallback(func(namespace string) {
+		p.namespaceFilter = namespace
+		// Immediately re-filter and display pods with the new filter
+		p.displayFilteredPods()
+	})
+
 	if err := ctrl.Start(ctx, time.Second*10); err != nil {
 		panic(fmt.Sprintf("main panel: controller start: %s", err))
 	}
@@ -187,14 +212,12 @@ func (p *MainPanel) refreshNodeView(ctx context.Context, models []model.NodeMode
 		nodeModels = append(nodeModels, existingModel)
 	}
 
-	// Sorting is now handled by the panel itself in DrawBody
-	p.nodePanel.Clear()
-	p.nodePanel.DrawBody(nodeModels)
-
-	// required: always schedule screen refresh
-	if p.refresh != nil {
-		p.refresh()
-	}
+	// Queue UI update on main goroutine to avoid race with Draw()
+	// This is called from controller goroutine, so we must synchronize
+	p.app.QueueUpdateDraw(func() {
+		p.nodePanel.Clear()
+		p.nodePanel.DrawBody(nodeModels)
+	})
 
 	return nil
 }
@@ -212,57 +235,88 @@ func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) er
 		allPodMetrics, err = p.metricsSource.GetAllPodMetrics(ctx)
 	}
 
-	if p.metricsSource == nil || err != nil {
-		// Fallback: if metrics source is nil or batch fetch fails, use existing models without metrics updates
-		// Sorting is now handled by the panel itself in DrawBody
-		p.podPanel.Clear()
-		p.podPanel.DrawBody(models)
-		if p.refresh != nil {
-			p.refresh()
+	// Update models with metrics first (before caching)
+	updatedModels := models
+	if p.metricsSource != nil && err == nil {
+		// Build a map for fast lookup: namespace/name -> PodMetrics
+		metricsMap := make(map[string]*metrics.PodMetrics, len(allPodMetrics))
+		for _, pm := range allPodMetrics {
+			key := pm.Namespace + "/" + pm.PodName
+			metricsMap[key] = pm
 		}
-		return nil
-	}
 
-	// Build a map for fast lookup: namespace/name -> PodMetrics
-	metricsMap := make(map[string]*metrics.PodMetrics, len(allPodMetrics))
-	for _, pm := range allPodMetrics {
-		key := pm.Namespace + "/" + pm.PodName
-		metricsMap[key] = pm
-	}
+		// Update models with metrics from the map
+		updatedModels = make([]model.PodModel, 0, len(models))
+		for _, existingModel := range models {
+			key := existingModel.Namespace + "/" + existingModel.Name
+			if podMetrics, found := metricsMap[key]; found {
+				// Convert metrics and sum up CPU/Memory for all containers
+				v1PodMetrics := convertToV1Beta1PodMetrics(podMetrics)
 
-	// Update models with metrics from the map
-	podModels := make([]model.PodModel, 0, len(models))
-	for _, existingModel := range models {
-		key := existingModel.Namespace + "/" + existingModel.Name
-		if podMetrics, found := metricsMap[key]; found {
-			// Convert metrics and sum up CPU/Memory for all containers
-			v1PodMetrics := convertToV1Beta1PodMetrics(podMetrics)
+				// Update the model's usage metrics only if we got actual metrics
+				totalCpu, totalMem := podMetricsTotals(v1PodMetrics)
 
-			// Update the model's usage metrics only if we got actual metrics
-			totalCpu, totalMem := podMetricsTotals(v1PodMetrics)
-
-			// If metrics are available (non-zero), use them
-			// Otherwise keep the existing model which may have requests/limits
-			if totalCpu.Value() > 0 || totalMem.Value() > 0 {
-				existingModel.PodUsageCpuQty = totalCpu
-				existingModel.PodUsageMemQty = totalMem
+				// If metrics are available (non-zero), use them
+				// Otherwise keep the existing model which may have requests/limits
+				if totalCpu.Value() > 0 || totalMem.Value() > 0 {
+					existingModel.PodUsageCpuQty = totalCpu
+					existingModel.PodUsageMemQty = totalMem
+				}
 			}
+			updatedModels = append(updatedModels, existingModel)
 		}
-		// If no metrics found in map, keep existing model's values (requests/limits from controller)
-
-		podModels = append(podModels, existingModel)
 	}
 
-	// Sorting is now handled by the panel itself in DrawBody
-	// refresh pod list
-	p.podPanel.Clear()
-	p.podPanel.DrawBody(podModels)
+	// Queue UI update on main goroutine to avoid race with Draw()
+	// This is called from controller goroutine, so we must synchronize
+	p.app.QueueUpdateDraw(func() {
+		// Cache the updated models (with metrics) for immediate re-filtering
+		p.cachedPodModels = updatedModels
+		// Apply namespace filter and display
+		p.displayFilteredPodsInternal()
+	})
 
-	// required: always refresh screen
+	return nil
+}
+
+// displayFilteredPods filters cached pod models and displays them
+// Called from namespace filter callback (runs on main goroutine)
+func (p *MainPanel) displayFilteredPods() {
+	if p.cachedPodModels == nil {
+		return
+	}
+
+	// Already on main goroutine from input handler, safe to update directly
+	p.displayFilteredPodsInternal()
+
+	// Refresh screen
 	if p.refresh != nil {
 		p.refresh()
 	}
-	return nil
+}
+
+// displayFilteredPodsInternal does the actual filtering and display
+// Must be called from main goroutine (either directly or via QueueUpdateDraw)
+func (p *MainPanel) displayFilteredPodsInternal() {
+	if p.cachedPodModels == nil {
+		return
+	}
+
+	// Apply namespace filter
+	filteredModels := p.cachedPodModels
+	if p.namespaceFilter != "" {
+		filteredModels = make([]model.PodModel, 0, len(p.cachedPodModels))
+		filterLower := strings.ToLower(p.namespaceFilter)
+		for _, m := range p.cachedPodModels {
+			if strings.Contains(strings.ToLower(m.Namespace), filterLower) {
+				filteredModels = append(filteredModels, m)
+			}
+		}
+	}
+
+	// Sorting is now handled by the panel itself in DrawBody
+	p.podPanel.Clear()
+	p.podPanel.DrawBody(filteredModels)
 }
 
 // podMetricsTotals sums up CPU and memory usage across all containers in a pod
@@ -288,11 +342,12 @@ func podMetricsTotals(podMetrics *metricsV1beta1.PodMetrics) (totalCpu, totalMem
 }
 
 func (p *MainPanel) refreshWorkloadSummary(ctx context.Context, summary model.ClusterSummary) error {
-	p.clusterSummaryPanel.Clear()
-	p.clusterSummaryPanel.DrawBody(summary)
-	if p.refresh != nil {
-		p.refresh()
-	}
+	// Queue UI update on main goroutine to avoid race with Draw()
+	// This is called from controller goroutine, so we must synchronize
+	p.app.QueueUpdateDraw(func() {
+		p.clusterSummaryPanel.Clear()
+		p.clusterSummaryPanel.DrawBody(summary)
+	})
 	return nil
 }
 

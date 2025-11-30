@@ -573,6 +573,11 @@ func (p *nodePanel) GetChildrenViews() []tview.Primitive {
 	return p.children
 }
 
+// SetFocused implements ui.FocusablePanel - updates visual focus state
+func (p *nodePanel) SetFocused(focused bool) {
+	ui.SetFlexFocused(p.root, focused)
+}
+
 // getNodeCells extracts text values from a node model for filter matching
 func (p *nodePanel) getNodeCells(node model.NodeModel) []string {
 	return []string{

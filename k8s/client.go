@@ -133,6 +133,14 @@ func (k8s *Client) ClusterContext() string {
 	return k8s.clusterContext
 }
 
+// ClusterName returns the cluster name from kubeconfig (may differ from context name)
+func (k8s *Client) ClusterName() string {
+	if ctx, ok := k8s.apiConfig.Contexts[k8s.clusterContext]; ok {
+		return ctx.Cluster
+	}
+	return k8s.clusterContext // fallback to context name
+}
+
 func (k8s *Client) Username() string {
 	return k8s.username
 }

@@ -186,9 +186,6 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 
 		metricsSource = promSource
 
-		fmt.Println("Warning: Prometheus metrics source is not yet fully integrated with the UI")
-		fmt.Println("         Currently using metrics-server fallback for display")
-
 	case "none":
 		fmt.Println("Using metrics source: None (fallback mode)")
 		fmt.Println("Displaying resource requests/limits only")
