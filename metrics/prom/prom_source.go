@@ -23,11 +23,12 @@ type PromMetricsSource struct {
 	config     *PromConfig
 
 	// Health tracking
-	mu         sync.RWMutex
-	healthy    bool
-	lastError  error
-	errorCount int
-	lastScrape time.Time
+	mu             sync.RWMutex
+	healthy        bool
+	lastError      error
+	errorCount     int
+	lastScrape     time.Time
+	healthCallback func(healthy bool, info metrics.SourceInfo)
 }
 
 // PromConfig holds configuration for the Prometheus metrics source
@@ -517,6 +518,39 @@ func (p *PromMetricsSource) GetSourceInfo() metrics.SourceInfo {
 	}
 }
 
+// SetHealthCallback registers a callback for health state changes.
+// The callback is invoked whenever IsHealthy() would return a different value.
+func (p *PromMetricsSource) SetHealthCallback(callback func(healthy bool, info metrics.SourceInfo)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.healthCallback = callback
+}
+
+// notifyHealthChange invokes the health callback if registered.
+// Must be called with p.mu held.
+func (p *PromMetricsSource) notifyHealthChange(newHealthy bool) {
+	if p.healthCallback != nil {
+		// Get metric count while we still have the lock
+		metricCount := 0
+		if p.store != nil {
+			metricCount = len(p.store.GetMetricNames())
+		}
+		info := metrics.SourceInfo{
+			Type:         metrics.SourceTypePrometheus,
+			Version:      "v1.0.0",
+			LastScrape:   p.lastScrape,
+			MetricsCount: metricCount,
+			ErrorCount:   p.errorCount,
+			Healthy:      newHealthy,
+		}
+		// Release lock before calling callback to avoid deadlock
+		cb := p.healthCallback
+		p.mu.Unlock()
+		cb(newHealthy, info)
+		p.mu.Lock()
+	}
+}
+
 // handleError is called when an error occurs during metrics collection
 func (p *PromMetricsSource) handleError(component prom.ComponentType, err error) {
 	p.mu.Lock()
@@ -524,21 +558,33 @@ func (p *PromMetricsSource) handleError(component prom.ComponentType, err error)
 
 	p.lastError = err
 	p.errorCount++
+	wasHealthy := p.healthy
 	p.healthy = false
+
+	// Notify if state changed
+	if wasHealthy {
+		p.notifyHealthChange(false)
+	}
 }
 
 // handleMetricsCollected is called when metrics are successfully collected
-func (p *PromMetricsSource) handleMetricsCollected(component prom.ComponentType, metrics *prom.ScrapedMetrics) {
+func (p *PromMetricsSource) handleMetricsCollected(component prom.ComponentType, collectedMetrics *prom.ScrapedMetrics) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	p.lastError = nil
+	wasHealthy := p.healthy
 	p.healthy = true
 	p.lastScrape = time.Now()
 
 	// Ensure we have a reference to the store
 	if p.store == nil && p.controller != nil {
 		p.store = p.controller.GetStore()
+	}
+
+	// Notify if state changed
+	if !wasHealthy {
+		p.notifyHealthChange(true)
 	}
 }
 
@@ -549,7 +595,13 @@ func (p *PromMetricsSource) recordError(err error) {
 
 	p.lastError = err
 	p.errorCount++
+	wasHealthy := p.healthy
 	p.healthy = false
+
+	// Notify if state changed
+	if wasHealthy {
+		p.notifyHealthChange(false)
+	}
 }
 
 // GetNodeHistory retrieves historical data for a specific resource on a node.

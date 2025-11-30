@@ -31,10 +31,13 @@ type MetricsServerSource struct {
 	lastError     error
 	errorCount    int
 
+	// Health callback for event-driven health monitoring
+	healthCallback func(healthy bool, info metrics.SourceInfo)
+
 	// History buffers for sparkline support
 	// Key format: "node:{nodeName}:{resource}" or "pod:{namespace}/{podName}:{resource}"
-	historyBuffers map[string]*prom.RingBuffer[historyDataPoint]
-	historyMu      sync.RWMutex
+	historyBuffers    map[string]*prom.RingBuffer[historyDataPoint]
+	historyMu         sync.RWMutex
 	maxHistorySamples int
 }
 
@@ -184,6 +187,35 @@ func (m *MetricsServerSource) GetSourceInfo() metrics.SourceInfo {
 	}
 }
 
+// SetHealthCallback registers a callback for health state changes.
+// The callback is invoked whenever IsHealthy() would return a different value.
+func (m *MetricsServerSource) SetHealthCallback(callback func(healthy bool, info metrics.SourceInfo)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.healthCallback = callback
+}
+
+// notifyHealthChange invokes the health callback if health state changed.
+// Must be called with m.mu held.
+func (m *MetricsServerSource) notifyHealthChange(newHealthy bool) {
+	if m.healthCallback != nil {
+		// Get source info while we still have the lock
+		info := metrics.SourceInfo{
+			Type:         metrics.SourceTypeMetricsServer,
+			Version:      "v1beta1",
+			LastScrape:   time.Now(),
+			MetricsCount: 2,
+			ErrorCount:   m.errorCount,
+			Healthy:      newHealthy,
+		}
+		// Release lock before calling callback to avoid deadlock
+		cb := m.healthCallback
+		m.mu.Unlock()
+		cb(newHealthy, info)
+		m.mu.Lock()
+	}
+}
+
 // recordError updates health status after an error.
 func (m *MetricsServerSource) recordError(err error) {
 	m.mu.Lock()
@@ -191,7 +223,13 @@ func (m *MetricsServerSource) recordError(err error) {
 
 	m.lastError = err
 	m.errorCount++
+	wasHealthy := m.healthy
 	m.healthy = false
+
+	// Notify if state changed
+	if wasHealthy {
+		m.notifyHealthChange(false)
+	}
 }
 
 // recordSuccess updates health status after a successful operation.
@@ -200,7 +238,13 @@ func (m *MetricsServerSource) recordSuccess() {
 	defer m.mu.Unlock()
 
 	m.lastError = nil
+	wasHealthy := m.healthy
 	m.healthy = true
+
+	// Notify if state changed
+	if !wasHealthy {
+		m.notifyHealthChange(true)
+	}
 }
 
 // convertNodeMetrics converts v1beta1.NodeMetrics to metrics.NodeMetrics.
