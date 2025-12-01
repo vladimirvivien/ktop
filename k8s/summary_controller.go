@@ -99,13 +99,21 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	summary.RequestedPodMemTotal = resource.NewQuantity(0, resource.DecimalSI)
 	summary.RequestedPodCpuTotal = resource.NewQuantity(0, resource.DecimalSI)
 	for _, pod := range pods {
-		if pod.Status.Phase == coreV1.PodRunning {
+		switch pod.Status.Phase {
+		case coreV1.PodRunning:
 			summary.PodsRunning++
-			// Count running containers
+			// Count running containers and restarts
 			for _, cs := range pod.Status.ContainerStatuses {
 				if cs.State.Running != nil {
 					summary.ContainerCount++
 				}
+				summary.ContainerRestarts += int(cs.RestartCount)
+			}
+		case coreV1.PodFailed:
+			summary.FailedPods++
+			// Check if evicted
+			if pod.Status.Reason == "Evicted" {
+				summary.EvictedPods++
 			}
 		}
 		containerSummary := model.GetPodContainerSummary(pod)
@@ -232,15 +240,6 @@ func (c *Controller) collectPrometheusEnhancedMetrics(ctx context.Context, summa
 		summary.LoadAverage1m /= float64(len(nodes))
 		summary.LoadAverage5m /= float64(len(nodes))
 		summary.LoadAverage15m /= float64(len(nodes))
-	}
-
-	// Count container restarts from pod status (available from all sources)
-	for _, pod := range pods {
-		for _, cs := range pod.Status.ContainerStatuses {
-			// Only count recent restarts (rough approximation - actual time filtering
-			// would require tracking restart timestamps)
-			summary.ContainerRestarts1h += int(cs.RestartCount)
-		}
 	}
 
 	// Count node pressures

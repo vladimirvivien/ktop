@@ -169,32 +169,43 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 		}
 
 		// === Stats row ===
-		if p.prometheusMode {
-			// Prometheus mode: show container count instead of jobs/sets
-			statsText := fmt.Sprintf(
-				"[yellow]Uptime: [white]%s [yellow]│ Nodes: [white]%d [yellow]│ Pods: [white]%d/%d [yellow]│ Deploys: [white]%d/%d [yellow]│ NS: [white]%d [yellow]│ Containers: [white]%d",
-				duration.HumanDuration(time.Since(summary.Uptime.Time)),
-				summary.NodesReady,
-				summary.PodsRunning, summary.PodsAvailable,
-				summary.DeploymentsReady, summary.DeploymentsTotal,
-				summary.Namespaces,
-				summary.ContainerCount,
-			)
-			p.statsView.SetText(statsText)
-		} else {
-			// Metrics Server mode: original stats
-			statsText := fmt.Sprintf(
-				"[yellow]Uptime: [white]%s [yellow]│ Nodes: [white]%d [yellow]│ Pods: [white]%d/%d [yellow]│ Deploys: [white]%d/%d [yellow]│ NS: [white]%d [yellow]│ Jobs: [white]%d [yellow]│ Sets: [white]r%d d%d s%d",
-				duration.HumanDuration(time.Since(summary.Uptime.Time)),
-				summary.NodesReady,
-				summary.PodsRunning, summary.PodsAvailable,
-				summary.DeploymentsReady, summary.DeploymentsTotal,
-				summary.Namespaces,
-				summary.JobsCount,
-				summary.ReplicaSetsReady, summary.DaemonSetsReady, summary.StatefulSetsReady,
-			)
-			p.statsView.SetText(statsText)
+		// Color code Deploys ratio: >= 80% green, > 50% yellow, <= 50% red
+		deploysColor := "green"
+		if summary.DeploymentsTotal > 0 {
+			deploysRatio := float64(summary.DeploymentsReady) / float64(summary.DeploymentsTotal)
+			if deploysRatio <= 0.5 {
+				deploysColor = "red"
+			} else if deploysRatio < 0.8 {
+				deploysColor = "yellow"
+			}
 		}
+
+		// Color code Pods ratio: >= 80% green, > 50% yellow, <= 50% red
+		podsColor := "green"
+		if summary.PodsAvailable > 0 {
+			podsRatio := float64(summary.PodsRunning) / float64(summary.PodsAvailable)
+			if podsRatio <= 0.5 {
+				podsColor = "red"
+			} else if podsRatio < 0.8 {
+				podsColor = "yellow"
+			}
+		}
+
+		// Stats format is the same for both modes
+		statsText := fmt.Sprintf(
+			"[yellow]Uptime: [white]%s [yellow]│ Nodes: [white]%d [yellow]│ NS: [white]%d [yellow]│ Deploys: [%s]%d/%d [yellow]│ Pods: [%s]%d/%d [yellow]│ Containers: [white]%d [yellow]│ Imgs: [white]%d [yellow]│ Vols: [white]%d [yellow]│ PVs: [white]%d (%s) [yellow]│ PVCs: [white]%d (%s)",
+			duration.HumanDuration(time.Since(summary.Uptime.Time)),
+			summary.NodesReady,
+			summary.Namespaces,
+			deploysColor, summary.DeploymentsReady, summary.DeploymentsTotal,
+			podsColor, summary.PodsRunning, summary.PodsAvailable,
+			summary.ContainerCount,
+			summary.ImagesCount,
+			summary.VolumesInUse,
+			summary.PVCount, ui.FormatMemory(summary.PVsTotal),
+			summary.PVCCount, ui.FormatMemory(summary.PVCsTotal),
+		)
+		p.statsView.SetText(statsText)
 
 		// === CPU and MEM sparklines ===
 		var cpuValue, cpuTotal int64
@@ -336,10 +347,20 @@ func (p *clusterSummaryPanel) drawEnhancedStats(summary model.ClusterSummary) {
 
 	// Color-code health indicators
 	restartsColor := "green"
-	if summary.ContainerRestarts1h > 10 {
+	if summary.ContainerRestarts > 100 {
 		restartsColor = "red"
-	} else if summary.ContainerRestarts1h > 5 {
+	} else if summary.ContainerRestarts > 50 {
 		restartsColor = "yellow"
+	}
+
+	failuresColor := "green"
+	if summary.FailedPods > 0 {
+		failuresColor = "red"
+	}
+
+	evictedColor := "green"
+	if summary.EvictedPods > 0 {
+		evictedColor = "yellow"
 	}
 
 	oomColor := "green"
@@ -360,8 +381,10 @@ func (p *clusterSummaryPanel) drawEnhancedStats(summary model.ClusterSummary) {
 	}
 
 	enhancedText := fmt.Sprintf(
-		"[yellow]Restarts: [%s]%d (1h)[yellow] │ OOMKills: [%s]%d[yellow] │ Pressure: [%s]%d[yellow] │ Throttled: [%s]%.1f%%",
-		restartsColor, summary.ContainerRestarts1h,
+		"[yellow]Restarts: [%s]%d[yellow] │ Failures: [%s]%d[yellow] │ Evicted: [%s]%d[yellow] │ OOMKills: [%s]%d[yellow] │ Pressure: [%s]%d[yellow] │ Throttled: [%s]%.1f%%",
+		restartsColor, summary.ContainerRestarts,
+		failuresColor, summary.FailedPods,
+		evictedColor, summary.EvictedPods,
 		oomColor, summary.OOMKillCount,
 		pressureColor, summary.NodePressureCount,
 		throttledColor, summary.CPUThrottledPercent,
