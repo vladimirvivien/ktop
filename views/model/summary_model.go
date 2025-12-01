@@ -57,9 +57,11 @@ type ClusterSummary struct {
 	DiskWriteRate  float64 // Bytes/sec written
 
 	// Health indicators
-	ContainerRestarts1h int     // Container restarts in last hour
-	OOMKillCount        int     // OOM kills in last hour
-	NodePressureCount   int     // Nodes with memory/disk/PID pressure
+	ContainerRestarts int     // Total container restarts (cumulative)
+	FailedPods        int     // Pods in Failed state
+	EvictedPods       int     // Pods that were evicted
+	OOMKillCount      int     // OOM kills
+	NodePressureCount int     // Nodes with memory/disk/PID pressure
 	CPUThrottledPercent float64 // Avg CPU throttling across containers
 
 	// Load averages (cluster-wide average)
