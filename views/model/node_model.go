@@ -30,6 +30,9 @@ type NodeModel struct {
 	ContainerImagesCount int
 	VolumesInUse         int
 	VolumesAttached      int
+	TaintCount           int
+	Unschedulable        bool
+	Restarts             int
 
 	KubeletVersion          string
 	OS                      string
@@ -66,6 +69,8 @@ func NewNodeModel(node *coreV1.Node, metrics *v1beta1.NodeMetrics) *NodeModel {
 		ContainerImagesCount: len(node.Status.Images),
 		VolumesAttached:      len(node.Status.VolumesAttached),
 		VolumesInUse:         len(node.Status.VolumesInUse),
+		TaintCount:           len(node.Spec.Taints),
+		Unschedulable:        node.Spec.Unschedulable,
 
 		KubeletVersion:          node.Status.NodeInfo.KubeletVersion,
 		ContainerRuntimeVersion: node.Status.NodeInfo.ContainerRuntimeVersion,
@@ -170,24 +175,7 @@ func SortNodeModelsBy(nodes []NodeModel, column string, ascending bool) {
 			return nodes[i].Status > nodes[j].Status
 		}
 
-	case "AGE":
-		sortFunc = func(i, j int) bool {
-			// Older nodes first (earlier creation time)
-			if nodes[i].CreationTime.Equal(&nodes[j].CreationTime) {
-				return nodes[i].Name < nodes[j].Name
-			}
-			return nodes[i].CreationTime.Before(&nodes[j].CreationTime)
-		}
-
-	case "VERSION":
-		sortFunc = func(i, j int) bool {
-			if nodes[i].KubeletVersion == nodes[j].KubeletVersion {
-				return nodes[i].Name < nodes[j].Name
-			}
-			return nodes[i].KubeletVersion < nodes[j].KubeletVersion
-		}
-
-	case "INT/EXT IPs":
+	case "IP":
 		sortFunc = func(i, j int) bool {
 			if nodes[i].InternalIP == nodes[j].InternalIP {
 				return nodes[i].Name < nodes[j].Name
@@ -195,25 +183,47 @@ func SortNodeModelsBy(nodes []NodeModel, column string, ascending bool) {
 			return nodes[i].InternalIP < nodes[j].InternalIP
 		}
 
-	case "OS/ARC":
-		sortFunc = func(i, j int) bool {
-			osArcI := nodes[i].OSImage + "/" + nodes[i].Architecture
-			osArcJ := nodes[j].OSImage + "/" + nodes[j].Architecture
-			if osArcI == osArcJ {
-				return nodes[i].Name < nodes[j].Name
-			}
-			return osArcI < osArcJ
-		}
-
-	case "PODS/IMGs":
+	case "PODS":
 		sortFunc = func(i, j int) bool {
 			if nodes[i].PodsCount == nodes[j].PodsCount {
-				if nodes[i].ContainerImagesCount == nodes[j].ContainerImagesCount {
-					return nodes[i].Name < nodes[j].Name
-				}
-				return nodes[i].ContainerImagesCount < nodes[j].ContainerImagesCount
+				return nodes[i].Name < nodes[j].Name
 			}
 			return nodes[i].PodsCount < nodes[j].PodsCount
+		}
+
+	case "TAINTS":
+		sortFunc = func(i, j int) bool {
+			if nodes[i].TaintCount == nodes[j].TaintCount {
+				return nodes[i].Name < nodes[j].Name
+			}
+			return nodes[i].TaintCount < nodes[j].TaintCount
+		}
+
+	case "PRESSURE":
+		sortFunc = func(i, j int) bool {
+			// Nodes with pressure sort after nodes without
+			pressureI := len(nodes[i].Pressures)
+			pressureJ := len(nodes[j].Pressures)
+			if pressureI == pressureJ {
+				return nodes[i].Name < nodes[j].Name
+			}
+			return pressureI < pressureJ
+		}
+
+	case "RST":
+		sortFunc = func(i, j int) bool {
+			if nodes[i].Restarts == nodes[j].Restarts {
+				return nodes[i].Name < nodes[j].Name
+			}
+			return nodes[i].Restarts < nodes[j].Restarts
+		}
+
+	case "VOLS":
+		sortFunc = func(i, j int) bool {
+			if nodes[i].VolumesInUse == nodes[j].VolumesInUse {
+				return nodes[i].Name < nodes[j].Name
+			}
+			return nodes[i].VolumesInUse < nodes[j].VolumesInUse
 		}
 
 	case "DISK":

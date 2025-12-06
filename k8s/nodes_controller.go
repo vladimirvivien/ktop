@@ -66,6 +66,10 @@ func (c *Controller) GetNodeModels(ctx context.Context) (models []model.NodeMode
 			summary := model.GetPodContainerSummary(pod)
 			nodeModel.RequestedPodMemQty.Add(*summary.RequestedMemQty)
 			nodeModel.RequestedPodCpuQty.Add(*summary.RequestedCpuQty)
+			// Aggregate container restarts for this node
+			for _, cs := range pod.Status.ContainerStatuses {
+				nodeModel.Restarts += int(cs.RestartCount)
+			}
 		}
 
 		models = append(models, *nodeModel)

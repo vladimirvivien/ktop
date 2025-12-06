@@ -58,7 +58,7 @@ func NewWithColumnOptions(app *application.Application, title string, showAllCol
 
 func (p *MainPanel) Layout(data interface{}) {
 	// Define the default columns
-	allNodeColumns := []string{"NAME", "STATUS", "AGE", "VERSION", "INT/EXT IPs", "OS/ARC", "PODS/IMGs", "DISK", "CPU", "MEM"}
+	allNodeColumns := []string{"NAME", "STATUS", "RST", "PODS", "TAINTS", "PRESSURE", "IP", "VOLS", "DISK", "CPU", "MEM"}
 	allPodColumns := []string{"NAMESPACE", "POD", "READY", "STATUS", "RST", "AGE", "VOLS", "IP", "NODE", "CPU", "MEMORY"}
 
 	// Use filtered columns if specified
