@@ -141,16 +141,17 @@ func (p *nodePanel) formatColumnHeader(col string) string {
 
 	// Map column name to keyboard shortcut key
 	columnToKey := map[string]rune{
-		"NAME":        'n',
-		"STATUS":      's',
-		"AGE":         'a',
-		"VERSION":     'v',
-		"INT/EXT IPs": 'i',
-		"OS/ARC":      'o',
-		"PODS/IMGs":   'p',
-		"DISK":        'd',
-		"CPU":         'c',
-		"MEM":         'm',
+		"NAME":     'n',
+		"STATUS":   'a',
+		"RST":      'r',
+		"IP":       'i',
+		"PODS":     'p',
+		"TAINTS":   't',
+		"PRESSURE": 's',
+		"VOLS":     'v',
+		"DISK":     'd',
+		"CPU":      'c',
+		"MEM":      'm',
 	}
 
 	// Find the shortcut key for this column
@@ -283,12 +284,13 @@ func (p *nodePanel) handleSortKey(key rune) bool {
 	// Map keyboard shortcuts to column names
 	keyToColumn := map[rune]string{
 		'n': "NAME",
-		's': "STATUS",
-		'a': "AGE",
-		'v': "VERSION",
-		'i': "INT/EXT IPs",
-		'o': "OS/ARC",
-		'p': "PODS/IMGs",
+		'a': "STATUS",
+		'r': "RST",
+		'i': "IP",
+		'p': "PODS",
+		't': "TAINTS",
+		's': "PRESSURE",
+		'v': "VOLS",
 		'd': "DISK",
 		'c': "CPU",
 		'm': "MEM",
@@ -394,11 +396,21 @@ func (p *nodePanel) DrawBody(data interface{}) {
 
 			switch colName {
 			case "NAME":
+				// Gray color for cordoned (unschedulable) nodes
+				nameColor := rowColor
+				if node.Unschedulable {
+					nameColor = tcell.ColorGray
+				}
+				// Truncate long names to 20 chars
+				name := node.Name
+				if len(name) > 20 {
+					name = name[:17] + "..."
+				}
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  node.Name,
-						Color: rowColor,
+						Text:  fmt.Sprintf("%-20s", name),
+						Color: nameColor,
 						Align: tview.AlignLeft,
 					},
 				)
@@ -409,67 +421,98 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  node.Status,
+						Text:  fmt.Sprintf("%-8s", node.Status),
 						Color: statusColor,
 						Align: tview.AlignLeft,
 					},
 				)
 
-			case "AGE":
+			case "RST":
+				// Restarts: green if 0, yellow if >0
+				rstColor := tcell.ColorGreen
+				if node.Restarts > 0 {
+					rstColor = tcell.ColorYellow
+				}
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  node.TimeSinceStart,
+						Text:  fmt.Sprintf("%-4d", node.Restarts),
+						Color: rstColor,
+						Align: tview.AlignLeft,
+					},
+				)
+
+			case "IP":
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:  fmt.Sprintf("%-15s", node.InternalIP),
 						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
 
-			case "VERSION":
+			case "PODS":
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  node.KubeletVersion,
+						Text:  fmt.Sprintf("%-4d", node.PodsCount),
 						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
 
-			case "INT/EXT IPs":
+			case "TAINTS":
+				// Yellow if taints > 0, green otherwise
+				taintsColor := tcell.ColorGreen
+				if node.TaintCount > 0 {
+					taintsColor = tcell.ColorYellow
+				}
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%s/%s", node.InternalIP, node.ExternalIP),
-						Color: rowColor,
+						Text:  fmt.Sprintf("%-3d", node.TaintCount),
+						Color: taintsColor,
 						Align: tview.AlignLeft,
 					},
 				)
 
-			case "OS/ARC":
+			case "PRESSURE":
+				// Red if any pressure, green if none
+				var pressureText string
+				pressureColor := tcell.ColorGreen
+				if len(node.Pressures) == 0 {
+					pressureText = "none"
+				} else {
+					pressureText = strings.Join(node.Pressures, "/")
+					pressureColor = tcell.ColorRed
+				}
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%s/%s", node.OSImage, node.Architecture),
-						Color: rowColor,
+						Text:  fmt.Sprintf("%-12s", pressureText),
+						Color: pressureColor,
 						Align: tview.AlignLeft,
 					},
 				)
 
-			case "PODS/IMGs":
+			case "VOLS":
+				volsText := fmt.Sprintf("%d/%d", node.VolumesInUse, node.VolumesAttached)
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%d/%d", node.PodsCount, node.ContainerImagesCount),
+						Text:  fmt.Sprintf("%-5s", volsText),
 						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
 				)
 
 			case "DISK":
+				diskText := fmt.Sprintf("%dGi", node.AllocatableStorageQty.ScaledValue(resource.Giga))
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%dGi", node.AllocatableStorageQty.ScaledValue(resource.Giga)),
+						Text:  fmt.Sprintf("%-7s", diskText),
 						Color: rowColor,
 						Align: tview.AlignLeft,
 					},
@@ -580,15 +623,19 @@ func (p *nodePanel) SetFocused(focused bool) {
 
 // getNodeCells extracts text values from a node model for filter matching
 func (p *nodePanel) getNodeCells(node model.NodeModel) []string {
+	pressureText := "none"
+	if len(node.Pressures) > 0 {
+		pressureText = strings.Join(node.Pressures, "/")
+	}
 	return []string{
 		node.Name,
 		node.Status,
-		node.TimeSinceStart,
-		node.KubeletVersion,
+		fmt.Sprintf("%d", node.Restarts),
 		node.InternalIP,
-		node.ExternalIP,
-		node.OSImage,
-		node.Architecture,
+		fmt.Sprintf("%d", node.PodsCount),
+		fmt.Sprintf("%d", node.TaintCount),
+		pressureText,
+		fmt.Sprintf("%d/%d", node.VolumesInUse, node.VolumesAttached),
 	}
 }
 
