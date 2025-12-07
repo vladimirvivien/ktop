@@ -2,10 +2,28 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/vladimirvivien/ktop/prom"
 )
+
+// ValidMetricsSources maps input values to canonical names
+var ValidMetricsSources = map[string]string{
+	"prom":           "prometheus",
+	"prometheus":     "prometheus",
+	"metrics-server": "metrics-server",
+	"none":           "none",
+}
+
+// NormalizeMetricsSource converts aliases to canonical names
+func NormalizeMetricsSource(source string) (string, error) {
+	normalized, ok := ValidMetricsSources[strings.ToLower(source)]
+	if !ok {
+		return "", fmt.Errorf("invalid metrics source: %s (valid: prom, prometheus, metrics-server, none)", source)
+	}
+	return normalized, nil
+}
 
 // Config holds the complete application configuration
 type Config struct {
@@ -27,11 +45,11 @@ type PrometheusConfig struct {
 }
 
 // DefaultConfig returns the default configuration
-// Default source is metrics-server for backward compatibility
+// Default source is prometheus with automatic fallback to metrics-server then none
 func DefaultConfig() *Config {
 	return &Config{
 		Source: SourceConfig{
-			Type: "metrics-server",
+			Type: "prometheus",
 		},
 		Prometheus: PrometheusConfig{
 			ScrapeInterval: 5 * time.Second,
@@ -47,10 +65,12 @@ func DefaultConfig() *Config {
 
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
-	// Validate source type
-	if c.Source.Type != "metrics-server" && c.Source.Type != "prometheus" && c.Source.Type != "none" {
-		return fmt.Errorf("invalid metrics-source: %s (must be 'metrics-server', 'prometheus', or 'none')", c.Source.Type)
+	// Validate and normalize source type
+	normalized, err := NormalizeMetricsSource(c.Source.Type)
+	if err != nil {
+		return err
 	}
+	c.Source.Type = normalized
 
 	// Validate Prometheus config if prometheus source is selected
 	if c.Source.Type == "prometheus" {

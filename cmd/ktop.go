@@ -17,6 +17,7 @@ import (
 	promMetrics "github.com/vladimirvivien/ktop/metrics/prom"
 	"github.com/vladimirvivien/ktop/views/overview"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/rest"
 )
 
 var (
@@ -80,8 +81,8 @@ func NewKtopCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&o.showAllColumns, "show-all-columns", true, "If true, show all columns (default)")
 
 	// Metrics source flags
-	cmd.Flags().StringVar(&o.metricsSource, "metrics-source", "metrics-server",
-		"Metrics source: 'metrics-server' (default) or 'prometheus'")
+	cmd.Flags().StringVar(&o.metricsSource, "metrics-source", "prometheus",
+		"Metrics source: 'prom'/'prometheus' (default), 'metrics-server', 'none'")
 	cmd.Flags().StringVar(&o.prometheusScrapeInterval, "prometheus-scrape-interval", "5s",
 		"Prometheus scrape interval (e.g., 10s, 30s, 1m)")
 	cmd.Flags().StringVar(&o.prometheusRetention, "prometheus-retention", "1h",
@@ -94,6 +95,66 @@ func NewKtopCmd() *cobra.Command {
 
 	o.kubeFlags.AddFlags(cmd.Flags())
 	return cmd
+}
+
+// tryPrometheus attempts to create, start, and verify a prometheus metrics source.
+// It performs a test scrape to verify connectivity before returning.
+func tryPrometheus(ctx context.Context, restConfig *rest.Config, cfg *promMetrics.PromConfig) (*promMetrics.PromMetricsSource, error) {
+	source, err := promMetrics.NewPromMetricsSource(restConfig, cfg)
+	if err != nil {
+		return nil, err
+	}
+	if err := source.Start(ctx); err != nil {
+		source.Stop()
+		return nil, err
+	}
+	// Verify connectivity with a test scrape
+	if err := source.TestConnection(ctx); err != nil {
+		source.Stop()
+		return nil, err
+	}
+	return source, nil
+}
+
+// selectMetricsSource selects and initializes the metrics source.
+// When enableFallback is true and prometheus fails, it falls back to metrics-server.
+func selectMetricsSource(
+	ctx context.Context,
+	sourceType string,
+	k8sC *k8s.Client,
+	promConfig *promMetrics.PromConfig,
+	enableFallback bool,
+) (metrics.MetricsSource, *promMetrics.PromMetricsSource, error) {
+	switch sourceType {
+	case "prometheus":
+		fmt.Print("Connecting to Prometheus... ")
+		promSource, err := tryPrometheus(ctx, k8sC.RESTConfig(), promConfig)
+		if err == nil {
+			fmt.Println("✓")
+			return promSource, promSource, nil
+		}
+		fmt.Println("✗")
+		if !enableFallback {
+			return nil, nil, fmt.Errorf("prometheus not available: %v", err)
+		}
+		fmt.Print("Falling back to Metrics Server... ")
+		source := k8sMetrics.NewMetricsServerSource(k8sC.Controller())
+		fmt.Println("✓")
+		return source, nil, nil
+
+	case "metrics-server":
+		fmt.Print("Connecting to Metrics Server... ")
+		source := k8sMetrics.NewMetricsServerSource(k8sC.Controller())
+		fmt.Println("✓")
+		return source, nil, nil
+
+	case "none":
+		fmt.Println("Using metrics source: None")
+		return nil, nil, nil
+
+	default:
+		return nil, nil, fmt.Errorf("unknown metrics source: %s", sourceType)
+	}
 }
 
 func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
@@ -150,49 +211,23 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	fmt.Printf("Connected to: %s\n", k8sC.RESTConfig().Host)
 
 	// Initialize metrics source based on configuration
-	var metricsSource metrics.MetricsSource
+	// Fallback is enabled only when using default (not explicitly set)
+	enableFallback := !c.Flags().Changed("metrics-source")
 
-	switch cfg.Source.Type {
-	case "metrics-server":
-		fmt.Println("Using metrics source: Metrics Server")
-		// MetricsServerSource uses the existing k8s.Controller
-		// It already has graceful fallback to requests/limits built-in
-		controller := k8sC.Controller()
-		metricsSource = k8sMetrics.NewMetricsServerSource(controller)
+	promConfig := &promMetrics.PromConfig{
+		Enabled:        true,
+		ScrapeInterval: cfg.Prometheus.ScrapeInterval,
+		RetentionTime:  cfg.Prometheus.RetentionTime,
+		MaxSamples:     cfg.Prometheus.MaxSamples,
+		Components:     cfg.Prometheus.Components,
+	}
 
-	case "prometheus":
-		fmt.Println("Using metrics source: Prometheus")
-
-		// Create Prometheus configuration
-		promConfig := &promMetrics.PromConfig{
-			Enabled:        true,
-			ScrapeInterval: cfg.Prometheus.ScrapeInterval,
-			RetentionTime:  cfg.Prometheus.RetentionTime,
-			MaxSamples:     cfg.Prometheus.MaxSamples,
-			Components:     cfg.Prometheus.Components,
-		}
-
-		// Create Prometheus metrics source
-		promSource, err := promMetrics.NewPromMetricsSource(k8sC.RESTConfig(), promConfig)
-		if err != nil {
-			return fmt.Errorf("failed to create prometheus source: %w", err)
-		}
-
-		// Start Prometheus collection
-		if err := promSource.Start(ctx); err != nil {
-			return fmt.Errorf("failed to start prometheus collection: %w", err)
-		}
+	metricsSource, promSource, err := selectMetricsSource(ctx, cfg.Source.Type, k8sC, promConfig, enableFallback)
+	if err != nil {
+		return err
+	}
+	if promSource != nil {
 		defer promSource.Stop()
-
-		metricsSource = promSource
-
-	case "none":
-		fmt.Println("Using metrics source: None (fallback mode)")
-		fmt.Println("Displaying resource requests/limits only")
-		// metricsSource remains nil - application will use fallback mode
-
-	default:
-		return fmt.Errorf("unknown metrics source: %s", cfg.Source.Type)
 	}
 
 	app := application.New(k8sC, metricsSource)

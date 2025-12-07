@@ -15,8 +15,8 @@ func TestDefaultConfig(t *testing.T) {
 	}
 
 	// Verify source defaults
-	if cfg.Source.Type != "metrics-server" {
-		t.Errorf("Expected default source 'metrics-server', got '%s'", cfg.Source.Type)
+	if cfg.Source.Type != "prometheus" {
+		t.Errorf("Expected default source 'prometheus', got '%s'", cfg.Source.Type)
 	}
 
 	// Verify Prometheus defaults
@@ -96,7 +96,7 @@ func TestValidate_InvalidSource(t *testing.T) {
 		t.Error("Expected error for invalid source type")
 	}
 
-	expectedMsg := "invalid metrics-source: invalid-source (must be 'metrics-server', 'prometheus', or 'none')"
+	expectedMsg := "invalid metrics source: invalid-source (valid: prom, prometheus, metrics-server, none)"
 	if err != nil && err.Error() != expectedMsg {
 		t.Errorf("Expected error message '%s', got '%s'", expectedMsg, err.Error())
 	}
@@ -364,6 +364,74 @@ func TestComponentsToStrings(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestNormalizeMetricsSource(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    string
+		expected string
+		wantErr  bool
+	}{
+		{name: "prometheus", input: "prometheus", expected: "prometheus", wantErr: false},
+		{name: "prom alias", input: "prom", expected: "prometheus", wantErr: false},
+		{name: "PROM uppercase", input: "PROM", expected: "prometheus", wantErr: false},
+		{name: "Prometheus mixed case", input: "Prometheus", expected: "prometheus", wantErr: false},
+		{name: "metrics-server", input: "metrics-server", expected: "metrics-server", wantErr: false},
+		{name: "METRICS-SERVER uppercase", input: "METRICS-SERVER", expected: "metrics-server", wantErr: false},
+		{name: "none", input: "none", expected: "none", wantErr: false},
+		{name: "NONE uppercase", input: "NONE", expected: "none", wantErr: false},
+		{name: "invalid", input: "invalid", expected: "", wantErr: true},
+		{name: "empty", input: "", expected: "", wantErr: true},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := NormalizeMetricsSource(tc.input)
+
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("Expected error for input '%s', got nil", tc.input)
+				}
+				return
+			}
+
+			if err != nil {
+				t.Errorf("Unexpected error for input '%s': %v", tc.input, err)
+				return
+			}
+
+			if result != tc.expected {
+				t.Errorf("Expected '%s' for input '%s', got '%s'", tc.expected, tc.input, result)
+			}
+		})
+	}
+}
+
+func TestValidate_NormalizesSource(t *testing.T) {
+	// Test that Validate normalizes the source type
+	cfg := &Config{
+		Source: SourceConfig{
+			Type: "prom", // alias
+		},
+		Prometheus: PrometheusConfig{
+			ScrapeInterval: 15 * time.Second,
+			RetentionTime:  1 * time.Hour,
+			MaxSamples:     10000,
+			Components: []prom.ComponentType{
+				prom.ComponentKubelet,
+			},
+		},
+	}
+
+	err := cfg.Validate()
+	if err != nil {
+		t.Errorf("Expected valid config, got error: %v", err)
+	}
+
+	if cfg.Source.Type != "prometheus" {
+		t.Errorf("Expected Source.Type to be normalized to 'prometheus', got '%s'", cfg.Source.Type)
 	}
 }
 

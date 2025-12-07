@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 )
 
 // Start initializes and starts the metrics collection controller
@@ -56,6 +59,50 @@ func (cc *CollectorController) Stop() error {
 	cc.running = false
 
 	// Cleanup would be handled by context cancellation
+	return nil
+}
+
+// TestScrape performs a quick test to verify connectivity to prometheus endpoints.
+// It makes a direct API call to test RBAC permissions for nodes/proxy.
+// Returns nil if the metrics endpoints are accessible.
+func (cc *CollectorController) TestScrape(ctx context.Context) error {
+	cc.mutex.RLock()
+	if !cc.running {
+		cc.mutex.RUnlock()
+		return fmt.Errorf("controller is not running")
+	}
+	kubeConfig := cc.kubeConfig
+	cc.mutex.RUnlock()
+
+	// Create a quick client to test connectivity
+	clientset, err := kubernetes.NewForConfig(kubeConfig)
+	if err != nil {
+		return fmt.Errorf("creating test client: %w", err)
+	}
+
+	// List nodes to get a node name for testing
+	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{Limit: 1})
+	if err != nil {
+		return fmt.Errorf("listing nodes: %w", err)
+	}
+	if len(nodes.Items) == 0 {
+		return fmt.Errorf("no nodes found in cluster")
+	}
+
+	nodeName := nodes.Items[0].Name
+
+	// Test access to node/proxy metrics endpoint (required for prometheus scraping)
+	req := clientset.CoreV1().RESTClient().Get().
+		Resource("nodes").
+		Name(nodeName).
+		SubResource("proxy").
+		Suffix("metrics")
+
+	_, err = req.DoRaw(ctx)
+	if err != nil {
+		return fmt.Errorf("cannot access node metrics (check RBAC for nodes/proxy): %w", err)
+	}
+
 	return nil
 }
 
