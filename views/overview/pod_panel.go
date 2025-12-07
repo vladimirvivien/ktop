@@ -365,9 +365,10 @@ func (p *podPanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  pod.Namespace,
-						Color: rowColor,
-						Align: tview.AlignLeft,
+						Text:     pod.Namespace,
+						Color:    rowColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 14,
 					},
 				)
 
@@ -375,9 +376,10 @@ func (p *podPanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  pod.Name,
-						Color: rowColor,
-						Align: tview.AlignLeft,
+						Text:     pod.Name,
+						Color:    rowColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 36,
 					},
 				)
 
@@ -385,9 +387,10 @@ func (p *podPanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%d/%d", pod.ReadyContainers, pod.TotalContainers),
-						Color: rowColor,
-						Align: tview.AlignLeft,
+						Text:     fmt.Sprintf("%d/%d", pod.ReadyContainers, pod.TotalContainers),
+						Color:    rowColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 5,
 					},
 				)
 
@@ -397,9 +400,10 @@ func (p *podPanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  pod.Status,
-						Color: statusColor,
-						Align: tview.AlignLeft,
+						Text:     pod.Status,
+						Color:    statusColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 11,
 					},
 				)
 
@@ -407,9 +411,10 @@ func (p *podPanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%-4d", pod.Restarts),
-						Color: rowColor,
-						Align: tview.AlignLeft,
+						Text:     fmt.Sprintf("%d", pod.Restarts),
+						Color:    rowColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 4,
 					},
 				)
 
@@ -417,9 +422,10 @@ func (p *podPanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  pod.TimeSince,
-						Color: rowColor,
-						Align: tview.AlignLeft,
+						Text:     pod.TimeSince,
+						Color:    rowColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 5,
 					},
 				)
 
@@ -427,9 +433,10 @@ func (p *podPanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%d/%d", pod.Volumes, pod.VolMounts),
-						Color: rowColor,
-						Align: tview.AlignLeft,
+						Text:     fmt.Sprintf("%d/%d", pod.Volumes, pod.VolMounts),
+						Color:    rowColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 5,
 					},
 				)
 
@@ -437,9 +444,10 @@ func (p *podPanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  pod.IP,
-						Color: rowColor,
-						Align: tview.AlignLeft,
+						Text:     pod.IP,
+						Color:    rowColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 15,
 					},
 				)
 
@@ -447,9 +455,10 @@ func (p *podPanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  pod.Node,
-						Color: rowColor,
-						Align: tview.AlignLeft,
+						Text:     pod.Node,
+						Color:    rowColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 16,
 					},
 				)
 

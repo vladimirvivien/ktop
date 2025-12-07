@@ -401,17 +401,13 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				if node.Unschedulable {
 					nameColor = tcell.ColorGray
 				}
-				// Truncate long names to 20 chars
-				name := node.Name
-				if len(name) > 20 {
-					name = name[:17] + "..."
-				}
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%-20s", name),
-						Color: nameColor,
-						Align: tview.AlignLeft,
+						Text:     node.Name,
+						Color:    nameColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 20,
 					},
 				)
 
@@ -421,9 +417,10 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%-8s", node.Status),
-						Color: statusColor,
-						Align: tview.AlignLeft,
+						Text:     node.Status,
+						Color:    statusColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 8,
 					},
 				)
 
@@ -436,9 +433,10 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%-4d", node.Restarts),
-						Color: rstColor,
-						Align: tview.AlignLeft,
+						Text:     fmt.Sprintf("%d", node.Restarts),
+						Color:    rstColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 5,
 					},
 				)
 
@@ -446,9 +444,10 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%-15s", node.InternalIP),
-						Color: rowColor,
-						Align: tview.AlignLeft,
+						Text:     node.InternalIP,
+						Color:    rowColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 15,
 					},
 				)
 
@@ -456,9 +455,10 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%-4d", node.PodsCount),
-						Color: rowColor,
-						Align: tview.AlignLeft,
+						Text:     fmt.Sprintf("%d", node.PodsCount),
+						Color:    rowColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 5,
 					},
 				)
 
@@ -471,9 +471,10 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%-3d", node.TaintCount),
-						Color: taintsColor,
-						Align: tview.AlignLeft,
+						Text:     fmt.Sprintf("%d", node.TaintCount),
+						Color:    taintsColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 4,
 					},
 				)
 
@@ -490,9 +491,10 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%-12s", pressureText),
-						Color: pressureColor,
-						Align: tview.AlignLeft,
+						Text:     pressureText,
+						Color:    pressureColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 12,
 					},
 				)
 
@@ -501,9 +503,10 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%-5s", volsText),
-						Color: rowColor,
-						Align: tview.AlignLeft,
+						Text:     volsText,
+						Color:    rowColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 5,
 					},
 				)
 
@@ -512,9 +515,10 @@ func (p *nodePanel) DrawBody(data interface{}) {
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:  fmt.Sprintf("%-7s", diskText),
-						Color: rowColor,
-						Align: tview.AlignLeft,
+						Text:     diskText,
+						Color:    rowColor,
+						Align:    tview.AlignLeft,
+						MaxWidth: 7,
 					},
 				)
 

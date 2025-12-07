@@ -582,10 +582,26 @@ func (app *Application) buildHeaderString(namespaceDisplay string) string {
 
 	client := app.GetK8sClient()
 
+	// Truncate long values to prevent header overflow
+	context := truncateString(client.ClusterName(), 25)
+	user := truncateString(client.Username(), 20)
+	ns := truncateString(namespaceDisplay, 16)
+
 	return fmt.Sprintf(
 		hdr.String(),
-		client.ClusterName(), client.GetServerVersion(), client.Username(), namespaceDisplay,
+		context, client.GetServerVersion(), user, ns,
 	)
+}
+
+// truncateString truncates a string for header display
+func truncateString(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	if max <= 3 {
+		return s[:max]
+	}
+	return s[:max-3] + "..."
 }
 
 // getNamespaceDisplay returns the namespace display string based on filter state
