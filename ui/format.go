@@ -64,3 +64,14 @@ func FormatBytes(bytes int64) string {
 	}
 	return fmt.Sprintf("%.1fG", float64(bytes)/(1024*1024*1024))
 }
+
+// Truncate truncates a string to max length, adding "..." if truncated
+func Truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	if max <= 3 {
+		return s[:max]
+	}
+	return s[:max-3] + "..."
+}
