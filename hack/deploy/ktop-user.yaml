@@ -1,35 +1,118 @@
+# ktop Test Users
+#
+# This file creates two service accounts for testing ktop:
+#   1. ktop-full - Full access including Prometheus scraping (nodes/proxy)
+#   2. ktop-restricted - Only metrics-server access (no nodes/proxy)
+#
+# Usage:
+#   kubectl apply -f ktop-user.yaml
+#
+# See README.md for kubeconfig generation instructions.
+
+---
+# Namespace for test users
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ktop-test
+
+---
+# =============================================================================
+# FULL ACCESS USER - Can use both Prometheus and metrics-server
+# =============================================================================
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: ktopuser
-  namespace: default
+  name: ktop-full
+  namespace: ktop-test
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
+kind: ClusterRole
 metadata:
-  name: ktopuser-role
-  namespace: default
-rules:          # Authorization rules for this role
-  - apiGroups:  # 1st API group
-      - ''      # An empty string designates the core API group.
-    resources:
-      - services
-      - pods
-      - nodes
-    verbs:
-      - get
-      - list
+  name: ktop-full-access
+rules:
+# Basic Kubernetes resources
+- apiGroups: [""]
+  resources: ["pods", "nodes", "namespaces", "services", "persistentvolumes", "persistentvolumeclaims", "events"]
+  verbs: ["get", "list", "watch"]
+# Deployments and other workloads
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+# Metrics-server access
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+# Prometheus scraping - nodes/proxy (required for kubelet/cAdvisor metrics)
+- apiGroups: [""]
+  resources: ["nodes/proxy"]
+  verbs: ["get"]
+# Prometheus scraping - pods/proxy (required for etcd, scheduler, controller-manager)
+- apiGroups: [""]
+  resources: ["pods/proxy"]
+  verbs: ["get"]
+# API server metrics endpoint
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: ClusterRoleBinding
 metadata:
-  name: ktopuser-role-binding
-  namespace: default
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: ktopuser-role
+  name: ktop-full-access-binding
 subjects:
-  - kind: User
-    name: ktopuser
-    namespace: default
+- kind: ServiceAccount
+  name: ktop-full
+  namespace: ktop-test
+roleRef:
+  kind: ClusterRole
+  name: ktop-full-access
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# =============================================================================
+# RESTRICTED USER - Only metrics-server, NO Prometheus scraping
+# =============================================================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ktop-restricted
+  namespace: ktop-test
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ktop-metrics-server-only
+rules:
+# Basic Kubernetes resources
+- apiGroups: [""]
+  resources: ["pods", "nodes", "namespaces", "services", "persistentvolumes", "persistentvolumeclaims", "events"]
+  verbs: ["get", "list", "watch"]
+# Deployments and other workloads
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets", "daemonsets", "statefulsets"]
+  verbs: ["get", "list", "watch"]
+# Metrics-server access
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods", "nodes"]
+  verbs: ["get", "list"]
+# NOTE: Explicitly NO access to:
+#   - nodes/proxy (required for Prometheus kubelet/cAdvisor scraping)
+#   - pods/proxy (required for Prometheus component scraping)
+#   - /metrics (API server metrics)
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ktop-metrics-server-only-binding
+subjects:
+- kind: ServiceAccount
+  name: ktop-restricted
+  namespace: ktop-test
+roleRef:
+  kind: ClusterRole
+  name: ktop-metrics-server-only
+  apiGroup: rbac.authorization.k8s.io

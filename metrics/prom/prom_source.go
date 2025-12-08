@@ -110,6 +110,12 @@ func (p *PromMetricsSource) Stop() error {
 	return p.controller.Stop()
 }
 
+// TestConnection performs a test scrape to verify connectivity and permissions.
+// Returns nil if the prometheus endpoints are accessible.
+func (p *PromMetricsSource) TestConnection(ctx context.Context) error {
+	return p.controller.TestScrape(ctx)
+}
+
 // calculateCPURate calculates CPU usage rate from counter samples over a time window
 // Returns CPU cores (e.g., 0.1 = 100 millicores)
 // Uses silent fallback - returns error without logging on insufficient samples
