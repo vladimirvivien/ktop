@@ -32,6 +32,7 @@ type Controller struct {
 	podInformer         coreV1Informers.PodInformer
 	pvInformer          coreV1Informers.PersistentVolumeInformer
 	pvcInformer         coreV1Informers.PersistentVolumeClaimInformer
+	eventInformer       coreV1Informers.EventInformer
 
 	jobInformer     batchV1Informers.JobInformer
 	cronJobInformer batchV1Informers.CronJobInformer
@@ -131,6 +132,8 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	pvHasSynced := c.pvInformer.Informer().HasSynced
 	c.pvcInformer = coreInformers.PersistentVolumeClaims()
 	pvcHasSynced := c.pvcInformer.Informer().HasSynced
+	c.eventInformer = coreInformers.Events()
+	eventHasSynced := c.eventInformer.Informer().HasSynced
 
 	// Apps/v1 Informers
 	appsInformers := factory.Apps().V1()
@@ -172,6 +175,7 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 		ok := cache.WaitForCacheSync(ctx.Done(),
 			pvHasSynced,
 			pvcHasSynced,
+			eventHasSynced,
 			deploymentHasSynced,
 			daemonsetHasSynced,
 			replicasetHasSynced,

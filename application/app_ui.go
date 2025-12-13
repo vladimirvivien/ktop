@@ -162,6 +162,21 @@ func (p *appPanel) switchToPage(title string) {
 	p.pages.SwitchToPage(title)
 }
 
+// addDetailPage adds a detail page that can be shown when navigating to resources
+func (p *appPanel) addDetailPage(name string, page tview.Primitive) {
+	p.pages.AddPage(name, page, true, false)
+}
+
+// showDetailPage switches to a detail page
+func (p *appPanel) showDetailPage(name string) {
+	p.pages.SwitchToPage(name)
+}
+
+// getPagesWidget returns the pages widget for external access
+func (p *appPanel) getPagesWidget() *tview.Pages {
+	return p.pages
+}
+
 func (p *appPanel) showModalView(t tview.Primitive) {
 	p.tviewApp.SetRoot(t, false)
 }

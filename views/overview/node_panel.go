@@ -12,6 +12,9 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
+// NodeSelectedCallback is called when a node is selected (Enter pressed)
+type NodeSelectedCallback func(nodeName string)
+
 type nodePanel struct {
 	app         *application.Application
 	title       string
@@ -29,6 +32,9 @@ type nodePanel struct {
 	// Stateful sparklines for smooth sliding animation
 	cpuSparklines map[string]*ui.SparklineState // key: node name
 	memSparklines map[string]*ui.SparklineState
+
+	// Callback for node selection
+	onNodeSelected NodeSelectedCallback
 }
 
 func NewNodePanel(app *application.Application, title string) ui.Panel {
@@ -47,6 +53,38 @@ func NewNodePanel(app *application.Application, title string) ui.Panel {
 
 func (p *nodePanel) GetTitle() string {
 	return p.title
+}
+
+// SetOnNodeSelected sets the callback for when a node is selected (Enter pressed)
+func (p *nodePanel) SetOnNodeSelected(callback NodeSelectedCallback) {
+	p.onNodeSelected = callback
+}
+
+// getNodeNameFromRow returns the node name from the given row index
+func (p *nodePanel) getNodeNameFromRow(row int) string {
+	// Row 0 is header, data starts at row 1
+	// We need to map from displayed row to the filtered data index
+	dataIndex := row - 1 // Subtract 1 for header
+
+	// Get filtered nodes (same logic as DrawBody)
+	var filteredNodes []model.NodeModel
+	if p.filter.IsFiltering() && p.filter.Text != "" {
+		for _, node := range p.currentData {
+			if p.filter.MatchesRow(p.getNodeCells(node)) {
+				filteredNodes = append(filteredNodes, node)
+			}
+		}
+	} else {
+		filteredNodes = p.currentData
+	}
+
+	// Sort the filtered nodes the same way as DrawBody
+	model.SortNodeModelsBy(filteredNodes, p.sortColumn, p.sortAsc)
+
+	if dataIndex >= 0 && dataIndex < len(filteredNodes) {
+		return filteredNodes[dataIndex].Name
+	}
+	return ""
 }
 
 // getSparkline returns an existing sparkline or creates a new one
@@ -113,6 +151,18 @@ func (p *nodePanel) Layout(_ interface{}) {
 				p.filter.StartEditing()
 				p.redrawWithFilter()
 				return nil
+			}
+
+			// Handle Enter key for node selection
+			if event.Key() == tcell.KeyEnter {
+				row, _ := p.list.GetSelection()
+				if row > 0 { // Skip header row
+					nodeName := p.getNodeNameFromRow(row)
+					if nodeName != "" && p.onNodeSelected != nil {
+						p.onNodeSelected(nodeName)
+						return nil
+					}
+				}
 			}
 
 			// Handle sorting shortcuts
