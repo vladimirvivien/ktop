@@ -22,13 +22,13 @@ type PromMetricsSource struct {
 	store      prom.MetricsStore
 	config     *PromConfig
 
-	// Health tracking
-	mu             sync.RWMutex
-	healthy        bool
-	lastError      error
-	errorCount     int
-	lastScrape     time.Time
-	healthCallback func(healthy bool, info metrics.SourceInfo)
+	// Health tracking - per-component to handle concurrent scrapes correctly
+	mu               sync.RWMutex
+	componentHealthy map[prom.ComponentType]bool // Track health per component
+	lastError        error
+	errorCount       int
+	lastScrape       time.Time
+	healthCallback   func(healthy bool, info metrics.SourceInfo)
 }
 
 // PromConfig holds configuration for the Prometheus metrics source
@@ -75,9 +75,9 @@ func NewPromMetricsSource(kubeConfig *rest.Config, config *PromConfig) (*PromMet
 	controller := prom.NewCollectorController(kubeConfig, scrapeConfig)
 
 	source := &PromMetricsSource{
-		controller: controller,
-		config:     config,
-		healthy:    false, // Will be set to true after first successful scrape
+		controller:       controller,
+		config:           config,
+		componentHealthy: make(map[prom.ComponentType]bool), // Track per-component health
 	}
 
 	// Set up callbacks for health monitoring
@@ -305,7 +305,7 @@ func (p *PromMetricsSource) GetNodeMetrics(ctx context.Context, nodeName string)
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	if !p.healthy {
+	if !p.isHealthyLocked() {
 		return nil, fmt.Errorf("prometheus source is not healthy")
 	}
 
@@ -381,7 +381,7 @@ func (p *PromMetricsSource) GetPodMetrics(ctx context.Context, namespace, podNam
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	if !p.healthy {
+	if !p.isHealthyLocked() {
 		return nil, fmt.Errorf("prometheus source is not healthy")
 	}
 
@@ -447,7 +447,7 @@ func (p *PromMetricsSource) GetAllPodMetrics(ctx context.Context) ([]*metrics.Po
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	if !p.healthy {
+	if !p.isHealthyLocked() {
 		return nil, fmt.Errorf("prometheus source is not healthy")
 	}
 
@@ -499,7 +499,13 @@ func (p *PromMetricsSource) GetAvailableMetrics() []string {
 func (p *PromMetricsSource) IsHealthy() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.healthy
+	// Healthy if ANY component is healthy (handles concurrent scrapes correctly)
+	for _, healthy := range p.componentHealthy {
+		if healthy {
+			return true
+		}
+	}
+	return false
 }
 
 // GetSourceInfo returns metadata about the Prometheus source
@@ -518,67 +524,71 @@ func (p *PromMetricsSource) GetSourceInfo() metrics.SourceInfo {
 		LastScrape:   p.lastScrape,
 		MetricsCount: metricCount,
 		ErrorCount:   p.errorCount,
-		Healthy:      p.healthy,
+		Healthy:      p.isHealthyLocked(),
 	}
 }
 
 // SetHealthCallback registers a callback for health state changes.
 // The callback is invoked whenever IsHealthy() would return a different value.
+// Note: The callback is NOT invoked immediately - callers should check IsHealthy()
+// for the initial state and use the callback only for subsequent changes.
 func (p *PromMetricsSource) SetHealthCallback(callback func(healthy bool, info metrics.SourceInfo)) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.healthCallback = callback
 }
 
-// notifyHealthChange invokes the health callback if registered.
+// buildSourceInfoLocked builds SourceInfo while holding the lock.
 // Must be called with p.mu held.
-func (p *PromMetricsSource) notifyHealthChange(newHealthy bool) {
-	if p.healthCallback != nil {
-		// Get metric count while we still have the lock
-		metricCount := 0
-		if p.store != nil {
-			metricCount = len(p.store.GetMetricNames())
-		}
-		info := metrics.SourceInfo{
-			Type:         metrics.SourceTypePrometheus,
-			Version:      "v1.0.0",
-			LastScrape:   p.lastScrape,
-			MetricsCount: metricCount,
-			ErrorCount:   p.errorCount,
-			Healthy:      newHealthy,
-		}
-		// Release lock before calling callback to avoid deadlock
-		cb := p.healthCallback
-		p.mu.Unlock()
-		cb(newHealthy, info)
-		p.mu.Lock()
+func (p *PromMetricsSource) buildSourceInfoLocked(healthy bool) metrics.SourceInfo {
+	metricCount := 0
+	if p.store != nil {
+		metricCount = len(p.store.GetMetricNames())
+	}
+	return metrics.SourceInfo{
+		Type:         metrics.SourceTypePrometheus,
+		Version:      "v1.0.0",
+		LastScrape:   p.lastScrape,
+		MetricsCount: metricCount,
+		ErrorCount:   p.errorCount,
+		Healthy:      healthy,
 	}
 }
 
 // handleError is called when an error occurs during metrics collection
 func (p *PromMetricsSource) handleError(component prom.ComponentType, err error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	var shouldNotify bool
+	var info metrics.SourceInfo
 
+	p.mu.Lock()
 	p.lastError = err
 	p.errorCount++
-	wasHealthy := p.healthy
-	p.healthy = false
 
-	// Notify if state changed
-	if wasHealthy {
-		p.notifyHealthChange(false)
+	// Track health per-component to handle concurrent scrapes correctly
+	wasHealthy := p.isHealthyLocked()
+	p.componentHealthy[component] = false
+	nowHealthy := p.isHealthyLocked()
+
+	// Check if we need to notify (overall state changed from healthy to unhealthy)
+	if wasHealthy && !nowHealthy {
+		shouldNotify = true
+		info = p.buildSourceInfoLocked(false)
+	}
+	p.mu.Unlock()
+
+	// Notify outside the lock to avoid deadlock
+	if shouldNotify && p.healthCallback != nil {
+		p.healthCallback(false, info)
 	}
 }
 
 // handleMetricsCollected is called when metrics are successfully collected
 func (p *PromMetricsSource) handleMetricsCollected(component prom.ComponentType, collectedMetrics *prom.ScrapedMetrics) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	var shouldNotify bool
+	var info metrics.SourceInfo
 
+	p.mu.Lock()
 	p.lastError = nil
-	wasHealthy := p.healthy
-	p.healthy = true
 	p.lastScrape = time.Now()
 
 	// Ensure we have a reference to the store
@@ -586,25 +596,52 @@ func (p *PromMetricsSource) handleMetricsCollected(component prom.ComponentType,
 		p.store = p.controller.GetStore()
 	}
 
-	// Notify if state changed
-	if !wasHealthy {
-		p.notifyHealthChange(true)
+	// Track health per-component to handle concurrent scrapes correctly
+	wasHealthy := p.isHealthyLocked()
+	p.componentHealthy[component] = true
+	nowHealthy := p.isHealthyLocked()
+
+	// Check if we need to notify (overall state changed from unhealthy to healthy)
+	if !wasHealthy && nowHealthy {
+		shouldNotify = true
+		info = p.buildSourceInfoLocked(true)
+	}
+	p.mu.Unlock()
+
+	// Notify outside the lock to avoid deadlock
+	if shouldNotify && p.healthCallback != nil {
+		p.healthCallback(true, info)
 	}
 }
 
-// recordError updates health status after an error
+// recordError updates health status after an error (for non-component errors like Start failure)
 func (p *PromMetricsSource) recordError(err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	p.lastError = err
 	p.errorCount++
-	wasHealthy := p.healthy
-	p.healthy = false
+	// Don't change component health - this is for controller-level errors
+}
 
-	// Notify if state changed
-	if wasHealthy {
-		p.notifyHealthChange(false)
+// isHealthyLocked checks if any component is healthy (must be called with lock held)
+func (p *PromMetricsSource) isHealthyLocked() bool {
+	for _, healthy := range p.componentHealthy {
+		if healthy {
+			return true
+		}
+	}
+	return false
+}
+
+// setHealthyForTesting sets health state for testing purposes (not thread-safe, use only in tests)
+func (p *PromMetricsSource) setHealthyForTesting(healthy bool) {
+	if healthy {
+		// Set at least one component as healthy
+		p.componentHealthy[prom.ComponentKubelet] = true
+	} else {
+		// Clear all component health
+		p.componentHealthy = make(map[prom.ComponentType]bool)
 	}
 }
 
@@ -614,7 +651,7 @@ func (p *PromMetricsSource) GetNodeHistory(ctx context.Context, nodeName string,
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	if !p.healthy {
+	if !p.isHealthyLocked() {
 		return nil, fmt.Errorf("prometheus source is not healthy")
 	}
 
@@ -725,7 +762,7 @@ func (p *PromMetricsSource) GetPodHistory(ctx context.Context, namespace, podNam
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	if !p.healthy {
+	if !p.isHealthyLocked() {
 		return nil, fmt.Errorf("prometheus source is not healthy")
 	}
 

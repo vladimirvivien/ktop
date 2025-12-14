@@ -189,61 +189,75 @@ func (m *MetricsServerSource) GetSourceInfo() metrics.SourceInfo {
 
 // SetHealthCallback registers a callback for health state changes.
 // The callback is invoked whenever IsHealthy() would return a different value.
+// Note: The callback is NOT invoked immediately - callers should check IsHealthy()
+// for the initial state and use the callback only for subsequent changes.
 func (m *MetricsServerSource) SetHealthCallback(callback func(healthy bool, info metrics.SourceInfo)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.healthCallback = callback
 }
 
-// notifyHealthChange invokes the health callback if health state changed.
+// buildSourceInfoLocked builds SourceInfo while holding the lock.
 // Must be called with m.mu held.
-func (m *MetricsServerSource) notifyHealthChange(newHealthy bool) {
-	if m.healthCallback != nil {
-		// Get source info while we still have the lock
-		info := metrics.SourceInfo{
-			Type:         metrics.SourceTypeMetricsServer,
-			Version:      "v1beta1",
-			LastScrape:   time.Now(),
-			MetricsCount: 2,
-			ErrorCount:   m.errorCount,
-			Healthy:      newHealthy,
-		}
-		// Release lock before calling callback to avoid deadlock
-		cb := m.healthCallback
-		m.mu.Unlock()
-		cb(newHealthy, info)
-		m.mu.Lock()
+func (m *MetricsServerSource) buildSourceInfoLocked(healthy bool) metrics.SourceInfo {
+	return metrics.SourceInfo{
+		Type:         metrics.SourceTypeMetricsServer,
+		Version:      "v1beta1",
+		LastScrape:   time.Now(),
+		MetricsCount: 2,
+		ErrorCount:   m.errorCount,
+		Healthy:      healthy,
 	}
 }
 
 // recordError updates health status after an error.
 func (m *MetricsServerSource) recordError(err error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	var shouldNotify bool
+	var info metrics.SourceInfo
+	var cb func(bool, metrics.SourceInfo)
 
+	m.mu.Lock()
 	m.lastError = err
 	m.errorCount++
 	wasHealthy := m.healthy
 	m.healthy = false
 
-	// Notify if state changed
-	if wasHealthy {
-		m.notifyHealthChange(false)
+	// Check if we need to notify (state changed from healthy to unhealthy)
+	if wasHealthy && m.healthCallback != nil {
+		shouldNotify = true
+		info = m.buildSourceInfoLocked(false)
+		cb = m.healthCallback
+	}
+	m.mu.Unlock()
+
+	// Notify outside the lock to avoid deadlock
+	if shouldNotify {
+		cb(false, info)
 	}
 }
 
 // recordSuccess updates health status after a successful operation.
 func (m *MetricsServerSource) recordSuccess() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	var shouldNotify bool
+	var info metrics.SourceInfo
+	var cb func(bool, metrics.SourceInfo)
 
+	m.mu.Lock()
 	m.lastError = nil
 	wasHealthy := m.healthy
 	m.healthy = true
 
-	// Notify if state changed
-	if !wasHealthy {
-		m.notifyHealthChange(true)
+	// Check if we need to notify (state changed from unhealthy to healthy)
+	if !wasHealthy && m.healthCallback != nil {
+		shouldNotify = true
+		info = m.buildSourceInfoLocked(true)
+		cb = m.healthCallback
+	}
+	m.mu.Unlock()
+
+	// Notify outside the lock to avoid deadlock
+	if shouldNotify {
+		cb(true, info)
 	}
 }
 

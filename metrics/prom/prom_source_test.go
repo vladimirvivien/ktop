@@ -187,7 +187,7 @@ func TestNewPromMetricsSource(t *testing.T) {
 		t.Error("Expected config to be set")
 	}
 
-	if source.healthy {
+	if source.IsHealthy() {
 		t.Error("Expected source to be initially unhealthy")
 	}
 }
@@ -344,7 +344,7 @@ func TestHandleError(t *testing.T) {
 		t.Errorf("Expected lastError to be set")
 	}
 
-	if source.healthy {
+	if source.IsHealthy() {
 		t.Error("Expected healthy to be false after error")
 	}
 }
@@ -353,13 +353,13 @@ func TestHandleMetricsCollected(t *testing.T) {
 	source, _ := NewPromMetricsSource(&rest.Config{}, nil)
 
 	// Initially unhealthy
-	source.healthy = false
+	source.setHealthyForTesting(false)
 
 	// Simulate metrics collected callback
 	source.handleMetricsCollected(prom.ComponentKubelet, &prom.ScrapedMetrics{})
 
 	// Check health was updated
-	if !source.healthy {
+	if !source.IsHealthy() {
 		t.Error("Expected healthy to be true after successful collection")
 	}
 
@@ -386,7 +386,7 @@ func TestRecordError(t *testing.T) {
 		t.Error("Expected lastError to be set to testErr")
 	}
 
-	if source.healthy {
+	if source.IsHealthy() {
 		t.Error("Expected healthy to be false")
 	}
 
@@ -402,7 +402,7 @@ func TestGetNodeMetrics_UnhealthySource(t *testing.T) {
 	source, _ := NewPromMetricsSource(&rest.Config{}, nil)
 
 	// Ensure source is unhealthy
-	source.healthy = false
+	source.setHealthyForTesting(false)
 
 	_, err := source.GetNodeMetrics(context.Background(), "test-node")
 
@@ -419,7 +419,7 @@ func TestGetNodeMetrics_NoStore(t *testing.T) {
 	source, _ := NewPromMetricsSource(&rest.Config{}, nil)
 
 	// Set healthy but no store
-	source.healthy = true
+	source.setHealthyForTesting(true)
 	source.store = nil
 
 	_, err := source.GetNodeMetrics(context.Background(), "test-node")
@@ -436,7 +436,7 @@ func TestGetNodeMetrics_NoStore(t *testing.T) {
 func TestGetPodMetrics_UnhealthySource(t *testing.T) {
 	source, _ := NewPromMetricsSource(&rest.Config{}, nil)
 
-	source.healthy = false
+	source.setHealthyForTesting(false)
 
 	_, err := source.GetPodMetrics(context.Background(), "default", "test-pod")
 
@@ -448,7 +448,7 @@ func TestGetPodMetrics_UnhealthySource(t *testing.T) {
 func TestGetPodMetrics_NoStore(t *testing.T) {
 	source, _ := NewPromMetricsSource(&rest.Config{}, nil)
 
-	source.healthy = true
+	source.setHealthyForTesting(true)
 	source.store = nil
 
 	_, err := source.GetPodMetrics(context.Background(), "default", "test-pod")
@@ -461,7 +461,7 @@ func TestGetPodMetrics_NoStore(t *testing.T) {
 func TestGetAllPodMetrics_UnhealthySource(t *testing.T) {
 	source, _ := NewPromMetricsSource(&rest.Config{}, nil)
 
-	source.healthy = false
+	source.setHealthyForTesting(false)
 
 	_, err := source.GetAllPodMetrics(context.Background())
 
@@ -502,7 +502,7 @@ func TestGetNodeMetrics_WithMockStore(t *testing.T) {
 	mockStore.SetMetric("container_count", "node:test-node", 42)
 
 	source.store = mockStore
-	source.healthy = true
+	source.setHealthyForTesting(true)
 
 	metrics, err := source.GetNodeMetrics(context.Background(), "test-node")
 
@@ -583,7 +583,7 @@ func TestGetPodMetrics_WithMockStore(t *testing.T) {
 	mockStore.SetMetric("container_memory_working_set_bytes", "pod:test-pod", 256*1024*1024) // 256MB
 
 	source.store = mockStore
-	source.healthy = true
+	source.setHealthyForTesting(true)
 
 	metrics, err := source.GetPodMetrics(context.Background(), "default", "test-pod")
 
@@ -631,7 +631,7 @@ func TestGetAllPodMetrics_WithMockStore(t *testing.T) {
 	// but we're testing that it doesn't crash with a mock store
 
 	source.store = mockStore
-	source.healthy = true
+	source.setHealthyForTesting(true)
 
 	metrics, err := source.GetAllPodMetrics(context.Background())
 
@@ -655,7 +655,7 @@ func TestGetSourceInfo_WithStore(t *testing.T) {
 	mockStore.SetMetric("test_metric_2", "label", 2.0)
 
 	source.store = mockStore
-	source.healthy = true
+	source.setHealthyForTesting(true)
 	source.errorCount = 3
 	source.lastScrape = time.Date(2025, 10, 26, 12, 0, 0, 0, time.UTC)
 
@@ -682,7 +682,7 @@ func TestGetMetricsForPod_NotImplemented(t *testing.T) {
 	source, _ := NewPromMetricsSource(&rest.Config{}, nil)
 
 	source.store = NewMockMetricsStore()
-	source.healthy = true
+	source.setHealthyForTesting(true)
 
 	// Create a mock pod object
 	mockPod := &mockPodObject{

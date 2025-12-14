@@ -20,7 +20,8 @@ func (c *Controller) GetNode(ctx context.Context, nodeName string) (*coreV1.Node
 	if err != nil {
 		return nil, err
 	}
-	return node, nil
+	// Return a deep copy to avoid pointer to informer cache issues
+	return node.DeepCopy(), nil
 }
 
 func (c *Controller) GetNodeList(ctx context.Context) ([]*coreV1.Node, error) {

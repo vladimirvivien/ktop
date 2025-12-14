@@ -11,6 +11,9 @@ import (
 	"github.com/vladimirvivien/ktop/views/model"
 )
 
+// PodSelectedCallback is called when a pod is selected (Enter pressed)
+type PodSelectedCallback func(namespace, podName string)
+
 type podPanel struct {
 	app         *application.Application
 	title       string
@@ -28,6 +31,9 @@ type podPanel struct {
 	// Stateful sparklines for smooth sliding animation
 	cpuSparklines map[string]*ui.SparklineState // key: "namespace/podname"
 	memSparklines map[string]*ui.SparklineState
+
+	// Callback for pod selection
+	onPodSelected PodSelectedCallback
 }
 
 func NewPodPanel(app *application.Application, title string) ui.Panel {
@@ -47,6 +53,38 @@ func NewPodPanel(app *application.Application, title string) ui.Panel {
 
 func (p *podPanel) GetTitle() string {
 	return p.title
+}
+
+// SetOnPodSelected sets the callback for when a pod is selected (Enter pressed)
+func (p *podPanel) SetOnPodSelected(callback PodSelectedCallback) {
+	p.onPodSelected = callback
+}
+
+// getPodInfoFromRow returns the namespace and pod name from the given row index
+func (p *podPanel) getPodInfoFromRow(row int) (namespace, podName string) {
+	// Row 0 is header, data starts at row 1
+	// We need to map from displayed row to the filtered data index
+	dataIndex := row - 1 // Subtract 1 for header
+
+	// Get filtered pods (same logic as DrawBody)
+	var filteredPods []model.PodModel
+	if p.filter.IsFiltering() && p.filter.Text != "" {
+		for _, pod := range p.currentData {
+			if p.filter.MatchesRow(p.getPodCells(pod)) {
+				filteredPods = append(filteredPods, pod)
+			}
+		}
+	} else {
+		filteredPods = p.currentData
+	}
+
+	// Sort the filtered pods the same way as DrawBody
+	model.SortPodModelsBy(filteredPods, p.sortColumn, p.sortAsc)
+
+	if dataIndex >= 0 && dataIndex < len(filteredPods) {
+		return filteredPods[dataIndex].Namespace, filteredPods[dataIndex].Name
+	}
+	return "", ""
 }
 
 // getSparkline returns an existing sparkline or creates a new one
@@ -114,6 +152,18 @@ func (p *podPanel) Layout(_ interface{}) {
 				p.filter.StartEditing()
 				p.redrawWithFilter()
 				return nil
+			}
+
+			// Handle Enter key for pod selection
+			if event.Key() == tcell.KeyEnter {
+				row, _ := p.list.GetSelection()
+				if row > 0 { // Skip header row
+					namespace, podName := p.getPodInfoFromRow(row)
+					if namespace != "" && podName != "" && p.onPodSelected != nil {
+						p.onPodSelected(namespace, podName)
+						return nil
+					}
+				}
 			}
 
 			// Handle sorting shortcuts

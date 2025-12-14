@@ -36,6 +36,13 @@ type Application struct {
 	refreshQ      chan struct{}
 	stopCh        chan struct{}
 
+	// Navigation stack for detail view navigation
+	navStack *NavigationStack
+
+	// Detail view callbacks
+	nodeDetailCallback func(nodeName string)
+	podDetailCallback  func(namespace, podName string)
+
 	// Health state tracking for transitions
 	lastHealthyState      bool
 	lastMetricsSource     string
@@ -65,6 +72,7 @@ func New(k8sC *k8s.Client, metricsSource metrics.MetricsSource) *Application {
 		refreshQ:      make(chan struct{}, 1),
 		pageIdx:       -1,
 		tabIdx:        -1, // -1 = header (default focus), 0+ = children panels
+		navStack:      NewNavigationStack(),
 	}
 
 	// Initialize API health tracker with persistent toast callback
@@ -314,7 +322,9 @@ func (app *Application) setup(ctx context.Context) error {
 			})
 		})
 
-		// Show loading toast if source isn't healthy yet
+		// Check health state and update UI accordingly
+		// This handles the race where health changed between initial header draw
+		// and callback registration
 		if !app.metricsSource.IsHealthy() {
 			app.loadingToastStartTime = time.Now()
 			app.loadingToastID = app.ShowToast(
@@ -341,6 +351,10 @@ func (app *Application) setup(ctx context.Context) error {
 			})
 		} else {
 			app.lastHealthyState = true
+			// Redraw header to ensure it reflects the healthy state
+			// This handles the race where health transitioned before callback was registered
+			nsDisplay := app.getNamespaceDisplay()
+			app.panel.DrawHeader(app.buildHeaderString(nsDisplay))
 		}
 	}
 
@@ -371,6 +385,13 @@ func (app *Application) setup(ctx context.Context) error {
 		// Handle ESC - check if header or visible panel has state to clear first
 		// Global handler runs BEFORE focused widget, so we must check panels here
 		if event.Key() == tcell.KeyEsc {
+			// Check if we're in a detail view - ESC navigates back
+			if app.IsInDetailView() {
+				app.NavigateBack()
+				app.Refresh()
+				return nil
+			}
+
 			// Check if header has escapable state first (when header is focused)
 			if app.tabIdx == -1 && app.panel.hasEscapableHeaderState() {
 				if app.panel.handleHeaderEscape() {
@@ -403,13 +424,31 @@ func (app *Application) setup(ctx context.Context) error {
 			}
 		}
 
-		if event.Key() == tcell.KeyTAB {
+		if event.Key() == tcell.KeyTAB || event.Key() == tcell.KeyBacktab {
+			// Check if we're on a detail page - if so, let the detail panel handle Tab
+			if frontPage, _ := app.panel.pages.GetFrontPage(); frontPage != "" {
+				// Detail pages are named "node_detail", "pod_detail", etc.
+				// Overview pages are named "Overview", etc.
+				if frontPage == "node_detail" || frontPage == "pod_detail" {
+					// Pass Tab through to the detail panel
+					return event
+				}
+			}
+
 			views := app.pages[0].Panel.GetChildrenViews()
 			// Cycle: -1 (header) -> 0 -> 1 -> 2 -> -1 (header) ...
 			// -2 = no focus (initial state)
-			app.tabIdx++
-			if app.tabIdx >= len(views) {
-				app.tabIdx = -1 // Back to header
+			if event.Key() == tcell.KeyTAB {
+				app.tabIdx++
+				if app.tabIdx >= len(views) {
+					app.tabIdx = -1 // Back to header
+				}
+			} else {
+				// Backtab - cycle in reverse
+				app.tabIdx--
+				if app.tabIdx < -1 {
+					app.tabIdx = len(views) - 1
+				}
 			}
 
 			// Update focus visuals for all panels
@@ -646,5 +685,110 @@ func (app *Application) updateHeaderDirect() {
 	nsDisplay := app.getNamespaceDisplay()
 	headerStr := app.buildHeaderString(nsDisplay)
 	app.panel.DrawHeader(headerStr)
+}
+
+// SetNodeDetailCallback sets the callback for navigating to node detail view
+func (app *Application) SetNodeDetailCallback(callback func(nodeName string)) {
+	app.nodeDetailCallback = callback
+}
+
+// SetPodDetailCallback sets the callback for navigating to pod detail view
+func (app *Application) SetPodDetailCallback(callback func(namespace, podName string)) {
+	app.podDetailCallback = callback
+}
+
+// NavigateToNodeDetail navigates to the node detail view for the given node
+func (app *Application) NavigateToNodeDetail(nodeName string) {
+	// Push current state to navigation stack
+	app.navStack.Push(PageState{
+		PageType:   PageNodeDetail,
+		ResourceID: nodeName,
+	})
+
+	// Call the callback to show the detail view
+	if app.nodeDetailCallback != nil {
+		app.nodeDetailCallback(nodeName)
+	}
+}
+
+// NavigateToPodDetail navigates to the pod detail view for the given pod
+func (app *Application) NavigateToPodDetail(namespace, podName string) {
+	// Push current state to navigation stack
+	resourceID := namespace + "/" + podName
+	app.navStack.Push(PageState{
+		PageType:   PagePodDetail,
+		ResourceID: resourceID,
+	})
+
+	// Call the callback to show the detail view
+	if app.podDetailCallback != nil {
+		app.podDetailCallback(namespace, podName)
+	}
+}
+
+// NavigateBack navigates back to the previous page
+func (app *Application) NavigateBack() bool {
+	popped := app.navStack.Pop()
+	if popped == nil {
+		return false // Already at root
+	}
+
+	// Determine what page we're now on
+	current := app.navStack.Current()
+	if current == nil {
+		return false
+	}
+
+	switch current.PageType {
+	case PageOverview:
+		// Switch back to the main overview page
+		app.panel.pages.SwitchToPage(app.pages[0].Title)
+		// Reset focus to the overview panel
+		if len(app.pages) > 0 {
+			views := app.pages[0].Panel.GetChildrenViews()
+			if len(views) > 0 && app.tabIdx >= 0 && app.tabIdx < len(views) {
+				app.tviewApp.SetFocus(views[app.tabIdx])
+			}
+		}
+	case PageNodeDetail:
+		// Navigate back to node detail (for nested navigation)
+		if app.nodeDetailCallback != nil {
+			app.nodeDetailCallback(current.ResourceID)
+		}
+	case PagePodDetail:
+		// Navigate back to pod detail (for nested navigation)
+		parts := strings.SplitN(current.ResourceID, "/", 2)
+		if len(parts) == 2 && app.podDetailCallback != nil {
+			app.podDetailCallback(parts[0], parts[1])
+		}
+	}
+
+	return true
+}
+
+// GetNavigationStack returns the navigation stack for breadcrumb display
+func (app *Application) GetNavigationStack() *NavigationStack {
+	return app.navStack
+}
+
+// IsInDetailView returns true if currently viewing a detail page
+func (app *Application) IsInDetailView() bool {
+	current := app.navStack.Current()
+	return current != nil && current.PageType != PageOverview
+}
+
+// AddDetailPage adds a detail page to the application's pages widget
+func (app *Application) AddDetailPage(name string, page tview.Primitive) {
+	app.panel.addDetailPage(name, page)
+}
+
+// ShowDetailPage switches to a detail page
+func (app *Application) ShowDetailPage(name string) {
+	app.panel.showDetailPage(name)
+}
+
+// GetPagesWidget returns the inner pages widget (for detail views to add themselves)
+func (app *Application) GetPagesWidget() *tview.Pages {
+	return app.panel.getPagesWidget()
 }
 
