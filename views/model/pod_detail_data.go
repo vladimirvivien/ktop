@@ -18,6 +18,16 @@ type PodDetailData struct {
 	// MetricsHistory contains historical CPU/memory samples for sparkline graphs
 	// Key is container name
 	MetricsHistory map[string][]MetricSample
+
+	// ContainerMetrics contains current CPU/memory usage for each container
+	// Key is container name, value is ContainerUsage
+	ContainerMetrics map[string]ContainerUsage
+}
+
+// ContainerUsage holds formatted CPU and memory usage strings for a container
+type ContainerUsage struct {
+	CPUUsage    string // e.g., "45m"
+	MemoryUsage string // e.g., "128Mi"
 }
 
 // ContainerInfo provides structured container information
@@ -34,6 +44,10 @@ type ContainerInfo struct {
 	CPULimit      string
 	MemoryRequest string
 	MemoryLimit   string
+
+	// Resource usage (from metrics)
+	CPUUsage    string
+	MemoryUsage string
 
 	// Probes
 	LivenessProbe  string
@@ -116,6 +130,19 @@ func (d *PodDetailData) GetContainers() []ContainerInfo {
 		}
 		if mem := container.Resources.Limits.Memory(); mem != nil && !mem.IsZero() {
 			info.MemoryLimit = mem.String()
+		}
+
+		// Resource usage from metrics
+		if d.ContainerMetrics != nil {
+			// Try actual container name first
+			if usage, ok := d.ContainerMetrics[container.Name]; ok {
+				info.CPUUsage = usage.CPUUsage
+				info.MemoryUsage = usage.MemoryUsage
+			} else if usage, ok := d.ContainerMetrics["main"]; ok && len(d.Pod.Spec.Containers) == 1 {
+				// Fallback to "main" for single-container pods (static pod aggregate)
+				info.CPUUsage = usage.CPUUsage
+				info.MemoryUsage = usage.MemoryUsage
+			}
 		}
 
 		// Probes

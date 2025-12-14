@@ -40,8 +40,9 @@ type Application struct {
 	navStack *NavigationStack
 
 	// Detail view callbacks
-	nodeDetailCallback func(nodeName string)
-	podDetailCallback  func(namespace, podName string)
+	nodeDetailCallback     func(nodeName string)
+	podDetailCallback      func(namespace, podName string)
+	containerLogsCallback  func(namespace, podName, containerName string)
 
 	// Health state tracking for transitions
 	lastHealthyState      bool
@@ -723,6 +724,26 @@ func (app *Application) NavigateToPodDetail(namespace, podName string) {
 	// Call the callback to show the detail view
 	if app.podDetailCallback != nil {
 		app.podDetailCallback(namespace, podName)
+	}
+}
+
+// SetContainerLogsCallback sets the callback for navigating to container logs view
+func (app *Application) SetContainerLogsCallback(callback func(namespace, podName, containerName string)) {
+	app.containerLogsCallback = callback
+}
+
+// NavigateToContainerLogs navigates to the container logs view
+func (app *Application) NavigateToContainerLogs(namespace, podName, containerName string) {
+	// Push current state to navigation stack
+	resourceID := namespace + "/" + podName + "/" + containerName
+	app.navStack.Push(PageState{
+		PageType:   PageContainerLogs,
+		ResourceID: resourceID,
+	})
+
+	// Call the callback to show the logs view
+	if app.containerLogsCallback != nil {
+		app.containerLogsCallback(namespace, podName, containerName)
 	}
 }
 
