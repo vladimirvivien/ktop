@@ -248,6 +248,10 @@ func (p *MainPanel) ensureNodeDetailPanel() {
 	p.nodeDetailPanel.SetAppFocus(func(prim tview.Primitive) {
 		p.app.Focus(prim)
 	})
+	// Set up footer context callback for focus changes
+	p.nodeDetailPanel.SetOnFooterContextChange(func(focusedPanel string) {
+		p.app.SetFooterContext(ui.NodeDetailContext{FocusedPanel: focusedPanel})
+	})
 	p.app.AddDetailPage("node_detail", p.nodeDetailPanel.GetRootView())
 }
 
@@ -270,6 +274,10 @@ func (p *MainPanel) ensurePodDetailPanel() {
 	// Set up focus callback for tab cycling within the detail panel
 	p.podDetailPanel.SetAppFocus(func(prim tview.Primitive) {
 		p.app.Focus(prim)
+	})
+	// Set up footer context callback for focus changes
+	p.podDetailPanel.SetOnFooterContextChange(func(focusedPanel string) {
+		p.app.SetFooterContext(ui.PodDetailContext{FocusedPanel: focusedPanel})
 	})
 	p.app.AddDetailPage("pod_detail", p.podDetailPanel.GetRootView())
 }

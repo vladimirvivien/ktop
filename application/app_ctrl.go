@@ -60,6 +60,10 @@ type Application struct {
 
 	// Namespace filter callback for pod filtering
 	namespaceFilterCallback func(namespace string)
+
+	// Quit confirmation state (double-ESC to quit from Overview)
+	pendingQuit     bool
+	pendingQuitTime time.Time
 }
 
 func New(k8sC *k8s.Client, metricsSource metrics.MetricsSource) *Application {
@@ -292,6 +296,9 @@ func (app *Application) setup(ctx context.Context) error {
 	// Explicitly focus header to prevent tview from auto-focusing first child
 	app.Focus(app.panel.getHeader())
 
+	// Set initial footer context for Overview page with header focused
+	app.updateFooterContext()
+
 	// Set up focus restoration callback for toast dismissal
 	// This ensures proper focus is restored based on tabIdx after toast goes away
 	app.panel.setFocusRestorationCallback(func() {
@@ -383,6 +390,11 @@ func (app *Application) setup(ctx context.Context) error {
 			return event // Pass other keys through
 		}
 
+		// Reset pending quit state on any non-ESC key
+		if event.Key() != tcell.KeyEsc && app.pendingQuit {
+			app.pendingQuit = false
+		}
+
 		// Handle ESC - check if header or visible panel has state to clear first
 		// Global handler runs BEFORE focused widget, so we must check panels here
 		if event.Key() == tcell.KeyEsc {
@@ -412,8 +424,25 @@ func (app *Application) setup(ctx context.Context) error {
 					}
 				}
 			}
-			// No panel had state to clear - quit the app
-			app.Stop()
+			// No panel had state to clear - handle quit confirmation
+			if app.pendingQuit && time.Since(app.pendingQuitTime) < 2*time.Second {
+				// Second ESC within timeout - quit
+				app.Stop()
+				return nil
+			}
+
+			// First ESC - show confirmation toast
+			app.pendingQuit = true
+			app.pendingQuitTime = time.Now()
+			app.ShowToast("Press ESC again to quit", ui.ToastInfo, 2*time.Second)
+
+			// Reset state after toast timeout
+			go func() {
+				time.Sleep(2 * time.Second)
+				app.tviewApp.QueueUpdateDraw(func() {
+					app.pendingQuit = false
+				})
+			}()
 			return nil
 		}
 
@@ -465,6 +494,8 @@ func (app *Application) setup(ctx context.Context) error {
 				app.panel.setHeaderFocused(false)
 				app.Focus(views[app.tabIdx])
 			}
+			// Update footer context to reflect new focus
+			app.updateFooterContext()
 			app.Refresh()
 			return nil
 		}
@@ -710,6 +741,9 @@ func (app *Application) NavigateToNodeDetail(nodeName string) {
 	if app.nodeDetailCallback != nil {
 		app.nodeDetailCallback(nodeName)
 	}
+
+	// Update footer context for detail page
+	app.updateFooterContext()
 }
 
 // NavigateToPodDetail navigates to the pod detail view for the given pod
@@ -725,6 +759,9 @@ func (app *Application) NavigateToPodDetail(namespace, podName string) {
 	if app.podDetailCallback != nil {
 		app.podDetailCallback(namespace, podName)
 	}
+
+	// Update footer context for detail page
+	app.updateFooterContext()
 }
 
 // SetContainerLogsCallback sets the callback for navigating to container logs view
@@ -745,6 +782,9 @@ func (app *Application) NavigateToContainerLogs(namespace, podName, containerNam
 	if app.containerLogsCallback != nil {
 		app.containerLogsCallback(namespace, podName, containerName)
 	}
+
+	// Update footer context for detail page
+	app.updateFooterContext()
 }
 
 // NavigateBack navigates back to the previous page
@@ -784,6 +824,9 @@ func (app *Application) NavigateBack() bool {
 		}
 	}
 
+	// Update footer context for the page we navigated back to
+	app.updateFooterContext()
+
 	return true
 }
 
@@ -811,5 +854,54 @@ func (app *Application) ShowDetailPage(name string) {
 // GetPagesWidget returns the inner pages widget (for detail views to add themselves)
 func (app *Application) GetPagesWidget() *tview.Pages {
 	return app.panel.getPagesWidget()
+}
+
+// getFocusedPanelName returns the name of the currently focused panel
+func (app *Application) getFocusedPanelName() string {
+	if app.tabIdx == -1 {
+		return "header"
+	}
+	// Map tabIdx to panel names based on Overview page structure
+	// Order: summary (0), nodes (1), pods (2)
+	switch app.tabIdx {
+	case 0:
+		return "summary"
+	case 1:
+		return "nodes"
+	case 2:
+		return "pods"
+	default:
+		return "summary"
+	}
+}
+
+// updateFooterContext updates the navigation footer based on current page and focus
+func (app *Application) updateFooterContext() {
+	current := app.navStack.Current()
+	if current == nil {
+		return
+	}
+
+	var ctx ui.FooterContext
+
+	switch current.PageType {
+	case PageOverview:
+		ctx = ui.OverviewContext{FocusedPanel: app.getFocusedPanelName()}
+	case PageNodeDetail:
+		ctx = ui.NodeDetailContext{FocusedPanel: "events"}
+	case PagePodDetail:
+		ctx = ui.PodDetailContext{FocusedPanel: "events"}
+	case PageContainerLogs:
+		ctx = ui.ContainerDetailContext{}
+	default:
+		ctx = ui.OverviewContext{FocusedPanel: app.getFocusedPanelName()}
+	}
+
+	app.panel.setFooterContext(ctx)
+}
+
+// SetFooterContext sets the footer context directly (for detail panels to update)
+func (app *Application) SetFooterContext(ctx ui.FooterContext) {
+	app.panel.setFooterContext(ctx)
 }
 
