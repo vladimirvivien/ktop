@@ -20,13 +20,14 @@ var (
 )
 
 type appPanel struct {
-	tviewApp *tview.Application
-	title    string
-	header   *tview.Table
-	pages    *tview.Pages
-	footer   *tview.Table
-	modals   []tview.Primitive
-	root     *tview.Pages // CHANGED: from *tview.Flex to *tview.Pages
+	tviewApp        *tview.Application
+	title           string
+	header          *tview.Table
+	pages           *tview.Pages
+	footer          *tview.Table    // Legacy footer for page buttons (future use)
+	footerComponent *ui.Footer      // Context-aware navigation footer
+	modals          []tview.Primitive
+	root            *tview.Pages // CHANGED: from *tview.Flex to *tview.Pages
 
 	// Toast tracking
 	currentToastID      string
@@ -65,12 +66,14 @@ func (p *appPanel) Layout(data interface{}) {
 	p.footer = tview.NewTable()
 	p.footer.SetBorder(true)
 
-	// Existing layout
+	// Initialize context-aware navigation footer
+	p.footerComponent = ui.NewFooter()
+
+	// Existing layout with navigation footer
 	mainLayout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.header, 3, 1, true). // header - focusable for input handling
-		AddItem(p.pages, 0, 1, true)   // body
-		// TODO show footer when multi-page is implemented
-		//AddItem(p.footer, 3, 1, false)  // footer
+		AddItem(p.header, 3, 1, true).                   // header - focusable for input handling
+		AddItem(p.pages, 0, 1, true).                    // body
+		AddItem(p.footerComponent.GetView(), 3, 0, false) // navigation footer - 3 rows for border
 
 	// NEW: Wrap in Pages for toast layering
 	p.root = tview.NewPages()
@@ -410,4 +413,11 @@ func (p *appPanel) handleHeaderEscape() bool {
 		return true
 	}
 	return false
+}
+
+// setFooterContext updates the navigation footer with new context
+func (p *appPanel) setFooterContext(ctx ui.FooterContext) {
+	if p.footerComponent != nil {
+		p.footerComponent.SetContext(ctx)
+	}
 }

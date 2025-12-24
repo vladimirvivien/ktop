@@ -55,8 +55,9 @@ type DetailPanel struct {
 	diskSparkline *ui.SparklineState
 
 	// Callbacks
-	onPodSelected NodeSelectedCallback
-	onBack        func()
+	onPodSelected       NodeSelectedCallback
+	onBack              func()
+	onFooterContextChange func(focusedPanel string)
 }
 
 // NewDetailPanel creates a new node detail panel
@@ -74,6 +75,11 @@ func (p *DetailPanel) SetOnPodSelected(callback NodeSelectedCallback) {
 // SetOnBack sets the callback for when user navigates back
 func (p *DetailPanel) SetOnBack(callback func()) {
 	p.onBack = callback
+}
+
+// SetOnFooterContextChange sets the callback for when focused panel changes
+func (p *DetailPanel) SetOnFooterContextChange(callback func(focusedPanel string)) {
+	p.onFooterContextChange = callback
 }
 
 // GetTitle returns the panel title
@@ -202,11 +208,11 @@ func (p *DetailPanel) Layout(_ interface{}) {
 
 		// Main layout: vertical flex
 		p.root = tview.NewFlex().SetDirection(tview.FlexRow)
-		p.root.AddItem(p.infoHeaderPanel, 3, 0, false)    // Info header: 3 rows
-		p.root.AddItem(p.sparklinePanel, 5, 0, false)     // Sparklines: 5 rows
-		p.root.AddItem(p.systemDetailPanel, 10, 0, false) // System Detail: 10 rows
-		p.root.AddItem(p.eventsPanel, 10, 0, false)       // Events: 10 rows
-		p.root.AddItem(p.podsPanel, 0, 1, true)           // Pods: remaining space (flex)
+		p.root.AddItem(p.infoHeaderPanel, 3, 0, false)       // Info header: 3 rows
+		p.root.AddItem(p.sparklinePanel, 5, 0, false)        // Sparklines: 5 rows
+		p.root.AddItem(p.systemDetailPanel, 10, 0, false)    // System Detail: 10 rows
+		p.root.AddItem(p.eventsPanel, 10, 0, false)          // Events: 10 rows
+		p.root.AddItem(p.podsPanel, 0, 1, true)              // Pods: remaining space (flex)
 
 		p.root.SetBorder(true)
 		p.root.SetTitle(fmt.Sprintf(" %s Node Detail ", ui.Icons.Factory))
@@ -867,6 +873,7 @@ func (p *DetailPanel) cycleFocus() {
 	}
 	p.focusedChildIdx = (p.focusedChildIdx + 1) % len(p.focusableItems)
 	p.updateFocusVisuals()
+	p.notifyFooterContextChange()
 }
 
 // cycleFocusReverse moves focus to the previous focusable child
@@ -879,6 +886,27 @@ func (p *DetailPanel) cycleFocusReverse() {
 		p.focusedChildIdx = len(p.focusableItems) - 1
 	}
 	p.updateFocusVisuals()
+	p.notifyFooterContextChange()
+}
+
+// GetFocusedPanelName returns the name of the currently focused panel
+func (p *DetailPanel) GetFocusedPanelName() string {
+	// Index 0 = events, Index 1 = pods
+	switch p.focusedChildIdx {
+	case 0:
+		return "events"
+	case 1:
+		return "pods"
+	default:
+		return "events"
+	}
+}
+
+// notifyFooterContextChange calls the footer context callback if set
+func (p *DetailPanel) notifyFooterContextChange() {
+	if p.onFooterContextChange != nil {
+		p.onFooterContextChange(p.GetFocusedPanelName())
+	}
 }
 
 // updateFocusVisuals updates border colors and sets tview focus
