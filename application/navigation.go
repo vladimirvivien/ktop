@@ -4,9 +4,10 @@ package application
 type PageType string
 
 const (
-	PageOverview    PageType = "overview"
-	PageNodeDetail  PageType = "node_detail"
-	PagePodDetail   PageType = "pod_detail"
+	PageOverview       PageType = "overview"
+	PageNodeDetail     PageType = "node_detail"
+	PagePodDetail      PageType = "pod_detail"
+	PageContainerLogs  PageType = "container_logs"
 )
 
 // PageState represents a page in the navigation stack

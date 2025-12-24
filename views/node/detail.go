@@ -252,7 +252,7 @@ func (p *DetailPanel) Layout(_ interface{}) {
 			}
 			return event
 		})
-		p.root.SetTitleAlign(tview.AlignLeft)
+		p.root.SetTitleAlign(tview.AlignCenter)
 		p.laidout = true
 	}
 }
@@ -288,11 +288,9 @@ func (p *DetailPanel) DrawBody(data interface{}) {
 		}
 	}
 
-	// Update main title with node name and status
+	// Update main title with breadcrumb navigation
 	if p.data.NodeModel != nil {
-		status := p.data.NodeModel.Status
-		statusColor := ui.GetStatusColor(status, "node")
-		p.root.SetTitle(fmt.Sprintf(" %s [::b]Node:[::] %s [%s](%s)[-] ", ui.Icons.Factory, p.data.NodeModel.Name, statusColor, status))
+		p.root.SetTitle(fmt.Sprintf(" %s Nodes > [::b]%s[::] ", ui.Icons.Factory, p.data.NodeModel.Name))
 	}
 
 	p.drawInfoHeader()
@@ -320,9 +318,8 @@ func (p *DetailPanel) drawInfoHeader() {
 	}
 	node := p.data.NodeModel
 
-	// Get hostname and machineID from raw Node object
+	// Get hostname from raw Node object
 	hostname := "n/a"
-	machineID := "n/a"
 	if p.data.Node != nil {
 		// Get hostname from addresses
 		for _, addr := range p.data.Node.Status.Addresses {
@@ -331,25 +328,15 @@ func (p *DetailPanel) drawInfoHeader() {
 				break
 			}
 		}
-		// Get machine ID (truncate for display)
-		if p.data.Node.Status.NodeInfo.MachineID != "" {
-			mid := p.data.Node.Status.NodeInfo.MachineID
-			if len(mid) > 12 {
-				machineID = mid[:12] + "..."
-			} else {
-				machineID = mid
-			}
-		}
 	}
 
-	// Build info items
+	// Build info items (MachineID moved to System Detail section)
 	items := []string{
 		fmt.Sprintf("[gray]Status:[white] %s", node.Status),
 		fmt.Sprintf("[gray]Roles:[white] %s", strings.Join(node.Roles, ",")),
 		fmt.Sprintf("[gray]Age:[white] %s", node.TimeSinceStart),
 		fmt.Sprintf("[gray]IP:[white] %s", node.InternalIP),
 		fmt.Sprintf("[gray]Hostname:[white] %s", hostname),
-		fmt.Sprintf("[gray]MachineID:[white] %s", machineID),
 	}
 
 	// Create a text view with all items on one line
@@ -445,8 +432,8 @@ func (p *DetailPanel) createSparklineColumn(title string, sparkline *ui.Sparklin
 	// Get panel width and resize sparkline to fill available space
 	_, _, panelWidth, _ := p.sparklinePanel.GetInnerRect()
 	if panelWidth > 0 {
-		// Each of 4 panels gets 1/4 of the width, minus borders (2 chars each side)
-		sparklineWidth := (panelWidth / 4) - 4
+		// Each of 4 panels gets 1/4 of the width, minus 2 for left/right border
+		sparklineWidth := (panelWidth / 4) - 2
 		if sparklineWidth > 10 {
 			sparkline.Resize(sparklineWidth)
 		}
@@ -473,6 +460,22 @@ func (p *DetailPanel) drawSystemDetailSection() {
 
 	// === LEFT COLUMN: System Info ===
 	row := 0
+	p.leftDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]System[::-]").SetTextColor(tcell.ColorAqua).SetSelectable(false))
+	row++
+
+	// MachineID (truncate for display)
+	machineID := "n/a"
+	if p.data.Node != nil && p.data.Node.Status.NodeInfo.MachineID != "" {
+		mid := p.data.Node.Status.NodeInfo.MachineID
+		if len(mid) > 12 {
+			machineID = mid[:12] + "..."
+		} else {
+			machineID = mid
+		}
+	}
+	p.addDetailRow(p.leftDetailTable, row, "MachineID", machineID)
+	row++
+
 	// Truncate OS to sensible width
 	osImage := node.OSImage
 	if len(osImage) > 35 {

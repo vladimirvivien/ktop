@@ -3,13 +3,16 @@ package overview
 import (
 	"context"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
 	"github.com/rivo/tview"
 	"github.com/vladimirvivien/ktop/application"
+	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
+	containerdetail "github.com/vladimirvivien/ktop/views/container"
 	"github.com/vladimirvivien/ktop/views/model"
 	nodedetail "github.com/vladimirvivien/ktop/views/node"
 	poddetail "github.com/vladimirvivien/ktop/views/pod"
@@ -40,12 +43,14 @@ type MainPanel struct {
 	cachedNodeModels    []model.NodeModel // Cached node models for detail view
 
 	// Detail panels
-	nodeDetailPanel *nodedetail.DetailPanel
-	podDetailPanel  *poddetail.DetailPanel
+	nodeDetailPanel      *nodedetail.DetailPanel
+	podDetailPanel       *poddetail.DetailPanel
+	containerDetailPanel *containerdetail.DetailPanel
+	containerSpecPanel   *containerdetail.SpecPanel
 
-	// Track currently displayed detail view for live updates
-	currentDetailNodeName string // Non-empty when node detail is displayed
-	currentDetailPodKey   string // "namespace/name" when pod detail is displayed
+	// Centralized view state manager - single source of truth for current page/resource
+	// Thread-safe, replaces individual tracking variables
+	viewState *ViewStateManager
 }
 
 func New(app *application.Application, title string) *MainPanel {
@@ -62,6 +67,7 @@ func NewWithColumnOptions(app *application.Application, title string, showAllCol
 		showAllColumns: showAllColumns,
 		nodeColumns:    nodeColumns,
 		podColumns:     podColumns,
+		viewState:      NewViewStateManager(), // Centralized state tracking
 	}
 
 	return ctrl
@@ -217,6 +223,7 @@ func (p *MainPanel) Run(ctx context.Context) error {
 	// Set up navigation callbacks on the app (detail panels created lazily on first use)
 	p.app.SetNodeDetailCallback(p.showNodeDetail)
 	p.app.SetPodDetailCallback(p.showPodDetail)
+	p.app.SetContainerLogsCallback(p.showContainerLogs)
 
 	if err := ctrl.Start(ctx, time.Second*10); err != nil {
 		panic(fmt.Sprintf("main panel: controller start: %s", err))
@@ -231,7 +238,7 @@ func (p *MainPanel) ensureNodeDetailPanel() {
 	}
 	p.nodeDetailPanel = nodedetail.NewDetailPanel()
 	p.nodeDetailPanel.SetOnBack(func() {
-		p.currentDetailNodeName = "" // Clear tracking on back navigation
+		p.viewState.SetOverview() // Clear tracking on back navigation
 		p.app.NavigateBack()
 	})
 	p.nodeDetailPanel.SetOnPodSelected(func(namespace, podName string) {
@@ -251,19 +258,99 @@ func (p *MainPanel) ensurePodDetailPanel() {
 	}
 	p.podDetailPanel = poddetail.NewDetailPanel()
 	p.podDetailPanel.SetOnBack(func() {
-		p.currentDetailPodKey = "" // Clear tracking on back navigation
+		p.viewState.SetOverview() // Clear tracking on back navigation
 		p.app.NavigateBack()
 	})
 	p.podDetailPanel.SetOnNodeNavigate(func(nodeName string) {
 		p.app.NavigateToNodeDetail(nodeName)
 	})
+	p.podDetailPanel.SetOnContainerSelected(func(namespace, podName, containerName string) {
+		p.app.NavigateToContainerLogs(namespace, podName, containerName)
+	})
+	// Set up focus callback for tab cycling within the detail panel
+	p.podDetailPanel.SetAppFocus(func(prim tview.Primitive) {
+		p.app.Focus(prim)
+	})
 	p.app.AddDetailPage("pod_detail", p.podDetailPanel.GetRootView())
+}
+
+// ensureContainerDetailPanel creates the container detail panel if not already created
+func (p *MainPanel) ensureContainerDetailPanel() {
+	if p.containerDetailPanel != nil {
+		return
+	}
+	p.containerDetailPanel = containerdetail.NewDetailPanel()
+	p.containerDetailPanel.SetOnBack(func() {
+		p.containerDetailPanel.Cleanup() // Stop any active streams
+		p.app.NavigateBack()
+	})
+	p.containerDetailPanel.SetOnShowSpec(func(namespace, podName, containerName string, containerSpec *v1.Container) {
+		p.showContainerSpec(namespace, podName, containerName, containerSpec)
+	})
+	p.containerDetailPanel.SetAppFocus(func(prim tview.Primitive) {
+		p.app.Focus(prim)
+	})
+	p.containerDetailPanel.SetLogStreamFunc(func(ctx context.Context, namespace, podName string, opts k8s.LogOptions) (io.ReadCloser, error) {
+		return p.app.GetK8sClient().Controller().GetPodLogs(ctx, namespace, podName, opts)
+	})
+	p.containerDetailPanel.SetGetPodFunc(func(ctx context.Context, namespace, podName string) (*v1.Pod, error) {
+		return p.app.GetK8sClient().Controller().GetPod(ctx, namespace, podName)
+	})
+	p.containerDetailPanel.SetGetPodMetricsFunc(func(ctx context.Context, namespace, podName string) (*metrics.PodMetrics, error) {
+		if p.metricsSource == nil {
+			return nil, fmt.Errorf("no metrics source")
+		}
+		return p.metricsSource.GetPodMetrics(ctx, namespace, podName)
+	})
+	p.containerDetailPanel.SetQueueUpdateFunc(p.app.QueueUpdateDraw)
+	p.app.AddDetailPage("container_detail", p.containerDetailPanel.GetRootView())
+}
+
+// ensureContainerSpecPanel creates the container spec panel if not already created
+func (p *MainPanel) ensureContainerSpecPanel() {
+	if p.containerSpecPanel != nil {
+		return
+	}
+	p.containerSpecPanel = containerdetail.NewSpecPanel()
+	p.containerSpecPanel.SetOnBack(func() {
+		p.app.NavigateBack()
+	})
+	p.app.AddDetailPage("container_spec", p.containerSpecPanel.GetRootView())
+}
+
+// showContainerSpec navigates to the container spec view
+func (p *MainPanel) showContainerSpec(namespace, podName, containerName string, containerSpec *v1.Container) {
+	// Ensure the container spec panel exists (lazy initialization)
+	p.ensureContainerSpecPanel()
+
+	// Show the container spec
+	p.containerSpecPanel.ShowSpec(namespace, podName, containerName, containerSpec)
+	p.app.ShowDetailPage("container_spec")
+	p.app.Focus(p.containerSpecPanel.GetRootView())
+}
+
+// showContainerLogs navigates to the container detail view (with logs)
+func (p *MainPanel) showContainerLogs(namespace, podName, containerName string) {
+	// Ensure the container detail panel exists (lazy initialization)
+	p.ensureContainerDetailPanel()
+
+	// Track state for navigation consistency
+	p.viewState.SetContainerLogs(namespace, podName, containerName)
+
+	// Show the container detail with logs
+	p.containerDetailPanel.ShowContainer(namespace, podName, containerName)
+	p.app.ShowDetailPage("container_detail")
+	p.app.Focus(p.containerDetailPanel.GetRootView())
 }
 
 // showNodeDetail navigates to the node detail view
 func (p *MainPanel) showNodeDetail(nodeName string) {
 	// Ensure the detail panel exists (lazy initialization)
 	p.ensureNodeDetailPanel()
+
+	// Set tracking IMMEDIATELY to prevent race with refreshNodeView
+	// If we set this after network calls, refreshNodeView might update with old node data
+	p.viewState.SetNodeDetail(nodeName)
 
 	// Find the node model in cached data
 	var nodeModel *model.NodeModel
@@ -344,10 +431,6 @@ func (p *MainPanel) showNodeDetail(nodeName string) {
 		detailData.Events = events
 	}
 
-	// Track that we're showing node detail for live updates
-	p.currentDetailNodeName = nodeName
-	p.currentDetailPodKey = "" // Clear pod tracking
-
 	// Update and show the detail panel
 	p.nodeDetailPanel.DrawBody(detailData)
 	p.app.ShowDetailPage("node_detail")
@@ -359,11 +442,18 @@ func (p *MainPanel) showPodDetail(namespace, podName string) {
 	// Ensure the detail panel exists (lazy initialization)
 	p.ensurePodDetailPanel()
 
+	// Set tracking IMMEDIATELY to prevent race with refreshPodView
+	// If we set this after network calls, refreshPodView might update with old pod data
+	p.viewState.SetPodDetail(namespace, podName)
+
 	// Find the pod model in cached data
+	// CRITICAL: Copy the value instead of storing pointer to slice element
+	// Pointers to slice elements become unstable when the slice is replaced during refresh
 	var podModel *model.PodModel
 	for i := range p.cachedPodModels {
 		if p.cachedPodModels[i].Namespace == namespace && p.cachedPodModels[i].Name == podName {
-			podModel = &p.cachedPodModels[i]
+			pm := p.cachedPodModels[i] // Copy the value
+			podModel = &pm             // Pointer to local copy
 			break
 		}
 	}
@@ -400,20 +490,14 @@ func (p *MainPanel) showPodDetail(namespace, podName string) {
 
 		// Convert to MetricSample format for the detail view
 		if err == nil && cpuHistory != nil && err2 == nil && memHistory != nil {
-			// For pods, we use requested resources as the baseline for ratios
-			// Default values if no requests are set
+			// Use node allocatable as denominator to match real-time sparkline calculation
+			// This ensures history bars and current bars use the same scale
 			allocCPU := int64(1000)    // 1 core default
 			allocMem := int64(1 << 30) // 1 GB default
-			if podModel.PodRequestedCpuQty != nil && podModel.PodRequestedCpuQty.MilliValue() > 0 {
-				allocCPU = podModel.PodRequestedCpuQty.MilliValue()
-			} else if podModel.NodeAllocatableCpuQty != nil && podModel.NodeAllocatableCpuQty.MilliValue() > 0 {
-				// Fallback to node allocatable for pods without requests
+			if podModel.NodeAllocatableCpuQty != nil && podModel.NodeAllocatableCpuQty.MilliValue() > 0 {
 				allocCPU = podModel.NodeAllocatableCpuQty.MilliValue()
 			}
-			if podModel.PodRequestedMemQty != nil && podModel.PodRequestedMemQty.Value() > 0 {
-				allocMem = podModel.PodRequestedMemQty.Value()
-			} else if podModel.NodeAllocatableMemQty != nil && podModel.NodeAllocatableMemQty.Value() > 0 {
-				// Fallback to node allocatable for pods without requests
+			if podModel.NodeAllocatableMemQty != nil && podModel.NodeAllocatableMemQty.Value() > 0 {
 				allocMem = podModel.NodeAllocatableMemQty.Value()
 			}
 
@@ -427,20 +511,38 @@ func (p *MainPanel) showPodDetail(namespace, podName string) {
 		}
 	}
 
-	// Fetch events for this pod
+	// Fetch the full Pod object for detailed info
 	ctrl := p.app.GetK8sClient().Controller()
+	if pod, err := ctrl.GetPod(ctx, namespace, podName); err == nil {
+		detailData.Pod = pod
+	}
+
+	// Fetch events for this pod
 	if events, err := ctrl.GetEventsForPod(ctx, namespace, podName); err == nil {
 		detailData.Events = events
 	}
 
-	// Track that we're showing pod detail for live updates
-	p.currentDetailPodKey = namespace + "/" + podName
-	p.currentDetailNodeName = "" // Clear node tracking
+	// Fetch container metrics for the containers table
+	if p.metricsSource != nil {
+		if podMetrics, err := p.metricsSource.GetPodMetrics(ctx, namespace, podName); err == nil && podMetrics != nil {
+			detailData.ContainerMetrics = make(map[string]model.ContainerUsage)
+			for _, cm := range podMetrics.Containers {
+				usage := model.ContainerUsage{}
+				if cm.CPUUsage != nil {
+					usage.CPUUsage = fmt.Sprintf("%dm", cm.CPUUsage.MilliValue())
+				}
+				if cm.MemoryUsage != nil {
+					usage.MemoryUsage = ui.FormatMemory(cm.MemoryUsage)
+				}
+				detailData.ContainerMetrics[cm.Name] = usage
+			}
+		}
+	}
 
 	// Update and show the detail panel
 	p.podDetailPanel.DrawBody(detailData)
 	p.app.ShowDetailPage("pod_detail")
-	p.app.Focus(p.podDetailPanel.GetRootView())
+	p.podDetailPanel.InitFocus() // Set up initial focus on events panel
 }
 
 func (p *MainPanel) refreshNodeView(ctx context.Context, models []model.NodeModel) error {
@@ -471,9 +573,13 @@ func (p *MainPanel) refreshNodeView(ctx context.Context, models []model.NodeMode
 	}
 
 	// Pre-fetch node detail data if detail view is visible (do network calls outside QueueUpdateDraw)
+	// Use ViewStateManager for thread-safe state access
+	// Capture the node name at fetch time so we can verify it later
 	var nodeDetailData *model.NodeDetailData
-	if p.currentDetailNodeName != "" && p.nodeDetailPanel != nil {
-		nodeDetailData = p.buildNodeDetailData(ctx, p.currentDetailNodeName, nodeModels)
+	var fetchedNodeName string
+	if nodeName, ok := p.viewState.GetNodeDetail(); ok && p.nodeDetailPanel != nil {
+		fetchedNodeName = nodeName
+		nodeDetailData = p.buildNodeDetailData(ctx, nodeName, nodeModels)
 	}
 
 	// Queue UI update on main goroutine to avoid race with Draw()
@@ -485,8 +591,16 @@ func (p *MainPanel) refreshNodeView(ctx context.Context, models []model.NodeMode
 		p.nodePanel.DrawBody(nodeModels)
 
 		// If node detail is currently displayed, update it with pre-fetched data
-		if nodeDetailData != nil && p.nodeDetailPanel != nil {
-			p.nodeDetailPanel.DrawBody(nodeDetailData)
+		// CRITICAL: Re-verify the view state matches what we fetched - user may have
+		// navigated to a different node/page between fetch and now
+		if nodeDetailData != nil && p.nodeDetailPanel != nil && fetchedNodeName != "" {
+			if currentNodeName, ok := p.viewState.GetNodeDetail(); ok {
+				if currentNodeName == fetchedNodeName {
+					p.nodeDetailPanel.DrawBody(nodeDetailData)
+				}
+				// If names don't match, skip this update - the data is stale
+			}
+			// If not on node detail page anymore, skip update
 		}
 	})
 
@@ -539,9 +653,50 @@ func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) er
 	}
 
 	// Pre-fetch pod detail data if detail view is visible (do network calls outside QueueUpdateDraw)
+	// Use ViewStateManager for thread-safe state access
+	// Capture the pod key at fetch time so we can verify it later
 	var podDetailData *model.PodDetailData
-	if p.currentDetailPodKey != "" && p.podDetailPanel != nil {
-		podDetailData = p.buildPodDetailData(ctx, p.currentDetailPodKey, updatedModels)
+	var fetchedPodKey string
+	if namespace, podName, ok := p.viewState.GetPodDetail(); ok && p.podDetailPanel != nil {
+		fetchedPodKey = namespace + "/" + podName
+		podDetailData = p.buildPodDetailData(ctx, fetchedPodKey, updatedModels)
+	}
+
+	// Pre-fetch container metrics if container detail view is visible
+	var containerCPU, containerMem string
+	var fetchedContainerKey string
+	if namespace, podName, containerName, ok := p.viewState.GetContainerLogs(); ok && p.containerDetailPanel != nil {
+		fetchedContainerKey = namespace + "/" + podName + "/" + containerName
+		if p.metricsSource != nil {
+			if podMetrics, err := p.metricsSource.GetPodMetrics(ctx, namespace, podName); err == nil && podMetrics != nil {
+				// Try actual container name first
+				for _, cm := range podMetrics.Containers {
+					if cm.Name == containerName {
+						if cm.CPUUsage != nil {
+							containerCPU = fmt.Sprintf("%dm", cm.CPUUsage.MilliValue())
+						}
+						if cm.MemoryUsage != nil {
+							containerMem = strings.TrimSpace(ui.FormatMemory(cm.MemoryUsage))
+						}
+						break
+					}
+				}
+				// Fallback to "main" for single-container static pods
+				if containerCPU == "" && containerMem == "" {
+					for _, cm := range podMetrics.Containers {
+						if cm.Name == "main" {
+							if cm.CPUUsage != nil {
+								containerCPU = fmt.Sprintf("%dm", cm.CPUUsage.MilliValue())
+							}
+							if cm.MemoryUsage != nil {
+								containerMem = strings.TrimSpace(ui.FormatMemory(cm.MemoryUsage))
+							}
+							break
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Queue UI update on main goroutine to avoid race with Draw()
@@ -553,8 +708,33 @@ func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) er
 		p.displayFilteredPodsInternal()
 
 		// If pod detail is currently displayed, update it with pre-fetched data
-		if podDetailData != nil && p.podDetailPanel != nil {
-			p.podDetailPanel.DrawBody(podDetailData)
+		// CRITICAL: Re-verify the view state matches what we fetched - user may have
+		// navigated to a different pod/page between fetch and now
+		if podDetailData != nil && p.podDetailPanel != nil && fetchedPodKey != "" {
+			if ns, pod, ok := p.viewState.GetPodDetail(); ok {
+				currentKey := ns + "/" + pod
+				if currentKey == fetchedPodKey {
+					// Additional validation: ensure PodModel matches expected identity
+					if podDetailData.PodModel != nil &&
+						podDetailData.PodModel.Namespace == ns &&
+						podDetailData.PodModel.Name == pod {
+						p.podDetailPanel.DrawBody(podDetailData)
+					}
+					// If PodModel doesn't match, skip - data is inconsistent
+				}
+				// If keys don't match, skip this update - the data is stale
+			}
+			// If not on pod detail page anymore, skip update
+		}
+
+		// If container detail is currently displayed, update metrics with pre-fetched data
+		if fetchedContainerKey != "" && p.containerDetailPanel != nil {
+			if ns, pod, container, ok := p.viewState.GetContainerLogs(); ok {
+				currentKey := ns + "/" + pod + "/" + container
+				if currentKey == fetchedContainerKey {
+					p.containerDetailPanel.UpdateMetrics(containerCPU, containerMem)
+				}
+			}
 		}
 	})
 
@@ -698,10 +878,13 @@ func (p *MainPanel) buildPodDetailData(ctx context.Context, podKey string, podMo
 	namespace, podName := parts[0], parts[1]
 
 	// Find the pod model in provided models
+	// CRITICAL: Copy the value instead of storing pointer to slice element
+	// Pointers to slice elements become unstable when the slice is replaced during refresh
 	var podModel *model.PodModel
 	for i := range podModels {
 		if podModels[i].Namespace == namespace && podModels[i].Name == podName {
-			podModel = &podModels[i]
+			pm := podModels[i] // Copy the value
+			podModel = &pm     // Pointer to local copy
 			break
 		}
 	}
@@ -733,16 +916,13 @@ func (p *MainPanel) buildPodDetailData(ctx context.Context, podKey string, podMo
 		})
 
 		if err == nil && cpuHistory != nil && err2 == nil && memHistory != nil {
+			// Use node allocatable as denominator to match real-time sparkline calculation
 			allocCPU := int64(1000)
 			allocMem := int64(1 << 30)
-			if podModel.PodRequestedCpuQty != nil && podModel.PodRequestedCpuQty.MilliValue() > 0 {
-				allocCPU = podModel.PodRequestedCpuQty.MilliValue()
-			} else if podModel.NodeAllocatableCpuQty != nil && podModel.NodeAllocatableCpuQty.MilliValue() > 0 {
+			if podModel.NodeAllocatableCpuQty != nil && podModel.NodeAllocatableCpuQty.MilliValue() > 0 {
 				allocCPU = podModel.NodeAllocatableCpuQty.MilliValue()
 			}
-			if podModel.PodRequestedMemQty != nil && podModel.PodRequestedMemQty.Value() > 0 {
-				allocMem = podModel.PodRequestedMemQty.Value()
-			} else if podModel.NodeAllocatableMemQty != nil && podModel.NodeAllocatableMemQty.Value() > 0 {
+			if podModel.NodeAllocatableMemQty != nil && podModel.NodeAllocatableMemQty.Value() > 0 {
 				allocMem = podModel.NodeAllocatableMemQty.Value()
 			}
 
@@ -755,10 +935,32 @@ func (p *MainPanel) buildPodDetailData(ctx context.Context, podKey string, podMo
 		}
 	}
 
-	// Fetch events for this pod
+	// Fetch the full Pod object for detailed info
 	ctrl := p.app.GetK8sClient().Controller()
+	if pod, err := ctrl.GetPod(ctx, namespace, podName); err == nil {
+		detailData.Pod = pod
+	}
+
+	// Fetch events for this pod
 	if events, err := ctrl.GetEventsForPod(ctx, namespace, podName); err == nil {
 		detailData.Events = events
+	}
+
+	// Fetch container metrics for the containers table
+	if p.metricsSource != nil {
+		if podMetrics, err := p.metricsSource.GetPodMetrics(ctx, namespace, podName); err == nil && podMetrics != nil {
+			detailData.ContainerMetrics = make(map[string]model.ContainerUsage)
+			for _, cm := range podMetrics.Containers {
+				usage := model.ContainerUsage{}
+				if cm.CPUUsage != nil {
+					usage.CPUUsage = fmt.Sprintf("%dm", cm.CPUUsage.MilliValue())
+				}
+				if cm.MemoryUsage != nil {
+					usage.MemoryUsage = ui.FormatMemory(cm.MemoryUsage)
+				}
+				detailData.ContainerMetrics[cm.Name] = usage
+			}
+		}
 	}
 
 	return detailData
