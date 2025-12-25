@@ -51,6 +51,10 @@ type MainPanel struct {
 	// Centralized view state manager - single source of truth for current page/resource
 	// Thread-safe, replaces individual tracking variables
 	viewState *ViewStateManager
+
+	// Dynamic layout tracking
+	lastHeightCategory  int // 0=small, 1=medium, 2=large, 3=extraLarge - for detecting resize category changes
+	lastTerminalHeight  int // Track height for dynamic resizing in ExtraLarge category
 }
 
 func New(app *application.Application, title string) *MainPanel {
@@ -131,21 +135,89 @@ func (p *MainPanel) Layout(data interface{}) {
 		p.podPanel,
 	}
 
-	// Determine summary panel height based on metrics source
-	summaryHeight := 12 // Default for Metrics Server
-	if p.metricsSource != nil {
-		info := p.metricsSource.GetSourceInfo()
-		if info.Type == metrics.SourceTypePrometheus {
-			summaryHeight = 14 // Prometheus: stats + 4 sparklines + enhanced stats
-		}
-	}
+	// Calculate dynamic panel heights based on terminal size
+	// Use default height (50) during initial layout since root doesn't exist yet
+	// The resize check in refreshWorkloadSummary will adjust once app is running
+	isPrometheus := p.metricsSource != nil && p.metricsSource.GetSourceInfo().Type == metrics.SourceTypePrometheus
+	terminalHeight := 50 // Default to medium during initial layout
+	summaryHeight, nodeHeight := p.calculatePanelHeights(terminalHeight, isPrometheus)
+	p.lastHeightCategory = ui.GetHeightCategory(terminalHeight)
+	p.lastTerminalHeight = terminalHeight
 
 	view := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(p.clusterSummaryPanel.GetRootView(), summaryHeight, 0, false).
-		AddItem(p.nodePanel.GetRootView(), 0, 3, true). // 30% of remaining
-		AddItem(p.podPanel.GetRootView(), 0, 7, true)   // 70% of remaining
+		AddItem(p.nodePanel.GetRootView(), nodeHeight, 0, true).
+		AddItem(p.podPanel.GetRootView(), 0, 1, true) // Takes remaining space
 
 	p.root = view
+}
+
+// calculatePanelHeights returns summary and node panel heights based on terminal height
+func (p *MainPanel) calculatePanelHeights(terminalHeight int, isPrometheus bool) (summaryHeight, nodeHeight int) {
+	switch ui.GetHeightCategory(terminalHeight) {
+	case ui.HeightCategoryTooSmall:
+		// Below minimum - use minimal heights (modal will be shown)
+		summaryHeight, nodeHeight = 5, 5
+		return
+	case ui.HeightCategorySmall:
+		// At small heights, stats rows are hidden so both modes use same height
+		summaryHeight, nodeHeight = 7, 8
+		return // Don't add Prometheus bonus at small heights
+	case ui.HeightCategoryMedium:
+		summaryHeight, nodeHeight = 10, 12
+	case ui.HeightCategoryLarge:
+		// Large: same summary height as medium, but more room for nodes
+		summaryHeight, nodeHeight = 10, 15
+	case ui.HeightCategoryExtraLarge:
+		// ExtraLarge: Summary fixed, Nodes gets 45% of remaining space
+		summaryHeight = 10
+		if isPrometheus {
+			summaryHeight = 12
+		}
+		// Available = terminal - header(3) - footer(3) - summary
+		available := terminalHeight - 6 - summaryHeight
+		// Nodes gets 45% of remaining, Pods gets the rest
+		nodeHeight = available * 45 / 100
+		return // Already handled Prometheus bonus above
+	default:
+		summaryHeight, nodeHeight = 10, 15
+	}
+	if isPrometheus {
+		summaryHeight += 2 // Only for medium/large
+	}
+	return
+}
+
+// checkAndRebuildLayout checks if terminal size category changed and rebuilds layout if needed
+func (p *MainPanel) checkAndRebuildLayout() {
+	terminalHeight := p.app.GetTerminalHeight()
+	currentCategory := ui.GetHeightCategory(terminalHeight)
+
+	// Check if we need to rebuild
+	needsRebuild := false
+	if currentCategory != p.lastHeightCategory {
+		// Category changed - always rebuild
+		needsRebuild = true
+	} else if currentCategory == ui.HeightCategoryExtraLarge && terminalHeight != p.lastTerminalHeight {
+		// In ExtraLarge, rebuild when height changes (dynamic sizing)
+		needsRebuild = true
+	}
+
+	if !needsRebuild {
+		return
+	}
+
+	isPrometheus := p.metricsSource != nil && p.metricsSource.GetSourceInfo().Type == metrics.SourceTypePrometheus
+	summaryHeight, nodeHeight := p.calculatePanelHeights(terminalHeight, isPrometheus)
+
+	// Clear and rebuild the flex layout
+	p.root.Clear()
+	p.root.AddItem(p.clusterSummaryPanel.GetRootView(), summaryHeight, 0, false)
+	p.root.AddItem(p.nodePanel.GetRootView(), nodeHeight, 0, true)
+	p.root.AddItem(p.podPanel.GetRootView(), 0, 1, true)
+
+	p.lastHeightCategory = currentCategory
+	p.lastTerminalHeight = terminalHeight
 }
 
 func (p *MainPanel) DrawHeader(_ interface{}) {}
@@ -1000,6 +1072,9 @@ func (p *MainPanel) refreshWorkloadSummary(ctx context.Context, summary model.Cl
 	// Queue UI update on main goroutine to avoid race with Draw()
 	// This is called from controller goroutine, so we must synchronize
 	p.app.QueueUpdateDraw(func() {
+		// Check if terminal size category changed and rebuild layout if needed
+		p.checkAndRebuildLayout()
+
 		p.clusterSummaryPanel.Clear()
 		p.clusterSummaryPanel.DrawBody(summary)
 	})

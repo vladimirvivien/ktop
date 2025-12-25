@@ -36,6 +36,9 @@ type clusterSummaryPanel struct {
 
 	// Layout mode
 	prometheusMode bool
+
+	// Dynamic layout tracking
+	lastTerminalHeight int
 }
 
 func NewClusterSummaryPanel(app *application.Application, title string) ui.Panel {
@@ -68,7 +71,17 @@ func (p *clusterSummaryPanel) Layout(data interface{}) {
 		p.prometheusMode = (info.Type == metrics.SourceTypePrometheus)
 	}
 
+	// Get actual terminal height from application (not panel height)
+	// During initial layout, app may not be fully set up - default to large
+	terminalHeight := 50 // Default to medium/large
+	if p.app != nil {
+		terminalHeight = p.app.GetTerminalHeight()
+	}
+	isSmallHeight := terminalHeight <= 45 // Match HeightCategorySmall threshold
+	p.lastTerminalHeight = terminalHeight
+
 	// Stats view (single line, with border for visual separation)
+	// Always create it even if hidden, for transitions to larger sizes
 	p.statsView = tview.NewTextView()
 	p.statsView.SetDynamicColors(true)
 	p.statsView.SetBorder(true)
@@ -78,43 +91,57 @@ func (p *clusterSummaryPanel) Layout(data interface{}) {
 	p.cpuView = p.createSparklineView()
 	p.memView = p.createSparklineView()
 
+	// Create graphFlex for sparklines
+	var graphFlex *tview.Flex
+
 	if p.prometheusMode {
-		// === PROMETHEUS LAYOUT: 4 sparklines on one row + enhanced stats ===
+		// === PROMETHEUS LAYOUT: 4 sparklines ===
 
 		// Network and Disk sparkline views
 		p.netView = p.createSparklineView()
 		p.diskView = p.createSparklineView()
 
 		// All 4 sparklines side-by-side, each 25% width
-		graphFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
+		graphFlex = tview.NewFlex().SetDirection(tview.FlexColumn).
 			AddItem(p.cpuView, 0, 1, false).  // 25%
 			AddItem(p.memView, 0, 1, false).  // 25%
 			AddItem(p.netView, 0, 1, false).  // 25%
 			AddItem(p.diskView, 0, 1, false)  // 25%
 
-		// Enhanced stats row
+		// Enhanced stats row (always create for transitions)
 		p.enhancedStats = tview.NewTextView()
 		p.enhancedStats.SetDynamicColors(true)
 		p.enhancedStats.SetBorder(true)
 		p.enhancedStats.SetBorderPadding(0, 0, 0, 0)
-
-		// Full layout: stats + 4 sparklines + enhanced stats
-		p.root = tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(p.statsView, 3, 0, false).     // Stats row (3 rows with border)
-			AddItem(graphFlex, 0, 1, false).       // 4 sparklines (flexible)
-			AddItem(p.enhancedStats, 3, 0, false)  // Enhanced stats (3 rows with border)
 	} else {
 		// === METRICS SERVER LAYOUT: 2 sparklines ===
 
 		// Horizontal flex for CPU and MEM sparklines side by side
-		graphFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
+		graphFlex = tview.NewFlex().SetDirection(tview.FlexColumn).
 			AddItem(p.cpuView, 0, 1, false). // 50%
 			AddItem(p.memView, 0, 1, false)  // 50%
+	}
 
-		// Flex layout: stacks bordered stats and graph vertically
-		p.root = tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(p.statsView, 3, 0, false). // 3 rows (1 content + 2 border)
-			AddItem(graphFlex, 0, 1, false)    // remaining for sparklines
+	// Create or clear root and rebuild layout
+	if p.root == nil {
+		p.root = tview.NewFlex().SetDirection(tview.FlexRow)
+	} else {
+		p.root.Clear()
+	}
+
+	// Add items based on height category
+	if isSmallHeight {
+		// Small: sparklines only (no stats rows)
+		p.root.AddItem(graphFlex, 0, 1, false)
+	} else if p.prometheusMode {
+		// Medium/Large Prometheus: stats + sparklines + enhanced stats
+		p.root.AddItem(p.statsView, 3, 0, false)
+		p.root.AddItem(graphFlex, 0, 1, false)
+		p.root.AddItem(p.enhancedStats, 3, 0, false)
+	} else {
+		// Medium/Large Metrics Server: stats + sparklines
+		p.root.AddItem(p.statsView, 3, 0, false)
+		p.root.AddItem(graphFlex, 0, 1, false)
 	}
 
 	p.root.SetBorder(true)
@@ -125,7 +152,25 @@ func (p *clusterSummaryPanel) Layout(data interface{}) {
 
 func (p *clusterSummaryPanel) DrawHeader(data interface{}) {}
 
+// checkAndRebuildLayout checks if terminal size changed across the threshold and rebuilds layout if needed
+func (p *clusterSummaryPanel) checkAndRebuildLayout() {
+	terminalHeight := p.app.GetTerminalHeight()
+	isSmallHeight := terminalHeight <= 45
+	wasSmallHeight := p.lastTerminalHeight > 0 && p.lastTerminalHeight <= 45
+
+	// Only rebuild if small-height state changed
+	if isSmallHeight == wasSmallHeight {
+		p.lastTerminalHeight = terminalHeight
+		return
+	}
+
+	p.lastTerminalHeight = terminalHeight
+	p.Layout(nil)
+}
+
 func (p *clusterSummaryPanel) DrawBody(data interface{}) {
+	// Check if terminal size category changed and rebuild layout if needed
+	p.checkAndRebuildLayout()
 	// Update title with disconnected state if applicable
 	if p.app.IsAPIDisconnected() {
 		p.root.SetTitle(fmt.Sprintf("%s [red][DISCONNECTED - Press R to reconnect]", p.GetTitle()))
@@ -191,19 +236,27 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 			}
 		}
 
+		// Build PV/PVC display strings conditionally (show storage only when count > 0)
+		pvDisplay := fmt.Sprintf("%d", summary.PVCount)
+		if summary.PVCount > 0 {
+			pvDisplay = fmt.Sprintf("%d (%s)", summary.PVCount, ui.FormatMemory(summary.PVsTotal))
+		}
+		pvcDisplay := fmt.Sprintf("%d", summary.PVCCount)
+		if summary.PVCCount > 0 {
+			pvcDisplay = fmt.Sprintf("%d (%s)", summary.PVCCount, ui.FormatMemory(summary.PVCsTotal))
+		}
+
 		// Stats format is the same for both modes
 		statsText := fmt.Sprintf(
-			"[yellow]Uptime: [white]%s [yellow]│ Nodes: [white]%d [yellow]│ NS: [white]%d [yellow]│ Deploys: [%s]%d/%d [yellow]│ Pods: [%s]%d/%d [yellow]│ Containers: [white]%d [yellow]│ Imgs: [white]%d [yellow]│ Vols: [white]%d [yellow]│ PVs: [white]%d (%s) [yellow]│ PVCs: [white]%d (%s)",
+			"[yellow]Uptime: [white]%s [yellow]│ Nodes: [white]%d [yellow]│ NS: [white]%d [yellow]│ Deploys: [%s]%d/%d [yellow]│ Pods: [%s]%d/%d [yellow]│ Vols: [white]%d [yellow]│ PVs: [white]%s [yellow]│ PVCs: [white]%s",
 			duration.HumanDuration(time.Since(summary.Uptime.Time)),
 			summary.NodesReady,
 			summary.Namespaces,
 			deploysColor, summary.DeploymentsReady, summary.DeploymentsTotal,
 			podsColor, summary.PodsRunning, summary.PodsAvailable,
-			summary.ContainerCount,
-			summary.ImagesCount,
 			summary.VolumesInUse,
-			summary.PVCount, ui.FormatMemory(summary.PVsTotal),
-			summary.PVCCount, ui.FormatMemory(summary.PVCsTotal),
+			pvDisplay,
+			pvcDisplay,
 		)
 		p.statsView.SetText(statsText)
 
@@ -363,31 +416,17 @@ func (p *clusterSummaryPanel) drawEnhancedStats(summary model.ClusterSummary) {
 		evictedColor = "yellow"
 	}
 
-	oomColor := "green"
-	if summary.OOMKillCount > 0 {
-		oomColor = "red"
-	}
-
 	pressureColor := "green"
 	if summary.NodePressureCount > 0 {
 		pressureColor = "red"
 	}
 
-	throttledColor := "green"
-	if summary.CPUThrottledPercent > 20 {
-		throttledColor = "red"
-	} else if summary.CPUThrottledPercent > 10 {
-		throttledColor = "yellow"
-	}
-
 	enhancedText := fmt.Sprintf(
-		"[yellow]Restarts: [%s]%d[yellow] │ Failures: [%s]%d[yellow] │ Evicted: [%s]%d[yellow] │ OOMKills: [%s]%d[yellow] │ Pressure: [%s]%d[yellow] │ Throttled: [%s]%.1f%%",
+		"[yellow]Restarts: [%s]%d[yellow] │ Failures: [%s]%d[yellow] │ Evicted: [%s]%d[yellow] │ Pressure: [%s]%d",
 		restartsColor, summary.ContainerRestarts,
 		failuresColor, summary.FailedPods,
 		evictedColor, summary.EvictedPods,
-		oomColor, summary.OOMKillCount,
 		pressureColor, summary.NodePressureCount,
-		throttledColor, summary.CPUThrottledPercent,
 	)
 	p.enhancedStats.SetText(enhancedText)
 }

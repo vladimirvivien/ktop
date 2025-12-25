@@ -27,6 +27,9 @@ type DetailPanel struct {
 	// Track current pod to detect when pod changes (for resetting sparklines)
 	currentPodKey string
 
+	// Dynamic layout tracking
+	lastHeightCategory int
+
 	// Focus management for tab cycling
 	focusedChildIdx int               // Index of currently focused child (-1 = none)
 	focusableItems  []tview.Primitive // Ordered list of focusable primitives
@@ -104,7 +107,8 @@ func (p *DetailPanel) Layout(_ interface{}) {
 	if !p.laidout {
 		colorKeys := ui.ColorKeys{0: "olivedrab", 50: "yellow", 90: "red"}
 
-		// Initialize stateful sparklines (width=20, height=3 for tall multi-line)
+		// Initialize stateful sparklines (width=20, height determined by terminal size)
+		// Default to height=3 for initial layout, will be adjusted on first DrawBody
 		p.cpuSparkline = ui.NewSparklineStateWithHeight(20, 3, colorKeys)
 		p.memSparkline = ui.NewSparklineStateWithHeight(20, 3, colorKeys)
 		p.netSparkline = ui.NewSparklineStateWithHeight(20, 3, colorKeys)
@@ -239,13 +243,18 @@ func (p *DetailPanel) Layout(_ interface{}) {
 
 		p.containersPanel.AddItem(p.containersTable, 0, 1, true)
 
-		// Main layout: vertical flex
+		// Main layout: vertical flex with dynamic heights
+		// Use default height (50) during initial layout since root doesn't exist yet
 		p.root = tview.NewFlex().SetDirection(tview.FlexRow)
-		p.root.AddItem(p.infoHeaderPanel, 3, 0, false)      // Info header: 3 rows
-		p.root.AddItem(p.sparklinePanel, 5, 0, false)       // Sparklines: 5 rows
-		p.root.AddItem(p.podDetailPanel, 20, 0, false)      // Pod Detail: 20 rows (expanded for more fields)
-		p.root.AddItem(p.eventsPanel, 10, 0, false)         // Events: 10 rows
-		p.root.AddItem(p.containersPanel, 0, 1, true)       // Containers: remaining space (flex)
+		terminalHeight := 50 // Default to medium during initial layout
+		heights := p.calculatePanelHeights(terminalHeight)
+		p.lastHeightCategory = ui.GetHeightCategory(terminalHeight)
+
+		p.root.AddItem(p.infoHeaderPanel, heights.infoHeader, 0, false)
+		p.root.AddItem(p.sparklinePanel, heights.sparklines, 0, false)
+		p.root.AddItem(p.podDetailPanel, heights.podDetail, 0, false)
+		p.root.AddItem(p.eventsPanel, heights.events, 0, false)
+		p.root.AddItem(p.containersPanel, 0, 1, true) // Containers: remaining space (flex)
 
 		p.root.SetBorder(true)
 		p.root.SetTitle(fmt.Sprintf(" %s Pod Detail ", ui.Icons.Package))
@@ -350,6 +359,9 @@ func (p *DetailPanel) DrawBody(data interface{}) {
 
 	p.data = detailData
 
+	// Check if terminal size category changed and rebuild layout if needed
+	p.checkAndRebuildLayout()
+
 	// Detect if we're viewing a different pod - if so, reset sparklines
 	newPodKey := ""
 	if p.data.PodModel != nil {
@@ -385,10 +397,25 @@ func (p *DetailPanel) DrawBody(data interface{}) {
 // resetSparklines clears all sparkline state for a fresh start
 func (p *DetailPanel) resetSparklines() {
 	colorKeys := ui.ColorKeys{0: "olivedrab", 50: "yellow", 90: "red"}
-	p.cpuSparkline = ui.NewSparklineStateWithHeight(20, 3, colorKeys)
-	p.memSparkline = ui.NewSparklineStateWithHeight(20, 3, colorKeys)
-	p.netSparkline = ui.NewSparklineStateWithHeight(20, 3, colorKeys)
-	p.diskSparkline = ui.NewSparklineStateWithHeight(20, 3, colorKeys)
+	// Calculate sparkline content height from sparkline panel allocation
+	// Panel height minus 2 for border = content height
+	sparklineContentHeight := p.getSparklineContentHeight()
+	p.cpuSparkline = ui.NewSparklineStateWithHeight(20, sparklineContentHeight, colorKeys)
+	p.memSparkline = ui.NewSparklineStateWithHeight(20, sparklineContentHeight, colorKeys)
+	p.netSparkline = ui.NewSparklineStateWithHeight(20, sparklineContentHeight, colorKeys)
+	p.diskSparkline = ui.NewSparklineStateWithHeight(20, sparklineContentHeight, colorKeys)
+}
+
+// getSparklineContentHeight returns the sparkline content height based on terminal size
+func (p *DetailPanel) getSparklineContentHeight() int {
+	terminalHeight := ui.GetTerminalHeight(p.root)
+	heights := p.calculatePanelHeights(terminalHeight)
+	// Sparkline panel height minus 2 for border = content height
+	contentHeight := heights.sparklines - 2
+	if contentHeight < 1 {
+		contentHeight = 1
+	}
+	return contentHeight
 }
 
 // drawInfoHeader draws the condensed info header row
@@ -1152,4 +1179,47 @@ func (p *DetailPanel) HandleEscape() bool {
 		return true
 	}
 	return false
+}
+
+// podDetailHeights holds panel heights for pod detail view
+type podDetailHeights struct {
+	infoHeader int
+	sparklines int
+	podDetail  int
+	events     int
+}
+
+// calculatePanelHeights returns panel heights based on terminal height
+func (p *DetailPanel) calculatePanelHeights(terminalHeight int) podDetailHeights {
+	switch ui.GetHeightCategory(terminalHeight) {
+	case ui.HeightCategorySmall:
+		return podDetailHeights{infoHeader: 3, sparklines: 4, podDetail: 12, events: 6}
+	case ui.HeightCategoryMedium:
+		return podDetailHeights{infoHeader: 3, sparklines: 5, podDetail: 16, events: 8}
+	default:
+		return podDetailHeights{infoHeader: 3, sparklines: 5, podDetail: 20, events: 10}
+	}
+}
+
+// checkAndRebuildLayout checks if terminal size category changed and rebuilds layout if needed
+func (p *DetailPanel) checkAndRebuildLayout() {
+	terminalHeight := ui.GetTerminalHeight(p.root)
+	currentCategory := ui.GetHeightCategory(terminalHeight)
+
+	// Only rebuild if height category changed
+	if currentCategory == p.lastHeightCategory {
+		return
+	}
+
+	heights := p.calculatePanelHeights(terminalHeight)
+
+	// Clear and rebuild the flex layout
+	p.root.Clear()
+	p.root.AddItem(p.infoHeaderPanel, heights.infoHeader, 0, false)
+	p.root.AddItem(p.sparklinePanel, heights.sparklines, 0, false)
+	p.root.AddItem(p.podDetailPanel, heights.podDetail, 0, false)
+	p.root.AddItem(p.eventsPanel, heights.events, 0, false)
+	p.root.AddItem(p.containersPanel, 0, 1, true)
+
+	p.lastHeightCategory = currentCategory
 }
