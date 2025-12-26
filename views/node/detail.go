@@ -110,7 +110,7 @@ func (p *DetailPanel) Layout(_ interface{}) {
 		p.infoHeaderPanel.SetBorder(true)
 		p.infoHeaderPanel.SetTitle(" Info ")
 		p.infoHeaderPanel.SetTitleAlign(tview.AlignLeft)
-		p.infoHeaderPanel.SetBorderColor(tcell.ColorWhite)
+		p.infoHeaderPanel.SetBorderColor(tcell.ColorLightGray)
 
 		// Create sparkline panel (4 columns)
 		p.sparklinePanel = tview.NewFlex().SetDirection(tview.FlexColumn)
@@ -120,7 +120,7 @@ func (p *DetailPanel) Layout(_ interface{}) {
 		p.systemDetailPanel.SetBorder(true)
 		p.systemDetailPanel.SetTitle(" System Detail ")
 		p.systemDetailPanel.SetTitleAlign(tview.AlignLeft)
-		p.systemDetailPanel.SetBorderColor(tcell.ColorWhite)
+		p.systemDetailPanel.SetBorderColor(tcell.ColorLightGray)
 
 		// Left column: System info table
 		p.leftDetailTable = tview.NewTable()
@@ -156,14 +156,14 @@ func (p *DetailPanel) Layout(_ interface{}) {
 		p.eventsPanel.SetBorder(true)
 		p.eventsPanel.SetTitle(" Events ")
 		p.eventsPanel.SetTitleAlign(tview.AlignLeft)
-		p.eventsPanel.SetBorderColor(tcell.ColorWhite)
+		p.eventsPanel.SetBorderColor(tcell.ColorLightGray)
 
 		p.eventsTable = tview.NewTable()
 		p.eventsTable.SetFixed(1, 0) // Fixed header row
 		p.eventsTable.SetBorder(false)
 		p.eventsTable.SetBorders(false)
-		p.eventsTable.SetSelectable(true, false) // Enable row selection for scrolling
-		p.eventsTable.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorYellow).Foreground(tcell.ColorBlue))
+		p.eventsTable.SetSelectable(false, false) // Start unselectable, enable on focus
+		p.eventsTable.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorLightGray).Foreground(tcell.ColorBlack))
 
 		p.eventsPanel.AddItem(p.eventsTable, 0, 1, false)
 
@@ -172,14 +172,14 @@ func (p *DetailPanel) Layout(_ interface{}) {
 		p.podsPanel.SetBorder(true)
 		p.podsPanel.SetTitle(" Pods ")
 		p.podsPanel.SetTitleAlign(tview.AlignLeft)
-		p.podsPanel.SetBorderColor(tcell.ColorWhite)
+		p.podsPanel.SetBorderColor(tcell.ColorLightGray)
 
 		p.podsTable = tview.NewTable()
 		p.podsTable.SetFixed(1, 0) // Fixed header row
-		p.podsTable.SetSelectable(true, false)
+		p.podsTable.SetSelectable(false, false) // Start unselectable, enable on focus
 		p.podsTable.SetBorder(false)
 		p.podsTable.SetBorders(false)
-		p.podsTable.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorYellow).Foreground(tcell.ColorBlue))
+		p.podsTable.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorLightGray).Foreground(tcell.ColorBlack))
 
 		// Handle keyboard input on pods table
 		p.podsTable.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -455,7 +455,7 @@ func (p *DetailPanel) createSparklineColumn(title string, sparkline *ui.Sparklin
 	panel.SetBorder(true)
 	panel.SetTitle(title)
 	panel.SetTitleAlign(tview.AlignCenter)
-	panel.SetBorderColor(tcell.ColorWhite)
+	panel.SetBorderColor(tcell.ColorLightGray)
 
 	// Create text view for sparkline
 	textView := tview.NewTextView()
@@ -693,8 +693,8 @@ func (p *DetailPanel) drawEventsTable() {
 			expansion = 4 // Give MESSAGE more space
 		}
 		cell := tview.NewTableCell(header).
-			SetTextColor(tcell.ColorYellow).
-			SetBackgroundColor(tcell.ColorDarkGreen).
+			SetTextColor(tcell.ColorWhite).
+			SetBackgroundColor(tcell.ColorDarkCyan).
 			SetSelectable(false).
 			SetExpansion(expansion)
 		p.eventsTable.SetCell(0, col, cell)
@@ -760,8 +760,8 @@ func (p *DetailPanel) drawPodsTable() {
 	headers := []string{"NAMESPACE", "NAME", "STATUS", "READY", "RESTARTS", "CPU", "MEM", "AGE"}
 	for col, header := range headers {
 		cell := tview.NewTableCell(header).
-			SetTextColor(tcell.ColorYellow).
-			SetBackgroundColor(tcell.ColorDarkGreen).
+			SetTextColor(tcell.ColorWhite).
+			SetBackgroundColor(tcell.ColorDarkCyan).
 			SetSelectable(false).
 			SetExpansion(1)
 		p.podsTable.SetCell(0, col, cell)
@@ -936,16 +936,21 @@ func (p *DetailPanel) notifyFooterContextChange() {
 	}
 }
 
-// updateFocusVisuals updates border colors and sets tview focus
+// updateFocusVisuals updates border colors, table selectability, and sets tview focus
 func (p *DetailPanel) updateFocusVisuals() {
 	// Update border colors for all focusable panels
 	for i, panel := range p.focusablePanels {
 		if i == p.focusedChildIdx {
-			panel.SetBorderColor(tcell.ColorYellow)
+			panel.SetBorderColor(tcell.ColorDodgerBlue)
 		} else {
-			panel.SetBorderColor(tcell.ColorWhite)
+			panel.SetBorderColor(tcell.ColorLightGray)
 		}
 	}
+
+	// Update table selectability - only focused table shows selection highlight
+	// Index 0 = events, Index 1 = pods
+	p.eventsTable.SetSelectable(p.focusedChildIdx == 0, false)
+	p.podsTable.SetSelectable(p.focusedChildIdx == 1, false)
 
 	// Set tview focus to the currently focused item
 	if p.setAppFocus != nil && p.focusedChildIdx >= 0 && p.focusedChildIdx < len(p.focusableItems) {

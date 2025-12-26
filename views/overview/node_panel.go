@@ -104,7 +104,7 @@ func (p *nodePanel) Layout(_ interface{}) {
 		p.list.SetBorders(false)
 		p.list.SetFocusFunc(func() {
 			p.list.SetSelectable(true, false)
-			p.list.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorYellow).Foreground(tcell.ColorBlue))
+			p.list.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorLightGray).Foreground(tcell.ColorBlack))
 			p.list.Select(1, 0) // Select row 1 (first data row), column 0
 		})
 		p.list.SetBlurFunc(func() {
@@ -267,7 +267,7 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 		tview.NewTableCell("").
 			SetTextColor(tcell.ColorWhite).
 			SetAlign(tview.AlignCenter).
-			SetBackgroundColor(tcell.ColorDarkGreen).
+			SetBackgroundColor(tcell.ColorDarkCyan).
 			SetMaxWidth(1).
 			SetExpansion(0).
 			SetSelectable(true),
@@ -286,7 +286,7 @@ func (p *nodePanel) DrawHeader(data interface{}) {
 			tview.NewTableCell(headerText).
 				SetTextColor(tcell.ColorWhite).
 				SetAlign(tview.AlignLeft).
-				SetBackgroundColor(tcell.ColorDarkGreen).
+				SetBackgroundColor(tcell.ColorDarkCyan).
 				SetExpansion(100).
 				SetSelectable(true),
 		)

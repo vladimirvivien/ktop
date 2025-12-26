@@ -182,14 +182,14 @@ func (p *DetailPanel) buildLayout() {
 	p.infoHeaderPanel.SetBorder(true)
 	p.infoHeaderPanel.SetTitle(" Info ")
 	p.infoHeaderPanel.SetTitleAlign(tview.AlignLeft)
-	p.infoHeaderPanel.SetBorderColor(tcell.ColorWhite)
+	p.infoHeaderPanel.SetBorderColor(tcell.ColorLightGray)
 
 	// === Container Detail Section (12 rows) ===
 	p.containerDetailPanel = tview.NewFlex().SetDirection(tview.FlexColumn)
 	p.containerDetailPanel.SetBorder(true)
 	p.containerDetailPanel.SetTitle(" Container Detail ")
 	p.containerDetailPanel.SetTitleAlign(tview.AlignCenter)
-	p.containerDetailPanel.SetBorderColor(tcell.ColorWhite)
+	p.containerDetailPanel.SetBorderColor(tcell.ColorLightGray)
 
 	// Left column: Container Info table
 	p.leftDetailTable = tview.NewTable()
@@ -218,7 +218,7 @@ func (p *DetailPanel) buildLayout() {
 	p.logControlPanel.SetBorder(true)
 	p.logControlPanel.SetTitle(" Log Control ")
 	p.logControlPanel.SetTitleAlign(tview.AlignLeft)
-	p.logControlPanel.SetBorderColor(tcell.ColorWhite)
+	p.logControlPanel.SetBorderColor(tcell.ColorLightGray)
 
 	// === Logs View (remaining space) ===
 	p.logsView = tview.NewTextView()
@@ -228,7 +228,7 @@ func (p *DetailPanel) buildLayout() {
 	p.logsView.SetBorder(true)
 	p.logsView.SetTitle(" Logs ")
 	p.logsView.SetTitleAlign(tview.AlignLeft)
-	p.logsView.SetBorderColor(tcell.ColorWhite)
+	p.logsView.SetBorderColor(tcell.ColorLightGray)
 
 	// Assemble main layout with dynamic heights
 	// Use default height (50) during initial layout since root may not be rendered yet
@@ -982,23 +982,23 @@ func (p *DetailPanel) cycleFocus() {
 
 // updateFocusVisuals updates border colors to indicate focused panel
 func (p *DetailPanel) updateFocusVisuals() {
-	// Container Detail panel: yellow when focused, white otherwise
+	// Container Detail panel: dodgerblue when focused, lightgray otherwise
 	if p.containerDetailPanel != nil {
 		if p.focusedChildIdx == 0 {
-			p.containerDetailPanel.SetBorderColor(tcell.ColorYellow)
+			p.containerDetailPanel.SetBorderColor(tcell.ColorDodgerBlue)
 			p.containerDetailPanel.SetTitle(" Container Detail [yellow][s][white]:spec ")
 		} else {
-			p.containerDetailPanel.SetBorderColor(tcell.ColorWhite)
+			p.containerDetailPanel.SetBorderColor(tcell.ColorLightGray)
 			p.containerDetailPanel.SetTitle(" Container Detail ")
 		}
 	}
 
-	// Logs view: yellow when focused, white otherwise
+	// Logs view: dodgerblue when focused, lightgray otherwise
 	if p.logsView != nil {
 		if p.focusedChildIdx == 1 {
-			p.logsView.SetBorderColor(tcell.ColorYellow)
+			p.logsView.SetBorderColor(tcell.ColorDodgerBlue)
 		} else {
-			p.logsView.SetBorderColor(tcell.ColorWhite)
+			p.logsView.SetBorderColor(tcell.ColorLightGray)
 		}
 	}
 }
