@@ -22,6 +22,9 @@ type DetailPanel struct {
 	root    *tview.Flex
 	laidout bool
 
+	// Dynamic layout tracking
+	lastHeightCategory int
+
 	// Container identity
 	namespace     string
 	podName       string
@@ -227,12 +230,17 @@ func (p *DetailPanel) buildLayout() {
 	p.logsView.SetTitleAlign(tview.AlignLeft)
 	p.logsView.SetBorderColor(tcell.ColorWhite)
 
-	// Assemble main layout
+	// Assemble main layout with dynamic heights
+	// Use default height (50) during initial layout since root may not be rendered yet
 	p.root.Clear()
-	p.root.AddItem(p.infoHeaderPanel, 3, 0, false)       // Info header: 3 rows
-	p.root.AddItem(p.containerDetailPanel, 12, 0, false) // Container detail: 12 rows
-	p.root.AddItem(p.logControlPanel, 3, 0, false)       // Log control: 3 rows
-	p.root.AddItem(p.logsView, 0, 1, true)               // Logs: remaining space (flex)
+	terminalHeight := 50 // Default to medium during initial layout
+	heights := p.calculatePanelHeights(terminalHeight)
+	p.lastHeightCategory = ui.GetHeightCategory(terminalHeight)
+
+	p.root.AddItem(p.infoHeaderPanel, heights.infoHeader, 0, false)
+	p.root.AddItem(p.containerDetailPanel, heights.containerDetail, 0, false)
+	p.root.AddItem(p.logControlPanel, heights.logControl, 0, false)
+	p.root.AddItem(p.logsView, 0, 1, true) // Logs: remaining space (flex)
 
 	p.root.SetBorder(true)
 	p.root.SetTitleAlign(tview.AlignCenter)
@@ -1030,6 +1038,9 @@ func (p *DetailPanel) Focus() {
 
 // RefreshData refreshes the container data without restarting log stream
 func (p *DetailPanel) RefreshData() {
+	// Check if terminal size category changed and rebuild layout if needed
+	p.checkAndRebuildLayout()
+
 	p.fetchContainerData()
 	p.updateTitle()
 	p.drawInfoHeader()
@@ -1063,4 +1074,45 @@ func (p *DetailPanel) HandleEscape() bool {
 		return true
 	}
 	return false
+}
+
+// containerDetailHeights holds panel heights for container detail view
+type containerDetailHeights struct {
+	infoHeader      int
+	containerDetail int
+	logControl      int
+}
+
+// calculatePanelHeights returns panel heights based on terminal height
+func (p *DetailPanel) calculatePanelHeights(terminalHeight int) containerDetailHeights {
+	switch ui.GetHeightCategory(terminalHeight) {
+	case ui.HeightCategorySmall:
+		return containerDetailHeights{infoHeader: 3, containerDetail: 8, logControl: 3}
+	case ui.HeightCategoryMedium:
+		return containerDetailHeights{infoHeader: 3, containerDetail: 10, logControl: 3}
+	default:
+		return containerDetailHeights{infoHeader: 3, containerDetail: 12, logControl: 3}
+	}
+}
+
+// checkAndRebuildLayout checks if terminal size category changed and rebuilds layout if needed
+func (p *DetailPanel) checkAndRebuildLayout() {
+	terminalHeight := ui.GetTerminalHeight(p.root)
+	currentCategory := ui.GetHeightCategory(terminalHeight)
+
+	// Only rebuild if height category changed
+	if currentCategory == p.lastHeightCategory {
+		return
+	}
+
+	heights := p.calculatePanelHeights(terminalHeight)
+
+	// Clear and rebuild the flex layout
+	p.root.Clear()
+	p.root.AddItem(p.infoHeaderPanel, heights.infoHeader, 0, false)
+	p.root.AddItem(p.containerDetailPanel, heights.containerDetail, 0, false)
+	p.root.AddItem(p.logControlPanel, heights.logControl, 0, false)
+	p.root.AddItem(p.logsView, 0, 1, true)
+
+	p.lastHeightCategory = currentCategory
 }

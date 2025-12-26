@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/spf13/cobra"
 	"github.com/vladimirvivien/ktop/application"
 	"github.com/vladimirvivien/ktop/config"
@@ -15,6 +16,7 @@ import (
 	"github.com/vladimirvivien/ktop/metrics"
 	k8sMetrics "github.com/vladimirvivien/ktop/metrics/k8s"
 	promMetrics "github.com/vladimirvivien/ktop/metrics/prom"
+	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/overview"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/rest"
@@ -255,6 +257,18 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 
 	if err := k8sC.AssertCoreAuthz(ctx); err != nil {
 		return fmt.Errorf("ktop: %s", err)
+	}
+
+	// Check terminal height before starting TUI
+	screen, err := tcell.NewScreen()
+	if err == nil {
+		if err := screen.Init(); err == nil {
+			_, height := screen.Size()
+			screen.Fini()
+			if height < ui.MinTerminalHeight {
+				return fmt.Errorf("terminal height too small (%d rows). Minimum required: %d rows", height, ui.MinTerminalHeight)
+			}
+		}
 	}
 
 	// launch application

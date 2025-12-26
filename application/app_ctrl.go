@@ -132,6 +132,23 @@ func (app *Application) GetMetricsSource() metrics.MetricsSource {
 	return app.metricsSource
 }
 
+// GetTerminalHeight returns the current terminal height
+func (app *Application) GetTerminalHeight() int {
+	if app.panel == nil {
+		return 50 // Default to medium during initialization
+	}
+	root := app.panel.GetRootView()
+	// Check if root is actually usable (not a nil interface or nil pointer)
+	if root == nil {
+		return 50
+	}
+	// Use type assertion to check for nil pointer wrapped in interface
+	if pages, ok := root.(*tview.Pages); ok && pages == nil {
+		return 50
+	}
+	return ui.GetTerminalHeight(root)
+}
+
 // GetAPIHealthTracker returns the API health tracker for controllers to report status
 func (app *Application) GetAPIHealthTracker() *health.APIHealthTracker {
 	return app.apiHealthTracker

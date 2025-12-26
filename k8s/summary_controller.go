@@ -179,8 +179,8 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	summary.PVCount = len(pvs)
 	summary.PVsTotal = resource.NewQuantity(0, resource.DecimalSI)
 	for _, pv := range pvs {
-		if pv.Status.Phase == coreV1.VolumeBound {
-			summary.PVsTotal.Add(*pv.Spec.Capacity.Storage())
+		if storage := pv.Spec.Capacity.Storage(); storage != nil {
+			summary.PVsTotal.Add(*storage)
 		}
 	}
 
@@ -192,8 +192,8 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	summary.PVCCount = len(pvcs)
 	summary.PVCsTotal = resource.NewQuantity(0, resource.DecimalSI)
 	for _, pvc := range pvcs {
-		if pvc.Status.Phase == coreV1.ClaimBound {
-			summary.PVCsTotal.Add(*pvc.Spec.Resources.Requests.Storage())
+		if storage := pvc.Spec.Resources.Requests.Storage(); storage != nil {
+			summary.PVCsTotal.Add(*storage)
 		}
 	}
 
