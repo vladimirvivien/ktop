@@ -26,7 +26,9 @@ type DetailPanel struct {
 	currentNodeName string
 
 	// Dynamic layout tracking
-	lastHeightCategory int
+	lastHeightCategory   int
+	lastSparklineHeight  int
+	lastInfoHeaderHeight int
 
 	// Focus management for tab cycling
 	focusedChildIdx int              // Index of currently focused child (-1 = none)
@@ -38,13 +40,11 @@ type DetailPanel struct {
 	infoHeaderPanel   *tview.Flex
 	sparklinePanel    *tview.Flex
 	systemDetailPanel *tview.Flex
-	eventsPanel       *tview.Flex
 	podsPanel         *tview.Flex
 
 	// Tables
 	leftDetailTable   *tview.Table
 	middleDetailTable *tview.Table
-	eventsTable       *tview.Table
 	podsTable         *tview.Table
 
 	// Text views for labels/annotations (sorted for stable display)
@@ -58,8 +58,8 @@ type DetailPanel struct {
 	diskSparkline *ui.SparklineState
 
 	// Callbacks
-	onPodSelected       NodeSelectedCallback
-	onBack              func()
+	onPodSelected         NodeSelectedCallback
+	onBack                func()
 	onFooterContextChange func(focusedPanel string)
 }
 
@@ -110,7 +110,7 @@ func (p *DetailPanel) Layout(_ interface{}) {
 		p.infoHeaderPanel.SetBorder(true)
 		p.infoHeaderPanel.SetTitle(" Info ")
 		p.infoHeaderPanel.SetTitleAlign(tview.AlignLeft)
-		p.infoHeaderPanel.SetBorderColor(tcell.ColorWhite)
+		p.infoHeaderPanel.SetBorderColor(tcell.ColorLightGray)
 
 		// Create sparkline panel (4 columns)
 		p.sparklinePanel = tview.NewFlex().SetDirection(tview.FlexColumn)
@@ -120,7 +120,7 @@ func (p *DetailPanel) Layout(_ interface{}) {
 		p.systemDetailPanel.SetBorder(true)
 		p.systemDetailPanel.SetTitle(" System Detail ")
 		p.systemDetailPanel.SetTitleAlign(tview.AlignLeft)
-		p.systemDetailPanel.SetBorderColor(tcell.ColorWhite)
+		p.systemDetailPanel.SetBorderColor(tcell.ColorLightGray)
 
 		// Left column: System info table
 		p.leftDetailTable = tview.NewTable()
@@ -151,35 +151,19 @@ func (p *DetailPanel) Layout(_ interface{}) {
 		p.systemDetailPanel.AddItem(p.labelsTextView, 0, 1, false)
 		p.systemDetailPanel.AddItem(p.annotationsTextView, 0, 1, false)
 
-		// Create events panel with table
-		p.eventsPanel = tview.NewFlex().SetDirection(tview.FlexRow)
-		p.eventsPanel.SetBorder(true)
-		p.eventsPanel.SetTitle(" Events ")
-		p.eventsPanel.SetTitleAlign(tview.AlignLeft)
-		p.eventsPanel.SetBorderColor(tcell.ColorWhite)
-
-		p.eventsTable = tview.NewTable()
-		p.eventsTable.SetFixed(1, 0) // Fixed header row
-		p.eventsTable.SetBorder(false)
-		p.eventsTable.SetBorders(false)
-		p.eventsTable.SetSelectable(true, false) // Enable row selection for scrolling
-		p.eventsTable.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorYellow).Foreground(tcell.ColorBlue))
-
-		p.eventsPanel.AddItem(p.eventsTable, 0, 1, false)
-
 		// Create pods panel with scrollable table
 		p.podsPanel = tview.NewFlex().SetDirection(tview.FlexRow)
 		p.podsPanel.SetBorder(true)
 		p.podsPanel.SetTitle(" Pods ")
 		p.podsPanel.SetTitleAlign(tview.AlignLeft)
-		p.podsPanel.SetBorderColor(tcell.ColorWhite)
+		p.podsPanel.SetBorderColor(tcell.ColorLightGray)
 
 		p.podsTable = tview.NewTable()
 		p.podsTable.SetFixed(1, 0) // Fixed header row
-		p.podsTable.SetSelectable(true, false)
+		p.podsTable.SetSelectable(false, false) // Start unselectable, enable on focus
 		p.podsTable.SetBorder(false)
 		p.podsTable.SetBorders(false)
-		p.podsTable.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorYellow).Foreground(tcell.ColorBlue))
+		p.podsTable.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorLightGray).Foreground(tcell.ColorBlack))
 
 		// Handle keyboard input on pods table
 		p.podsTable.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -211,47 +195,30 @@ func (p *DetailPanel) Layout(_ interface{}) {
 		p.podsPanel.AddItem(p.podsTable, 0, 1, true)
 
 		// Main layout: vertical flex with dynamic heights
-		// Use default height (50) during initial layout since root doesn't exist yet
+		// Sparklines are always shown but with variable height (2 when ≤35, 4 otherwise)
 		p.root = tview.NewFlex().SetDirection(tview.FlexRow)
-		terminalHeight := 50 // Default to medium during initial layout
-		heights := p.calculatePanelHeights(terminalHeight)
-		p.lastHeightCategory = ui.GetHeightCategory(terminalHeight)
 
-		p.root.AddItem(p.infoHeaderPanel, heights.infoHeader, 0, false)
-		p.root.AddItem(p.sparklinePanel, heights.sparklines, 0, false)
-		p.root.AddItem(p.systemDetailPanel, heights.systemDetail, 0, false)
-		p.root.AddItem(p.eventsPanel, heights.events, 0, false)
+		// Initial layout with sparklines (height will be adjusted dynamically)
+		p.root.AddItem(p.infoHeaderPanel, 3, 0, false)
+		p.root.AddItem(p.sparklinePanel, 4, 0, false) // Default height, adjusted in checkAndRebuildLayout
+		p.root.AddItem(p.systemDetailPanel, 12, 0, false)
 		p.root.AddItem(p.podsPanel, 0, 1, true) // Pods: remaining space (flex)
+
+		// Initialize tracking to force rebuild on first DrawBody
+		p.lastHeightCategory = -999  // Invalid value ensures first rebuild
+		p.lastSparklineHeight = 4    // Initial sparkline height
+		p.lastInfoHeaderHeight = 3   // Initial info header height
 
 		p.root.SetBorder(true)
 		p.root.SetTitle(fmt.Sprintf(" %s Node Detail ", ui.Icons.Factory))
 
-		// Set up focusable items for tab cycling
-		// Order: Events -> Pods (the two scrollable/selectable tables)
-		p.focusableItems = []tview.Primitive{p.eventsTable, p.podsTable}
-		p.focusablePanels = []*tview.Flex{p.eventsPanel, p.podsPanel}
-		p.focusedChildIdx = 0 // Start with events focused
+		// Set up focusable items for tab cycling (only pods table now)
+		p.focusableItems = []tview.Primitive{p.podsTable}
+		p.focusablePanels = []*tview.Flex{p.podsPanel}
+		p.focusedChildIdx = 0 // Start with pods focused
 
 		// Set up input capture on root for Tab when page first opens
 		p.root.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-			switch event.Key() {
-			case tcell.KeyTab:
-				p.cycleFocus()
-				return nil
-			case tcell.KeyBacktab:
-				p.cycleFocusReverse()
-				return nil
-			case tcell.KeyEscape:
-				if p.onBack != nil {
-					p.onBack()
-					return nil
-				}
-			}
-			return event
-		})
-
-		// Set up input capture on events table for Tab and ESC
-		p.eventsTable.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 			switch event.Key() {
 			case tcell.KeyTab:
 				p.cycleFocus()
@@ -311,10 +278,13 @@ func (p *DetailPanel) DrawBody(data interface{}) {
 		p.root.SetTitle(fmt.Sprintf(" %s Nodes > [::b]%s[::] ", ui.Icons.Factory, p.data.NodeModel.Name))
 	}
 
-	p.drawInfoHeader()
-	p.drawSparklines()
+	// Only draw info header if it's visible (hidden at panel height ≤31)
+	terminalHeight := ui.GetTerminalHeight(p.root)
+	if terminalHeight > 31 {
+		p.drawInfoHeader()
+	}
+	p.drawSparklines() // Always draw sparklines (height varies based on terminal size)
 	p.drawSystemDetailSection()
-	p.drawEventsTable()
 	p.drawPodsTable()
 }
 
@@ -455,7 +425,7 @@ func (p *DetailPanel) createSparklineColumn(title string, sparkline *ui.Sparklin
 	panel.SetBorder(true)
 	panel.SetTitle(title)
 	panel.SetTitleAlign(tview.AlignCenter)
-	panel.SetBorderColor(tcell.ColorWhite)
+	panel.SetBorderColor(tcell.ColorLightGray)
 
 	// Create text view for sparkline
 	textView := tview.NewTextView()
@@ -586,6 +556,51 @@ func (p *DetailPanel) drawSystemDetailSection() {
 	}
 	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", "Pressures")).SetTextColor(tcell.ColorGray).SetSelectable(false))
 	p.middleDetailTable.SetCell(row, 1, tview.NewTableCell(pressureValue).SetSelectable(false))
+	row++
+
+	// === EVENTS SUMMARY ===
+	row++
+	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]Events[::-]").SetTextColor(tcell.ColorAqua).SetSelectable(false))
+	row++
+
+	if p.data != nil && len(p.data.Events) > 0 {
+		normalCount, warningCount := 0, 0
+		var recentWarning *corev1.Event
+		for i := range p.data.Events {
+			e := &p.data.Events[i]
+			if e.Type == "Warning" {
+				warningCount++
+				if recentWarning == nil {
+					recentWarning = e
+				}
+			} else {
+				normalCount++
+			}
+		}
+
+		p.addDetailRow(p.middleDetailTable, row, "Total", fmt.Sprintf("%d", len(p.data.Events)))
+		row++
+		p.addDetailRow(p.middleDetailTable, row, "Normal", fmt.Sprintf("%d", normalCount))
+		row++
+
+		// Warning with color
+		warningColor := tcell.ColorGreen
+		if warningCount > 0 {
+			warningColor = tcell.ColorYellow
+		}
+		p.addDetailRowColor(p.middleDetailTable, row, "Warning", fmt.Sprintf("%d", warningCount), warningColor)
+		row++
+
+		if recentWarning != nil {
+			reason := recentWarning.Reason
+			if len(reason) > 18 {
+				reason = reason[:15] + "..."
+			}
+			p.addDetailRow(p.middleDetailTable, row, "Recent", fmt.Sprintf("%s (%s)", reason, formatEventAge(*recentWarning)))
+		}
+	} else {
+		p.addDetailRow(p.middleDetailTable, row, "Total", "0")
+	}
 
 	// === LABELS COLUMN (TextView with sorted keys) ===
 	labels := p.data.GetLabels()
@@ -671,77 +686,11 @@ func (p *DetailPanel) addDetailRow(table *tview.Table, row int, key, value strin
 	table.SetCell(row, 1, tview.NewTableCell(value).SetTextColor(tcell.ColorWhite).SetSelectable(false))
 }
 
-// drawEventsTable draws the events table
-func (p *DetailPanel) drawEventsTable() {
-	// Save current selection before clearing
-	selectedRow, selectedCol := p.eventsTable.GetSelection()
-
-	p.eventsTable.Clear()
-
-	// Update title with event count
-	eventCount := 0
-	if p.data != nil {
-		eventCount = len(p.data.Events)
-	}
-	p.eventsPanel.SetTitle(fmt.Sprintf(" Events (%d) ", eventCount))
-
-	// Draw header
-	headers := []string{"TYPE", "REASON", "MESSAGE", "AGE", "COUNT"}
-	for col, header := range headers {
-		expansion := 1
-		if header == "MESSAGE" {
-			expansion = 4 // Give MESSAGE more space
-		}
-		cell := tview.NewTableCell(header).
-			SetTextColor(tcell.ColorYellow).
-			SetBackgroundColor(tcell.ColorDarkGreen).
-			SetSelectable(false).
-			SetExpansion(expansion)
-		p.eventsTable.SetCell(0, col, cell)
-	}
-
-	if p.data == nil || len(p.data.Events) == 0 {
-		// Show "No events" message
-		p.eventsTable.SetCell(1, 0, tview.NewTableCell("").SetSelectable(false))
-		p.eventsTable.SetCell(1, 1, tview.NewTableCell("").SetSelectable(false))
-		p.eventsTable.SetCell(1, 2, tview.NewTableCell("[gray]No events[-]").SetSelectable(false))
-		return
-	}
-
-	// Draw all events (table is scrollable)
-	for i, event := range p.data.Events {
-		rowIdx := i + 1 // Offset for header
-
-		// Type color
-		typeColor := tcell.ColorGreen
-		if event.Type == "Warning" {
-			typeColor = tcell.ColorYellow
-		}
-
-		// Truncate message if too long
-		message := event.Message
-		if len(message) > 80 {
-			message = message[:77] + "..."
-		}
-
-		age := formatEventAge(event)
-		count := fmt.Sprintf("%d", event.Count)
-
-		p.eventsTable.SetCell(rowIdx, 0, tview.NewTableCell(event.Type).SetTextColor(typeColor))
-		p.eventsTable.SetCell(rowIdx, 1, tview.NewTableCell(event.Reason).SetTextColor(tcell.ColorWhite))
-		p.eventsTable.SetCell(rowIdx, 2, tview.NewTableCell(message).SetTextColor(tcell.ColorGray).SetExpansion(4))
-		p.eventsTable.SetCell(rowIdx, 3, tview.NewTableCell(age).SetTextColor(tcell.ColorGray))
-		p.eventsTable.SetCell(rowIdx, 4, tview.NewTableCell(count).SetTextColor(tcell.ColorWhite))
-	}
-
-	// Restore selection (clamped to valid range)
-	maxRow := len(p.data.Events) // +1 for header, but we want max data row index
-	if selectedRow < 1 {
-		selectedRow = 1 // Minimum is first data row
-	} else if selectedRow > maxRow {
-		selectedRow = maxRow
-	}
-	p.eventsTable.Select(selectedRow, selectedCol)
+// addDetailRowColor adds a key-value row with a specific value color
+func (p *DetailPanel) addDetailRowColor(table *tview.Table, row int, key, value string, color tcell.Color) {
+	paddedKey := fmt.Sprintf("%-10s", key)
+	table.SetCell(row, 0, tview.NewTableCell(paddedKey).SetTextColor(tcell.ColorGray).SetSelectable(false))
+	table.SetCell(row, 1, tview.NewTableCell(value).SetTextColor(color).SetSelectable(false))
 }
 
 // drawPodsTable draws the scrollable pods table
@@ -760,8 +709,8 @@ func (p *DetailPanel) drawPodsTable() {
 	headers := []string{"NAMESPACE", "NAME", "STATUS", "READY", "RESTARTS", "CPU", "MEM", "AGE"}
 	for col, header := range headers {
 		cell := tview.NewTableCell(header).
-			SetTextColor(tcell.ColorYellow).
-			SetBackgroundColor(tcell.ColorDarkGreen).
+			SetTextColor(tcell.ColorWhite).
+			SetBackgroundColor(tcell.ColorDarkCyan).
 			SetSelectable(false).
 			SetExpansion(1)
 		p.podsTable.SetCell(0, col, cell)
@@ -889,7 +838,7 @@ func (p *DetailPanel) SetAppFocus(fn func(p tview.Primitive)) {
 
 // InitFocus sets up initial focus when the page is shown
 func (p *DetailPanel) InitFocus() {
-	p.focusedChildIdx = 0 // Start with events
+	p.focusedChildIdx = 0 // Start with pods
 	p.updateFocusVisuals()
 }
 
@@ -918,15 +867,8 @@ func (p *DetailPanel) cycleFocusReverse() {
 
 // GetFocusedPanelName returns the name of the currently focused panel
 func (p *DetailPanel) GetFocusedPanelName() string {
-	// Index 0 = events, Index 1 = pods
-	switch p.focusedChildIdx {
-	case 0:
-		return "events"
-	case 1:
-		return "pods"
-	default:
-		return "events"
-	}
+	// Only pods table is focusable now
+	return "pods"
 }
 
 // notifyFooterContextChange calls the footer context callback if set
@@ -936,16 +878,19 @@ func (p *DetailPanel) notifyFooterContextChange() {
 	}
 }
 
-// updateFocusVisuals updates border colors and sets tview focus
+// updateFocusVisuals updates border colors, table selectability, and sets tview focus
 func (p *DetailPanel) updateFocusVisuals() {
 	// Update border colors for all focusable panels
 	for i, panel := range p.focusablePanels {
 		if i == p.focusedChildIdx {
-			panel.SetBorderColor(tcell.ColorYellow)
+			panel.SetBorderColor(tcell.ColorDodgerBlue)
 		} else {
-			panel.SetBorderColor(tcell.ColorWhite)
+			panel.SetBorderColor(tcell.ColorLightGray)
 		}
 	}
+
+	// Only pods table is focusable now - always show selection
+	p.podsTable.SetSelectable(true, false)
 
 	// Set tview focus to the currently focused item
 	if p.setAppFocus != nil && p.focusedChildIdx >= 0 && p.focusedChildIdx < len(p.focusableItems) {
@@ -981,40 +926,66 @@ type nodeDetailHeights struct {
 	infoHeader   int
 	sparklines   int
 	systemDetail int
-	events       int
 }
 
 // calculatePanelHeights returns panel heights based on terminal height
+// At panel height ≤31: compact layout (no info header, smaller system detail, compact sparklines)
+// Note: Panel height is ~4-5 less than terminal height due to ktop header/footer overhead
 func (p *DetailPanel) calculatePanelHeights(terminalHeight int) nodeDetailHeights {
+	// Compact layout when panel height ≤31 (corresponds to terminal ≤35-36)
+	if terminalHeight <= 31 {
+		return nodeDetailHeights{infoHeader: 0, sparklines: 3, systemDetail: 8}
+	}
+
+	// Normal layout for larger terminals
 	switch ui.GetHeightCategory(terminalHeight) {
 	case ui.HeightCategorySmall:
-		return nodeDetailHeights{infoHeader: 3, sparklines: 4, systemDetail: 6, events: 6}
+		return nodeDetailHeights{infoHeader: 3, sparklines: 4, systemDetail: 12}
 	case ui.HeightCategoryMedium:
-		return nodeDetailHeights{infoHeader: 3, sparklines: 5, systemDetail: 8, events: 8}
+		return nodeDetailHeights{infoHeader: 3, sparklines: 4, systemDetail: 14}
 	default:
-		return nodeDetailHeights{infoHeader: 3, sparklines: 5, systemDetail: 10, events: 10}
+		return nodeDetailHeights{infoHeader: 3, sparklines: 4, systemDetail: 14}
 	}
 }
 
 // checkAndRebuildLayout checks if terminal size category changed and rebuilds layout if needed
 func (p *DetailPanel) checkAndRebuildLayout() {
-	terminalHeight := ui.GetTerminalHeight(p.root)
-	currentCategory := ui.GetHeightCategory(terminalHeight)
-
-	// Only rebuild if height category changed
-	if currentCategory == p.lastHeightCategory {
+	// Get actual dimensions - don't rebuild until we have real values
+	_, _, _, height := p.root.GetRect()
+	if height <= 0 {
+		// Panel not rendered yet, skip rebuild - initial layout will be used
 		return
 	}
 
+	terminalHeight := height // Use actual height, not the default from GetTerminalHeight
+	currentCategory := ui.GetHeightCategory(terminalHeight)
 	heights := p.calculatePanelHeights(terminalHeight)
+
+	// Only rebuild if height category, sparkline height, or info header height changed
+	if currentCategory == p.lastHeightCategory &&
+		heights.sparklines == p.lastSparklineHeight &&
+		heights.infoHeader == p.lastInfoHeaderHeight {
+		return
+	}
+
+	// Track if sparkline height is changing (need to reset sparklines)
+	sparklineHeightChanged := heights.sparklines != p.lastSparklineHeight
 
 	// Clear and rebuild the flex layout
 	p.root.Clear()
-	p.root.AddItem(p.infoHeaderPanel, heights.infoHeader, 0, false)
-	p.root.AddItem(p.sparklinePanel, heights.sparklines, 0, false)
+	if heights.infoHeader > 0 {
+		p.root.AddItem(p.infoHeaderPanel, heights.infoHeader, 0, false)
+	}
+	p.root.AddItem(p.sparklinePanel, heights.sparklines, 0, false) // Always include sparklines
 	p.root.AddItem(p.systemDetailPanel, heights.systemDetail, 0, false)
-	p.root.AddItem(p.eventsPanel, heights.events, 0, false)
 	p.root.AddItem(p.podsPanel, 0, 1, true)
 
 	p.lastHeightCategory = currentCategory
+	p.lastSparklineHeight = heights.sparklines
+	p.lastInfoHeaderHeight = heights.infoHeader
+
+	// Reset sparklines with new height if sparkline panel height changed
+	if sparklineHeightChanged {
+		p.resetSparklines()
+	}
 }

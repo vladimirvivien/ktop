@@ -168,6 +168,20 @@ func (p *clusterSummaryPanel) checkAndRebuildLayout() {
 	p.Layout(nil)
 }
 
+// getSparklineContentHeight returns sparkline content height based on terminal size
+// Uses explicit heights matching detail pages for consistency across all pages
+func (p *clusterSummaryPanel) getSparklineContentHeight() int {
+	terminalHeight := p.app.GetTerminalHeight()
+	switch ui.GetHeightCategory(terminalHeight) {
+	case ui.HeightCategoryTooSmall:
+		return 1
+	case ui.HeightCategorySmall:
+		return 2 // Match detail pages
+	default:
+		return 3 // Match detail pages for medium/large/extralarge
+	}
+}
+
 func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 	// Check if terminal size category changed and rebuild layout if needed
 	p.checkAndRebuildLayout()
@@ -181,12 +195,8 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 	colorKeys := ui.ColorKeys{0: "olivedrab", 40: "yellow", 80: "red"}
 	const defaultWidth = 40 // Initial width before container dimensions are known
 
-	// Sparkline height - use actual view height (minus 2 for border)
-	_, _, _, viewHeight := p.cpuView.GetRect()
-	sparklineHeight := viewHeight - 2 // subtract top/bottom border
-	if sparklineHeight < 1 {
-		sparklineHeight = 1
-	}
+	// Use explicit sparkline height for consistency with detail pages
+	sparklineHeight := p.getSparklineContentHeight()
 
 	switch summary := data.(type) {
 	case model.ClusterSummary:
@@ -312,8 +322,8 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 
 		// === Prometheus-only: Network, Disk, Enhanced Stats ===
 		if p.prometheusMode {
-			p.drawNetworkSparkline(summary, sparklineHeight, colorKeys)
-			p.drawDiskSparkline(summary, sparklineHeight, colorKeys)
+			p.drawNetworkSparkline(summary, colorKeys)
+			p.drawDiskSparkline(summary, colorKeys)
 			p.drawEnhancedStats(summary)
 		}
 
@@ -323,12 +333,13 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 }
 
 // drawNetworkSparkline renders the network I/O sparkline (Prometheus mode only)
-func (p *clusterSummaryPanel) drawNetworkSparkline(summary model.ClusterSummary, height int, colorKeys ui.ColorKeys) {
+func (p *clusterSummaryPanel) drawNetworkSparkline(summary model.ClusterSummary, colorKeys ui.ColorKeys) {
 	if p.netView == nil {
 		return
 	}
 
 	const defaultWidth = 40
+	height := p.getSparklineContentHeight()
 
 	// Initialize sparkline if needed, or recreate if height changed
 	if p.netSparkline == nil || p.netSparkline.Height() != height {
@@ -358,12 +369,13 @@ func (p *clusterSummaryPanel) drawNetworkSparkline(summary model.ClusterSummary,
 }
 
 // drawDiskSparkline renders the disk I/O sparkline (Prometheus mode only)
-func (p *clusterSummaryPanel) drawDiskSparkline(summary model.ClusterSummary, height int, colorKeys ui.ColorKeys) {
+func (p *clusterSummaryPanel) drawDiskSparkline(summary model.ClusterSummary, colorKeys ui.ColorKeys) {
 	if p.diskView == nil {
 		return
 	}
 
 	const defaultWidth = 40
+	height := p.getSparklineContentHeight()
 
 	// Initialize sparkline if needed, or recreate if height changed
 	if p.diskSparkline == nil || p.diskSparkline.Height() != height {
