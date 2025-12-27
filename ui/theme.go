@@ -70,14 +70,14 @@ var Theme = struct {
 	UnfocusBorderColor string // Border color when panel is unfocused (white)
 }{
 	// Header colors
-	HeaderBackground:    "darkgreen",
+	HeaderBackground:    "darkcyan",
 	HeaderForeground:    "white",
 	HeaderShortcutKey:   "orange", // Keyboard shortcut key color
 	HeaderSortIndicator: "white",  // Sort arrow color
 
 	// Selection colors
-	SelectionBackground: "yellow",
-	SelectionForeground: "blue",
+	SelectionBackground: "lightgray",
+	SelectionForeground: "black",
 
 	// Status colors
 	StatusOK:      "olivedrab",
@@ -130,8 +130,8 @@ var Theme = struct {
 	TrendHighThreshold: 0.80,        // 80% threshold for red arrow
 
 	// Panel focus colors
-	FocusBorderColor:   "yellow", // Border color when panel is focused
-	UnfocusBorderColor: "white",  // Border color when panel is unfocused
+	FocusBorderColor:   "dodgerblue", // Border color when panel is focused
+	UnfocusBorderColor: "lightgray",  // Border color when panel is unfocused
 }
 
 // FormatTag returns a tview color/style tag string
@@ -288,12 +288,20 @@ func GetTcellColor(color string) tcell.Color {
 		return tcell.ColorYellow
 	case "cyan":
 		return tcell.ColorDarkCyan
+	case "darkcyan":
+		return tcell.ColorDarkCyan
 	case "gray":
 		return tcell.ColorGray
+	case "lightgray":
+		return tcell.ColorLightGray
 	case "orange":
 		return tcell.ColorOrange
 	case "blue":
 		return tcell.ColorBlue
+	case "dodgerblue":
+		return tcell.ColorDodgerBlue
+	case "black":
+		return tcell.ColorBlack
 	case "white":
 		return tcell.ColorWhite
 	default:
