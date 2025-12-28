@@ -87,7 +87,7 @@ func (p *SpecPanel) buildLayout() {
 
 	p.root.SetBorder(true)
 	p.root.SetTitleAlign(tview.AlignLeft)
-	p.root.SetBorderColor(tcell.ColorWhite)
+	p.root.SetBorderColor(tcell.ColorLightGray)
 }
 
 func (p *SpecPanel) renderSpec() {

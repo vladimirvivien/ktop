@@ -105,7 +105,7 @@ func (p *podPanel) Layout(_ interface{}) {
 		p.list.SetBorders(false)
 		p.list.SetFocusFunc(func() {
 			p.list.SetSelectable(true, false)
-			p.list.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorYellow).Foreground(tcell.ColorBlue))
+			p.list.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorLightGray).Foreground(tcell.ColorBlack))
 			p.list.Select(1, 0) // Select row 1 (first data row), column 0
 		})
 		p.list.SetBlurFunc(func() {
@@ -272,7 +272,7 @@ func (p *podPanel) DrawHeader(data interface{}) {
 		p.list.SetCell(0, i,
 			tview.NewTableCell(headerText).
 				SetTextColor(tcell.ColorWhite).
-				SetBackgroundColor(tcell.ColorDarkGreen).
+				SetBackgroundColor(tcell.ColorDarkCyan).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(100).
 				SetSelectable(true),

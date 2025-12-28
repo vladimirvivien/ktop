@@ -153,15 +153,19 @@ func (p *MainPanel) Layout(data interface{}) {
 }
 
 // calculatePanelHeights returns summary and node panel heights based on terminal height
+// Sparkline content heights are designed to match detail pages:
+// - Small (≤45): 2 rows content
+// - Medium+ (46+): 3 rows content
 func (p *MainPanel) calculatePanelHeights(terminalHeight int, isPrometheus bool) (summaryHeight, nodeHeight int) {
 	switch ui.GetHeightCategory(terminalHeight) {
 	case ui.HeightCategoryTooSmall:
-		// Below minimum - use minimal heights (modal will be shown)
+		// Below minimum - use minimal heights
 		summaryHeight, nodeHeight = 5, 5
 		return
 	case ui.HeightCategorySmall:
-		// At small heights, stats rows are hidden so both modes use same height
-		summaryHeight, nodeHeight = 7, 8
+		// Small: stats hidden, sparklines only with 2-row content (matches detail pages)
+		// graphFlex=4 (2 content + 2 border) + outerBorder=2 = 6
+		summaryHeight, nodeHeight = 6, 8
 		return // Don't add Prometheus bonus at small heights
 	case ui.HeightCategoryMedium:
 		summaryHeight, nodeHeight = 10, 12
@@ -172,7 +176,7 @@ func (p *MainPanel) calculatePanelHeights(terminalHeight int, isPrometheus bool)
 		// ExtraLarge: Summary fixed, Nodes gets 45% of remaining space
 		summaryHeight = 10
 		if isPrometheus {
-			summaryHeight = 12
+			summaryHeight = 13
 		}
 		// Available = terminal - header(3) - footer(3) - summary
 		available := terminalHeight - 6 - summaryHeight
@@ -183,7 +187,9 @@ func (p *MainPanel) calculatePanelHeights(terminalHeight int, isPrometheus bool)
 		summaryHeight, nodeHeight = 10, 15
 	}
 	if isPrometheus {
-		summaryHeight += 2 // Only for medium/large
+		// Prometheus needs extra row for enhanced stats while maintaining 3-row sparklines
+		// graphFlex=5 (3 content + 2 border) + stats=3 + enhanced=3 + outerBorder=2 = 13
+		summaryHeight += 3
 	}
 	return
 }
@@ -382,7 +388,9 @@ func (p *MainPanel) ensureContainerDetailPanel() {
 		}
 		return p.metricsSource.GetPodMetrics(ctx, namespace, podName)
 	})
-	p.containerDetailPanel.SetQueueUpdateFunc(p.app.QueueUpdateDraw)
+	p.containerDetailPanel.SetGetTerminalHeightFunc(func() int {
+		return p.app.GetTerminalHeight()
+	})
 	p.app.AddDetailPage("container_detail", p.containerDetailPanel.GetRootView())
 }
 
