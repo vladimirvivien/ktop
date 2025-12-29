@@ -99,17 +99,31 @@ func (c PodDetailContext) GetItems() []FooterItem {
 
 // ContainerDetailContext provides footer items for Container Detail page
 type ContainerDetailContext struct {
-	FocusedPanel string // optional, container detail has simpler context
+	FocusedPanel string // "detail" or "logs"
 }
 
-// GetItems returns footer items for container detail (static)
+// GetItems returns footer items based on focused panel
 func (c ContainerDetailContext) GetItems() []FooterItem {
-	return []FooterItem{
-		{Key: "[↑/↓]", Action: "scroll"},
-		{Key: "[Tab]", Action: "next"},
-		{Key: "[l]", Action: "logs"},
-		{Key: "[s]", Action: "spec"},
-		{Key: "[ESC]", Action: "back"},
-		{Key: "[Ctrl+C]", Action: "quit"},
+	switch c.FocusedPanel {
+	case "logs":
+		return []FooterItem{
+			{Key: "[↑/↓]", Action: "scroll"},
+			{Key: "[s]", Action: "stream"},
+			{Key: "[t]", Action: "time"},
+			{Key: "[w]", Action: "wrap"},
+			{Key: "[m]", Action: "more"},
+			{Key: "[/]", Action: "filter"},
+			{Key: "[x]", Action: "expand"},
+			{Key: "[g/G]", Action: "top/btm"},
+			{Key: "[ESC]", Action: "back"},
+		}
+	default: // detail panel
+		return []FooterItem{
+			{Key: "[↑/↓]", Action: "scroll"},
+			{Key: "[Tab]", Action: "next"},
+			{Key: "[s]", Action: "spec"},
+			{Key: "[ESC]", Action: "back"},
+			{Key: "[Ctrl+C]", Action: "quit"},
+		}
 	}
 }

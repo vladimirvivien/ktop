@@ -283,6 +283,22 @@ func (p *MainPanel) HandleEscape() bool {
 	return false
 }
 
+// GetActiveDetailPanel returns the currently active detail panel as an EscapablePanel.
+// Returns nil if no detail panel is active or the panel doesn't implement EscapablePanel.
+func (p *MainPanel) GetActiveDetailPanel() ui.EscapablePanel {
+	// Check which detail view is currently active based on viewState
+	if _, _, _, ok := p.viewState.GetContainerLogs(); ok && p.containerDetailPanel != nil {
+		return p.containerDetailPanel
+	}
+	if _, _, ok := p.viewState.GetPodDetail(); ok && p.podDetailPanel != nil {
+		return p.podDetailPanel
+	}
+	if _, ok := p.viewState.GetNodeDetail(); ok && p.nodeDetailPanel != nil {
+		return p.nodeDetailPanel
+	}
+	return nil
+}
+
 func (p *MainPanel) Run(ctx context.Context) error {
 	p.Layout(nil)
 	ctrl := p.app.GetK8sClient().Controller()
@@ -391,6 +407,12 @@ func (p *MainPanel) ensureContainerDetailPanel() {
 	p.containerDetailPanel.SetGetTerminalHeightFunc(func() int {
 		return p.app.GetTerminalHeight()
 	})
+	p.containerDetailPanel.SetQueueUpdateFunc(func(fn func()) {
+		p.app.QueueUpdateDraw(fn)
+	})
+	p.containerDetailPanel.SetOnFooterContextChange(func(focusedPanel string) {
+		p.app.SetFooterContext(ui.ContainerDetailContext{FocusedPanel: focusedPanel})
+	})
 	p.app.AddDetailPage("container_detail", p.containerDetailPanel.GetRootView())
 }
 
@@ -429,6 +451,9 @@ func (p *MainPanel) showContainerLogs(namespace, podName, containerName string) 
 	p.containerDetailPanel.ShowContainer(namespace, podName, containerName)
 	p.app.ShowDetailPage("container_detail")
 	p.app.Focus(p.containerDetailPanel.GetRootView())
+
+	// Set initial footer context (default focus is on logs panel)
+	p.app.SetFooterContext(ui.ContainerDetailContext{FocusedPanel: p.containerDetailPanel.GetFocusedPanelName()})
 }
 
 // showNodeDetail navigates to the node detail view
