@@ -415,8 +415,18 @@ func (app *Application) setup(ctx context.Context) error {
 		// Handle ESC - check if header or visible panel has state to clear first
 		// Global handler runs BEFORE focused widget, so we must check panels here
 		if event.Key() == tcell.KeyEsc {
-			// Check if we're in a detail view - ESC navigates back
+			// Check if we're in a detail view
 			if app.IsInDetailView() {
+				// First check if the detail panel has escapable state (e.g., filter mode)
+				if panel := app.getActiveDetailPanel(); panel != nil {
+					if escapable, ok := panel.(ui.EscapablePanel); ok {
+						if escapable.HandleEscape() {
+							app.Refresh()
+							return nil // Panel handled ESC (e.g., closed filter)
+						}
+					}
+				}
+				// No state to clear - navigate back
 				app.NavigateBack()
 				app.Refresh()
 				return nil
@@ -858,6 +868,17 @@ func (app *Application) IsInDetailView() bool {
 	return current != nil && current.PageType != PageOverview
 }
 
+// getActiveDetailPanel returns the currently active detail panel if any
+func (app *Application) getActiveDetailPanel() ui.EscapablePanel {
+	// MainPanel is always the first page
+	if len(app.pages) > 0 {
+		if provider, ok := app.pages[0].Panel.(interface{ GetActiveDetailPanel() ui.EscapablePanel }); ok {
+			return provider.GetActiveDetailPanel()
+		}
+	}
+	return nil
+}
+
 // AddDetailPage adds a detail page to the application's pages widget
 func (app *Application) AddDetailPage(name string, page tview.Primitive) {
 	app.panel.addDetailPage(name, page)
@@ -909,7 +930,7 @@ func (app *Application) updateFooterContext() {
 	case PagePodDetail:
 		ctx = ui.PodDetailContext{FocusedPanel: "events"}
 	case PageContainerLogs:
-		ctx = ui.ContainerDetailContext{}
+		ctx = ui.ContainerDetailContext{FocusedPanel: "logs"}
 	default:
 		ctx = ui.OverviewContext{FocusedPanel: app.getFocusedPanelName()}
 	}

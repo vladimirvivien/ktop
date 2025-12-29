@@ -50,15 +50,22 @@ type DetailPanel struct {
 	rightDetailTable     *tview.Table
 
 	// UI components - Log section
-	logControlPanel *tview.Flex
-	logsView        *tview.TextView
+	logsView *tview.TextView
 
 	// Log state
-	following  bool
-	timestamps bool
-	wrapText   bool
-	tailLines  int64
-	lineCount  int
+	following        bool
+	timestamps       bool
+	wrapText         bool
+	tailLines        int64
+	lineCount        int
+	totalLinesLoaded int64 // Cumulative lines requested for "load more"
+	logsExpanded     bool  // true when logs panel is expanded to full height
+
+	// Filter state
+	filterMode  bool
+	filterQuery string
+	allLogs     []string    // Store full logs for filtering
+	filterInput *tview.InputField
 
 	// Streaming control
 	cancelFunc context.CancelFunc
@@ -71,22 +78,24 @@ type DetailPanel struct {
 	setAppFocus     func(p tview.Primitive)
 
 	// Callbacks
-	onBack            func()
-	onShowSpec        func(namespace, podName, containerName string, containerSpec *corev1.Container)
-	getLogStream      func(ctx context.Context, namespace, podName string, opts k8s.LogOptions) (io.ReadCloser, error)
-	getPod            func(ctx context.Context, namespace, podName string) (*corev1.Pod, error)
-	getPodMetrics     func(ctx context.Context, namespace, podName string) (*metrics.PodMetrics, error)
-	queueUpdate       func(func())
-	getTerminalHeight func() int
+	onBack                func()
+	onShowSpec            func(namespace, podName, containerName string, containerSpec *corev1.Container)
+	onFooterContextChange func(focusedPanel string)
+	getLogStream          func(ctx context.Context, namespace, podName string, opts k8s.LogOptions) (io.ReadCloser, error)
+	getPod                func(ctx context.Context, namespace, podName string) (*corev1.Pod, error)
+	getPodMetrics         func(ctx context.Context, namespace, podName string) (*metrics.PodMetrics, error)
+	queueUpdate           func(func())
+	getTerminalHeight     func() int
 }
 
 // NewDetailPanel creates a new container detail panel
 func NewDetailPanel() *DetailPanel {
 	p := &DetailPanel{
-		root:      tview.NewFlex().SetDirection(tview.FlexRow),
-		following: true,  // Default to following
-		wrapText:  true,  // Default to wrapped
-		tailLines: 1000,  // Default tail lines
+		root:             tview.NewFlex().SetDirection(tview.FlexRow),
+		following:        true, // Default to streaming (auto-tail)
+		wrapText:         false, // Default to no wrap
+		tailLines:        100,  // Default tail lines (fast initial load)
+		totalLinesLoaded: 100,  // Track cumulative for "load more"
 	}
 
 	p.setupInputCapture()
@@ -101,6 +110,11 @@ func (p *DetailPanel) SetOnBack(callback func()) {
 // SetOnShowSpec sets the callback for when user wants to view container spec
 func (p *DetailPanel) SetOnShowSpec(callback func(namespace, podName, containerName string, containerSpec *corev1.Container)) {
 	p.onShowSpec = callback
+}
+
+// SetOnFooterContextChange sets the callback for when focused panel changes
+func (p *DetailPanel) SetOnFooterContextChange(callback func(focusedPanel string)) {
+	p.onFooterContextChange = callback
 }
 
 // SetAppFocus sets the function to change application focus
@@ -154,6 +168,10 @@ func (p *DetailPanel) ShowContainer(namespace, podName, containerName string) {
 	p.podName = podName
 	p.containerName = containerName
 	p.lineCount = 0
+	p.totalLinesLoaded = 100 // Reset to default for new container
+	p.allLogs = nil          // Clear stored logs
+	p.filterMode = false     // Exit filter mode
+	p.filterQuery = ""
 	p.cpuUsage = ""
 	p.memUsage = ""
 
@@ -183,10 +201,8 @@ func (p *DetailPanel) ShowContainer(namespace, podName, containerName string) {
 	// Draw container detail section
 	p.drawContainerDetail()
 
-	// Update log control panel
-	p.updateLogControlPanel()
-
-	// Clear logs view and start streaming
+	// Update logs title and start streaming
+	p.updateLogsTitle()
 	p.logsView.Clear()
 	p.startLogStream(false)
 }
@@ -228,13 +244,6 @@ func (p *DetailPanel) buildLayout() {
 	p.containerDetailPanel.AddItem(p.centerDetailTable, 0, 1, false)
 	p.containerDetailPanel.AddItem(p.rightDetailTable, 0, 1, false)
 
-	// === Log Control Panel (3 rows) ===
-	p.logControlPanel = tview.NewFlex().SetDirection(tview.FlexColumn)
-	p.logControlPanel.SetBorder(true)
-	p.logControlPanel.SetTitle(" Log Control ")
-	p.logControlPanel.SetTitleAlign(tview.AlignLeft)
-	p.logControlPanel.SetBorderColor(tcell.ColorLightGray)
-
 	// === Logs View (remaining space) ===
 	p.logsView = tview.NewTextView()
 	p.logsView.SetDynamicColors(true)
@@ -255,7 +264,6 @@ func (p *DetailPanel) buildLayout() {
 
 	p.root.AddItem(p.infoHeaderPanel, heights.infoHeader, 0, false)
 	p.root.AddItem(p.containerDetailPanel, heights.containerDetail, 0, false)
-	p.root.AddItem(p.logControlPanel, heights.logControl, 0, false)
 	p.root.AddItem(p.logsView, 0, 1, true) // Logs: remaining space (flex)
 
 	p.root.SetBorder(true)
@@ -723,86 +731,56 @@ func (p *DetailPanel) addDetailRowColor(table *tview.Table, row int, key, value 
 	table.SetCell(row, 1, tview.NewTableCell(value).SetTextColor(color).SetSelectable(false))
 }
 
-func (p *DetailPanel) updateLogControlPanel() {
-	p.logControlPanel.Clear()
-
-	// Container info
-	containerInfo := tview.NewTextView()
-	containerInfo.SetDynamicColors(true)
-	containerInfo.SetText(fmt.Sprintf("[yellow]Container:[white] %s", p.containerName))
-
-	// Pod info
-	podInfo := tview.NewTextView()
-	podInfo.SetDynamicColors(true)
-	podInfo.SetText(fmt.Sprintf("[yellow]Pod:[white] %s", p.podName))
-
-	// Namespace info
-	nsInfo := tview.NewTextView()
-	nsInfo.SetDynamicColors(true)
-	nsInfo.SetText(fmt.Sprintf("[yellow]NS:[white] %s", p.namespace))
-
-	// Lines info
-	linesInfo := tview.NewTextView()
-	linesInfo.SetDynamicColors(true)
-	linesInfo.SetText(fmt.Sprintf("[yellow]Lines:[white] %d", p.lineCount))
-
-	// Status info
-	statusInfo := tview.NewTextView()
-	statusInfo.SetDynamicColors(true)
-	followStatus := "[gray]PAUSED[-]"
-	if p.following {
-		followStatus = "[green]FOLLOWING[-]"
+// updateLogsTitle updates the logs panel title with line count and streaming status
+// Use this only when called from the main goroutine (e.g., toggleFollow)
+func (p *DetailPanel) updateLogsTitle() {
+	expandIndicator := ""
+	if p.logsExpanded {
+		expandIndicator = " [blue]expanded[-]"
 	}
-	statusInfo.SetText(followStatus)
 
-	// Shortcuts
-	shortcuts := tview.NewTextView()
-	shortcuts.SetDynamicColors(true)
-	shortcuts.SetTextAlign(tview.AlignRight)
-	shortcuts.SetText("[yellow]Tab[white]:select [yellow]f[white]:follow [yellow]p[white]:prev [yellow]t[white]:time [yellow]w[white]:wrap [yellow]g/G[white]:top/btm [yellow]ESC[white]:back")
+	if p.following {
+		p.logsView.SetTitle(fmt.Sprintf(" Logs (%d lines [green]streaming[-])%s ", p.lineCount, expandIndicator))
+	} else {
+		p.logsView.SetTitle(fmt.Sprintf(" Logs (%d lines)%s ", p.lineCount, expandIndicator))
+	}
+}
 
-	p.logControlPanel.AddItem(containerInfo, 0, 1, false)
-	p.logControlPanel.AddItem(podInfo, 0, 1, false)
-	p.logControlPanel.AddItem(nsInfo, 0, 1, false)
-	p.logControlPanel.AddItem(linesInfo, 12, 0, false)
-	p.logControlPanel.AddItem(statusInfo, 12, 0, false)
-	p.logControlPanel.AddItem(shortcuts, 0, 2, false)
+// updateLogsTitleWithCount updates the logs panel title with the given line count
+// Use this when called from closures in queueUpdate to avoid race conditions
+func (p *DetailPanel) updateLogsTitleWithCount(count int) {
+	p.streamMu.Lock()
+	following := p.following
+	expanded := p.logsExpanded
+	p.streamMu.Unlock()
+
+	expandIndicator := ""
+	if expanded {
+		expandIndicator = " [blue]expanded[-]"
+	}
+
+	if following {
+		p.logsView.SetTitle(fmt.Sprintf(" Logs (%d lines [green]streaming[-])%s ", count, expandIndicator))
+	} else {
+		p.logsView.SetTitle(fmt.Sprintf(" Logs (%d lines)%s ", count, expandIndicator))
+	}
 }
 
 func (p *DetailPanel) setupInputCapture() {
 	p.root.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		// Note: ESC is handled at the app level via HandleEscape()
+		// which properly checks filterMode before navigating back
+
+		// When in filter mode, pass all keys to the filter input (except ESC which is handled at app level)
+		if p.filterMode {
+			return event
+		}
+
 		switch event.Key() {
-		case tcell.KeyEscape:
-			p.stopStream()
-			if p.onBack != nil {
-				p.onBack()
-			}
-			return nil
-
-		case tcell.KeyTab:
-			p.cycleFocus()
-			return nil
-
-		case tcell.KeyEnter:
-			// Enter shows spec when Container Detail panel is focused
-			if p.focusedChildIdx == 0 {
-				p.showSpec()
-				return nil
-			}
-
 		case tcell.KeyRune:
 			switch event.Rune() {
 			case 's', 'S':
-				// Show spec when Container Detail panel is focused
-				if p.focusedChildIdx == 0 {
-					p.showSpec()
-					return nil
-				}
-			case 'f', 'F':
 				p.toggleFollow()
-				return nil
-			case 'p', 'P':
-				p.showPreviousLogs()
 				return nil
 			case 't', 'T':
 				p.toggleTimestamps()
@@ -816,6 +794,15 @@ func (p *DetailPanel) setupInputCapture() {
 			case 'G':
 				p.logsView.ScrollToEnd()
 				return nil
+			case 'm', 'M':
+				p.loadMoreLogs()
+				return nil
+			case '/':
+				p.enterFilterMode()
+				return nil
+			case 'x', 'X':
+				p.toggleLogsExpand()
+				return nil
 			}
 		}
 		return event
@@ -825,16 +812,17 @@ func (p *DetailPanel) setupInputCapture() {
 func (p *DetailPanel) toggleFollow() {
 	p.streamMu.Lock()
 	p.following = !p.following
+	following := p.following
 	p.streamMu.Unlock()
 
-	if p.following {
-		p.startLogStream(false)
-	} else {
-		p.stopStream()
-	}
+	// Just toggle auto-scroll behavior - stream keeps running
+	// No need to stop/restart the stream
+	p.updateLogsTitle()
 
-	p.updateLogControlPanel()
-	p.queueRedraw()
+	// If re-enabling follow, scroll to end
+	if following {
+		p.logsView.ScrollToEnd()
+	}
 }
 
 func (p *DetailPanel) showPreviousLogs() {
@@ -858,7 +846,245 @@ func (p *DetailPanel) toggleTimestamps() {
 func (p *DetailPanel) toggleWrap() {
 	p.wrapText = !p.wrapText
 	p.logsView.SetWrap(p.wrapText)
-	p.queueRedraw()
+	// No need to queue redraw - SetWrap triggers redraw automatically
+}
+
+// toggleLogsExpand toggles between expanded (full height) and normal logs view
+func (p *DetailPanel) toggleLogsExpand() {
+	p.logsExpanded = !p.logsExpanded
+	p.rebuildLayoutForExpand()
+	p.updateLogsTitle()
+}
+
+// rebuildLayoutForExpand rebuilds layout based on logsExpanded state
+func (p *DetailPanel) rebuildLayoutForExpand() {
+	p.root.Clear()
+
+	if p.logsExpanded {
+		// Expanded mode: only show logs panel
+		p.root.AddItem(p.logsView, 0, 1, true)
+	} else {
+		// Normal mode: show all panels with dynamic heights
+		_, _, _, height := p.root.GetRect()
+		if height <= 0 {
+			height = 50 // Default during initial layout
+		}
+		heights := p.calculatePanelHeights(height)
+		if heights.infoHeader > 0 {
+			p.root.AddItem(p.infoHeaderPanel, heights.infoHeader, 0, false)
+		}
+		p.root.AddItem(p.containerDetailPanel, heights.containerDetail, 0, false)
+		p.root.AddItem(p.logsView, 0, 1, true)
+	}
+
+	p.updateFocusVisuals()
+}
+
+// loadMoreLogs fetches 100 additional older lines
+func (p *DetailPanel) loadMoreLogs() {
+	if p.getLogStream == nil {
+		return
+	}
+
+	// Stop current stream and clear logs
+	p.stopStream()
+
+	// Store current state
+	currentRow, currentCol := p.logsView.GetScrollOffset()
+	prevLineCount := p.lineCount
+
+	// Increase tail lines by 100
+	p.streamMu.Lock()
+	p.totalLinesLoaded += 100
+	p.tailLines = p.totalLinesLoaded
+	wasFollowing := p.following // Remember if we were streaming
+	p.following = false         // Temporarily disable following during historical fetch
+	p.streamMu.Unlock()
+
+	// Clear and show loading state
+	p.logsView.Clear()
+	p.lineCount = 0
+	p.allLogs = nil
+	p.logsView.SetTitle(" Logs (loading...) ")
+
+	// Fetch in background goroutine
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		opts := k8s.LogOptions{
+			Container:  p.containerName,
+			Follow:     false, // Historical fetch without streaming
+			Timestamps: p.timestamps,
+			TailLines:  p.tailLines,
+		}
+
+		stream, err := p.getLogStream(ctx, p.namespace, p.podName, opts)
+		if err != nil {
+			p.appendLog(fmt.Sprintf("[red]Error loading more logs: %v", err))
+			return
+		}
+		defer stream.Close()
+
+		scanner := bufio.NewScanner(stream)
+		buf := make([]byte, 0, 64*1024)
+		scanner.Buffer(buf, 1024*1024)
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			formatted := p.formatLogLine(line)
+
+			p.streamMu.Lock()
+			p.lineCount++
+			p.allLogs = append(p.allLogs, formatted)
+			p.streamMu.Unlock()
+
+			fmt.Fprintln(p.logsView, formatted)
+		}
+
+		// Calculate scroll position adjustment
+		newLinesAdded := p.lineCount - prevLineCount
+		if newLinesAdded < 0 {
+			newLinesAdded = 0
+		}
+		newRow := currentRow + newLinesAdded
+
+		// Final UI update
+		p.streamMu.Lock()
+		finalCount := p.lineCount
+		p.streamMu.Unlock()
+
+		if p.queueUpdate != nil {
+			p.queueUpdate(func() {
+				p.logsView.ScrollTo(newRow, currentCol)
+				p.updateLogsTitleWithCount(finalCount)
+
+				// Restart streaming if it was active before loading more
+				if wasFollowing {
+					p.streamMu.Lock()
+					p.following = true
+					p.streamMu.Unlock()
+					p.startLogStream(false)
+				}
+			})
+		}
+	}()
+}
+
+// enterFilterMode enters filter mode and shows the filter input
+func (p *DetailPanel) enterFilterMode() {
+	// Already in filter mode - don't add another input
+	if p.filterMode {
+		return
+	}
+
+	// Create filter input if not exists
+	if p.filterInput == nil {
+		p.filterInput = tview.NewInputField()
+		p.filterInput.SetLabel("[yellow]/[-] ")
+		p.filterInput.SetFieldBackgroundColor(tcell.ColorDarkBlue)
+		p.filterInput.SetLabelColor(tcell.ColorYellow)
+
+		// Handle Enter and Escape keys via DoneFunc
+		p.filterInput.SetDoneFunc(func(key tcell.Key) {
+			switch key {
+			case tcell.KeyEnter:
+				query := p.filterInput.GetText()
+				p.applyFilter(query)
+			case tcell.KeyEscape:
+				p.exitFilterMode()
+			}
+		})
+	}
+
+	p.filterInput.SetText("")
+	p.filterMode = true
+
+	// Add filter input to the layout
+	p.root.AddItem(p.filterInput, 1, 0, true)
+
+	// Focus the input
+	if p.setAppFocus != nil {
+		p.setAppFocus(p.filterInput)
+	}
+}
+
+// applyFilter applies the filter and shows only matching lines
+func (p *DetailPanel) applyFilter(query string) {
+	p.streamMu.Lock()
+	p.filterQuery = query
+	logs := make([]string, len(p.allLogs))
+	copy(logs, p.allLogs)
+	p.streamMu.Unlock()
+
+	// Remove filter input from layout but keep filter mode active
+	p.root.RemoveItem(p.filterInput)
+
+	// Return focus to logs
+	if p.setAppFocus != nil {
+		p.setAppFocus(p.logsView)
+	}
+
+	// Clear and rerender filtered logs
+	p.logsView.Clear()
+
+	matchCount := 0
+	if query == "" {
+		// Empty query - show all logs
+		for _, line := range logs {
+			fmt.Fprintln(p.logsView, p.formatLogLine(line))
+			matchCount++
+		}
+	} else {
+		queryLower := strings.ToLower(query)
+		for _, line := range logs {
+			if strings.Contains(strings.ToLower(line), queryLower) {
+				fmt.Fprintln(p.logsView, p.formatLogLine(line))
+				matchCount++
+			}
+		}
+	}
+
+	// Update title with filter info
+	if query != "" {
+		p.logsView.SetTitle(fmt.Sprintf(" Logs (%d/%d matching \"%s\") ", matchCount, len(logs), query))
+	} else {
+		p.updateLogsTitle()
+	}
+
+	p.logsView.ScrollToEnd()
+}
+
+// exitFilterMode exits filter mode and shows all logs
+func (p *DetailPanel) exitFilterMode() {
+	// Remove filter input from layout if present
+	if p.filterInput != nil {
+		p.root.RemoveItem(p.filterInput)
+	}
+
+	wasFiltering := p.filterMode && p.filterQuery != ""
+
+	p.streamMu.Lock()
+	p.filterMode = false
+	p.filterQuery = ""
+	logs := make([]string, len(p.allLogs))
+	copy(logs, p.allLogs)
+	p.streamMu.Unlock()
+
+	// Return focus to logs
+	if p.setAppFocus != nil {
+		p.setAppFocus(p.logsView)
+	}
+
+	// Only re-render if we were actually filtering
+	if wasFiltering {
+		p.logsView.Clear()
+		for _, line := range logs {
+			fmt.Fprintln(p.logsView, p.formatLogLine(line))
+		}
+		p.updateLogsTitle()
+		p.logsView.ScrollToEnd()
+	}
 }
 
 func (p *DetailPanel) startLogStream(previous bool) {
@@ -894,6 +1120,21 @@ func (p *DetailPanel) startLogStream(previous bool) {
 			return
 		}
 		defer stream.Close()
+
+		// Ensure final UI update when goroutine exits
+		defer func() {
+			if p.queueUpdate != nil {
+				// Capture lineCount under mutex to avoid race condition
+				p.streamMu.Lock()
+				finalCount := p.lineCount
+				p.streamMu.Unlock()
+
+				p.queueUpdate(func() {
+					p.logsView.ScrollToEnd()
+					p.updateLogsTitleWithCount(finalCount)
+				})
+			}
+		}()
 
 		scanner := bufio.NewScanner(stream)
 		buf := make([]byte, 0, 64*1024)
@@ -957,18 +1198,32 @@ func (p *DetailPanel) appendLog(line string) {
 	p.lineCount++
 	count := p.lineCount
 	following := p.following
+	filterMode := p.filterMode
+	filterQuery := p.filterQuery
+	// Store the original line (without formatting) for filtering
+	p.allLogs = append(p.allLogs, line)
 	p.streamMu.Unlock()
 
+	// In filter mode, only show matching lines
+	if filterMode && filterQuery != "" {
+		if !strings.Contains(strings.ToLower(line), strings.ToLower(filterQuery)) {
+			return // Skip non-matching lines
+		}
+	}
+
+	// Write directly to logsView (tview.TextView is goroutine-safe for writes)
+	fmt.Fprintln(p.logsView, line)
+
+	// Update title on every line for responsive count display
 	if p.queueUpdate != nil {
+		// Capture values for closure to avoid race conditions
+		capturedCount := count
+		capturedFollowing := following
 		p.queueUpdate(func() {
-			fmt.Fprintln(p.logsView, line)
-			if following {
+			if capturedFollowing {
 				p.logsView.ScrollToEnd()
 			}
-			// Update line count in control panel periodically
-			if count%100 == 0 {
-				p.updateLogControlPanel()
-			}
+			p.updateLogsTitleWithCount(capturedCount)
 		})
 	}
 }
@@ -993,6 +1248,28 @@ func (p *DetailPanel) cycleFocus() {
 	// Set application focus to the new item
 	if p.setAppFocus != nil {
 		p.setAppFocus(p.focusableItems[p.focusedChildIdx])
+	}
+
+	// Notify footer context change
+	p.notifyFooterContextChange()
+}
+
+// GetFocusedPanelName returns the name of the currently focused panel
+func (p *DetailPanel) GetFocusedPanelName() string {
+	switch p.focusedChildIdx {
+	case 0:
+		return "detail"
+	case 1:
+		return "logs"
+	default:
+		return ""
+	}
+}
+
+// notifyFooterContextChange notifies listeners that the focused panel changed
+func (p *DetailPanel) notifyFooterContextChange() {
+	if p.onFooterContextChange != nil {
+		p.onFooterContextChange(p.GetFocusedPanelName())
 	}
 }
 
@@ -1067,7 +1344,7 @@ func (p *DetailPanel) RefreshData() {
 	}
 
 	p.drawContainerDetail()
-	p.updateLogControlPanel()
+	p.updateLogsTitle()
 }
 
 // UpdateMetrics updates the CPU and memory usage values and redraws.
@@ -1095,16 +1372,17 @@ func (p *DetailPanel) SetFocused(focused bool) {
 
 // HasEscapableState implements ui.EscapablePanel
 func (p *DetailPanel) HasEscapableState() bool {
-	return true // Always allow ESC to go back
+	return p.filterMode // Has state to clear if in filter mode
 }
 
 // HandleEscape implements ui.EscapablePanel
 func (p *DetailPanel) HandleEscape() bool {
-	p.stopStream()
-	if p.onBack != nil {
-		p.onBack()
-		return true
+	// If in filter mode, exit filter mode first
+	if p.filterMode {
+		p.exitFilterMode()
+		return true // Handled - don't navigate back
 	}
+	// Not in filter mode - let app handle navigation
 	return false
 }
 
@@ -1112,7 +1390,6 @@ func (p *DetailPanel) HandleEscape() bool {
 type containerDetailHeights struct {
 	infoHeader      int
 	containerDetail int
-	logControl      int
 }
 
 // calculatePanelHeights returns panel heights based on panel height
@@ -1121,22 +1398,27 @@ type containerDetailHeights struct {
 func (p *DetailPanel) calculatePanelHeights(panelHeight int) containerDetailHeights {
 	// Compact layout when panel height ≤31 (corresponds to terminal ≤35-36)
 	if panelHeight <= 31 {
-		return containerDetailHeights{infoHeader: 0, containerDetail: 8, logControl: 3}
+		return containerDetailHeights{infoHeader: 0, containerDetail: 8}
 	}
 
 	// Normal layout for larger panels
 	switch ui.GetHeightCategory(panelHeight) {
 	case ui.HeightCategorySmall:
-		return containerDetailHeights{infoHeader: 3, containerDetail: 8, logControl: 3}
+		return containerDetailHeights{infoHeader: 3, containerDetail: 8}
 	case ui.HeightCategoryMedium:
-		return containerDetailHeights{infoHeader: 3, containerDetail: 10, logControl: 3}
+		return containerDetailHeights{infoHeader: 3, containerDetail: 10}
 	default:
-		return containerDetailHeights{infoHeader: 3, containerDetail: 12, logControl: 3}
+		return containerDetailHeights{infoHeader: 3, containerDetail: 12}
 	}
 }
 
 // checkAndRebuildLayout checks if terminal size category changed and rebuilds layout if needed
 func (p *DetailPanel) checkAndRebuildLayout() {
+	// Skip dynamic rebuild when logs are expanded - user controls this manually
+	if p.logsExpanded {
+		return
+	}
+
 	// Get actual dimensions - don't rebuild until we have real values
 	_, _, _, height := p.root.GetRect()
 	if height <= 0 {
@@ -1159,7 +1441,6 @@ func (p *DetailPanel) checkAndRebuildLayout() {
 		p.root.AddItem(p.infoHeaderPanel, heights.infoHeader, 0, false)
 	}
 	p.root.AddItem(p.containerDetailPanel, heights.containerDetail, 0, false)
-	p.root.AddItem(p.logControlPanel, heights.logControl, 0, false)
 	p.root.AddItem(p.logsView, 0, 1, true)
 
 	p.lastHeightCategory = currentCategory
