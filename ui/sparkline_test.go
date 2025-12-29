@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-func TestNewSparkline(t *testing.T) {
+func TestNewSparklineRenderer(t *testing.T) {
 	data := []float64{1, 2, 3, 4, 5}
-	spark := NewSparkline(data, 10, 1)
+	spark := NewSparklineRenderer(data, 10, 1)
 
 	if spark.Width != 10 {
 		t.Errorf("Expected width 10, got %d", spark.Width)
@@ -23,8 +23,8 @@ func TestNewSparkline(t *testing.T) {
 	}
 }
 
-func TestNewSparkline_MinimumDimensions(t *testing.T) {
-	spark := NewSparkline(nil, 0, 0)
+func TestNewSparklineRenderer_MinimumDimensions(t *testing.T) {
+	spark := NewSparklineRenderer(nil, 0, 0)
 
 	if spark.Width != 1 {
 		t.Errorf("Expected minimum width 1, got %d", spark.Width)
@@ -72,7 +72,7 @@ func TestSparkline_Normalize(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			spark := NewSparkline(tc.data, 10, 1)
+			spark := NewSparklineRenderer(tc.data, 10, 1)
 			spark.Min = tc.min
 			spark.Max = tc.max
 
@@ -92,7 +92,7 @@ func TestSparkline_Normalize(t *testing.T) {
 }
 
 func TestSparkline_Render_EmptyData(t *testing.T) {
-	spark := NewSparkline(nil, 5, 1)
+	spark := NewSparklineRenderer(nil, 5, 1)
 	result := spark.Render()
 
 	// Should return empty braille characters
@@ -109,7 +109,7 @@ func TestSparkline_Render_EmptyData(t *testing.T) {
 func TestSparkline_Render_BasicBar(t *testing.T) {
 	// Create a simple increasing pattern
 	data := []float64{0.25, 0.5, 0.75, 1.0}
-	spark := NewSparkline(data, 4, 1)
+	spark := NewSparklineRenderer(data, 4, 1)
 	spark.Colors = ColorKeys{0: "white"} // Simple single color
 
 	result := spark.Render()
@@ -128,7 +128,7 @@ func TestSparkline_Render_BasicBar(t *testing.T) {
 func TestSparkline_Render_FullBar(t *testing.T) {
 	// All maximum values should produce full bars
 	data := []float64{100, 100, 100, 100}
-	spark := NewSparkline(data, 2, 1)
+	spark := NewSparklineRenderer(data, 2, 1)
 	spark.Colors = ColorKeys{0: "white"}
 
 	result := spark.Render()
@@ -141,7 +141,7 @@ func TestSparkline_Render_FullBar(t *testing.T) {
 
 func TestSparkline_Render_MultiRow(t *testing.T) {
 	data := []float64{0, 0.5, 1.0}
-	spark := NewSparkline(data, 3, 2)
+	spark := NewSparklineRenderer(data, 3, 2)
 	spark.Colors = ColorKeys{0: "white"}
 
 	result := spark.Render()
@@ -205,7 +205,7 @@ func TestSparkline_TrendIndicator(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			spark := NewSparkline(tc.data, 10, 1)
+			spark := NewSparklineRenderer(tc.data, 10, 1)
 			result := spark.TrendIndicator(tc.percentage)
 
 			if tc.expectEmpty {
@@ -244,7 +244,7 @@ func TestSparkline_LastValue(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			spark := NewSparkline(tc.data, 10, 1)
+			spark := NewSparklineRenderer(tc.data, 10, 1)
 			result := spark.LastValue()
 
 			if result != tc.expected {
@@ -255,7 +255,7 @@ func TestSparkline_LastValue(t *testing.T) {
 }
 
 func TestSparkline_AddPoint(t *testing.T) {
-	spark := NewSparkline([]float64{1, 2, 3}, 10, 1)
+	spark := NewSparklineRenderer([]float64{1, 2, 3}, 10, 1)
 
 	spark.AddPoint(4, 0) // No max
 	if len(spark.Data) != 4 {
@@ -276,7 +276,7 @@ func TestSparkline_AddPoint(t *testing.T) {
 }
 
 func TestSparkline_ResampleData(t *testing.T) {
-	spark := NewSparkline(nil, 10, 1)
+	spark := NewSparklineRenderer(nil, 10, 1)
 
 	// Stretch case: less data than width
 	smallData := []float64{0, 1}
@@ -307,7 +307,7 @@ func TestSparkline_ResampleData(t *testing.T) {
 
 func TestSparkline_Colors(t *testing.T) {
 	data := []float64{10, 50, 90}
-	spark := NewSparkline(data, 6, 1)
+	spark := NewSparklineRenderer(data, 6, 1)
 	spark.Colors = ColorKeys{0: "green", 50: "yellow", 80: "red"}
 
 	result := spark.Render()
@@ -320,8 +320,8 @@ func TestSparkline_Colors(t *testing.T) {
 
 func TestSparkline_Inverted(t *testing.T) {
 	data := []float64{0.5, 0.5, 0.5}
-	sparkNormal := NewSparkline(data, 3, 1)
-	sparkInverted := NewSparkline(data, 3, 1)
+	sparkNormal := NewSparklineRenderer(data, 3, 1)
+	sparkInverted := NewSparklineRenderer(data, 3, 1)
 	sparkInverted.Inverted = true
 
 	normalResult := sparkNormal.Render()
@@ -371,7 +371,7 @@ func TestSparkline_RenderDimensions(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run("", func(t *testing.T) {
-			spark := NewSparkline([]float64{1, 2, 3}, tc.width, tc.height)
+			spark := NewSparklineRenderer([]float64{1, 2, 3}, tc.width, tc.height)
 			result := spark.Render()
 
 			lines := strings.Split(result, "\n")

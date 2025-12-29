@@ -7,6 +7,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/model"
 	corev1 "k8s.io/api/core/v1"
@@ -24,6 +25,9 @@ type DetailPanel struct {
 
 	// Track current node to detect when node changes (for resetting sparklines)
 	currentNodeName string
+
+	// Two-phase layout: laidout=components created, layoutBuilt=sizes applied
+	layoutBuilt bool
 
 	// Dynamic layout tracking
 	lastHeightCategory   int
@@ -51,11 +55,8 @@ type DetailPanel struct {
 	labelsTextView      *tview.TextView
 	annotationsTextView *tview.TextView
 
-	// Stateful sparklines for metrics
-	cpuSparkline  *ui.SparklineState
-	memSparkline  *ui.SparklineState
-	netSparkline  *ui.SparklineState
-	diskSparkline *ui.SparklineState
+	// Sparkline row component for metrics visualization
+	sparklineRow *ui.SparklineRow
 
 	// Callbacks
 	onPodSelected         NodeSelectedCallback
@@ -96,14 +97,8 @@ func (p *DetailPanel) GetTitle() string {
 // Layout initializes the panel UI
 func (p *DetailPanel) Layout(_ interface{}) {
 	if !p.laidout {
-		colorKeys := ui.ColorKeys{0: "olivedrab", 50: "yellow", 90: "red"}
-
-		// Initialize stateful sparklines (width=20, height determined by terminal size)
-		// Default to height=3 for initial layout, will be adjusted on first DrawBody
-		p.cpuSparkline = ui.NewSparklineStateWithHeight(20, 3, colorKeys)
-		p.memSparkline = ui.NewSparklineStateWithHeight(20, 3, colorKeys)
-		p.netSparkline = ui.NewSparklineStateWithHeight(20, 3, colorKeys)
-		p.diskSparkline = ui.NewSparklineStateWithHeight(20, 3, colorKeys)
+		// Initialize sparkline row (starts in non-prometheus mode, self-sizing)
+		p.sparklineRow = ui.NewSparklineRow(false)
 
 		// Create info header panel
 		p.infoHeaderPanel = tview.NewFlex().SetDirection(tview.FlexColumn)
@@ -112,8 +107,9 @@ func (p *DetailPanel) Layout(_ interface{}) {
 		p.infoHeaderPanel.SetTitleAlign(tview.AlignLeft)
 		p.infoHeaderPanel.SetBorderColor(tcell.ColorLightGray)
 
-		// Create sparkline panel (4 columns)
+		// Create sparkline panel and add sparkline row to it
 		p.sparklinePanel = tview.NewFlex().SetDirection(tview.FlexColumn)
+		p.sparklinePanel.AddItem(p.sparklineRow, 0, 1, false)
 
 		// Create system detail panel (4 columns)
 		p.systemDetailPanel = tview.NewFlex().SetDirection(tview.FlexColumn)
@@ -195,19 +191,12 @@ func (p *DetailPanel) Layout(_ interface{}) {
 		p.podsPanel.AddItem(p.podsTable, 0, 1, true)
 
 		// Main layout: vertical flex with dynamic heights
-		// Sparklines are always shown but with variable height (2 when ≤35, 4 otherwise)
+		// Items are added in buildLayout() when dimensions are known
 		p.root = tview.NewFlex().SetDirection(tview.FlexRow)
 
-		// Initial layout with sparklines (height will be adjusted dynamically)
-		p.root.AddItem(p.infoHeaderPanel, 3, 0, false)
-		p.root.AddItem(p.sparklinePanel, 4, 0, false) // Default height, adjusted in checkAndRebuildLayout
-		p.root.AddItem(p.systemDetailPanel, 12, 0, false)
-		p.root.AddItem(p.podsPanel, 0, 1, true) // Pods: remaining space (flex)
-
-		// Initialize tracking to force rebuild on first DrawBody
-		p.lastHeightCategory = -999  // Invalid value ensures first rebuild
-		p.lastSparklineHeight = 4    // Initial sparkline height
-		p.lastInfoHeaderHeight = 3   // Initial info header height
+		// Don't add items here - defer to buildLayout() to avoid jitter
+		// layoutBuilt tracks whether sizes have been applied
+		p.layoutBuilt = false
 
 		p.root.SetBorder(true)
 		p.root.SetTitle(fmt.Sprintf(" %s Node Detail ", ui.Icons.Factory))
@@ -252,6 +241,11 @@ func (p *DetailPanel) DrawBody(data interface{}) {
 	}
 	p.data = detailData
 
+	// Build layout on first draw when dimensions are available
+	if !p.layoutBuilt {
+		p.buildLayout()
+	}
+
 	// Check if terminal size category changed and rebuild layout if needed
 	p.checkAndRebuildLayout()
 
@@ -267,8 +261,8 @@ func (p *DetailPanel) DrawBody(data interface{}) {
 		// Populate sparklines from history if available
 		if len(p.data.MetricsHistory) > 0 {
 			for _, sample := range p.data.MetricsHistory {
-				p.cpuSparkline.Push(sample.CPURatio)
-				p.memSparkline.Push(sample.MemRatio)
+				p.sparklineRow.UpdateCPU(sample.CPURatio, "")
+				p.sparklineRow.UpdateMEM(sample.MemRatio, "")
 			}
 		}
 	}
@@ -290,26 +284,7 @@ func (p *DetailPanel) DrawBody(data interface{}) {
 
 // resetSparklines clears all sparkline state for a fresh start
 func (p *DetailPanel) resetSparklines() {
-	colorKeys := ui.ColorKeys{0: "olivedrab", 50: "yellow", 90: "red"}
-	// Calculate sparkline content height from sparkline panel allocation
-	// Panel height minus 2 for border = content height
-	sparklineContentHeight := p.getSparklineContentHeight()
-	p.cpuSparkline = ui.NewSparklineStateWithHeight(20, sparklineContentHeight, colorKeys)
-	p.memSparkline = ui.NewSparklineStateWithHeight(20, sparklineContentHeight, colorKeys)
-	p.netSparkline = ui.NewSparklineStateWithHeight(20, sparklineContentHeight, colorKeys)
-	p.diskSparkline = ui.NewSparklineStateWithHeight(20, sparklineContentHeight, colorKeys)
-}
-
-// getSparklineContentHeight returns the sparkline content height based on terminal size
-func (p *DetailPanel) getSparklineContentHeight() int {
-	terminalHeight := ui.GetTerminalHeight(p.root)
-	heights := p.calculatePanelHeights(terminalHeight)
-	// Sparkline panel height minus 2 for border = content height
-	contentHeight := heights.sparklines - 2
-	if contentHeight < 1 {
-		contentHeight = 1
-	}
-	return contentHeight
+	p.sparklineRow.Reset()
 }
 
 // drawInfoHeader draws the condensed info header row
@@ -350,16 +325,18 @@ func (p *DetailPanel) drawInfoHeader() {
 	p.infoHeaderPanel.AddItem(infoText, 0, 1, false)
 }
 
-// drawSparklines draws the 4-column sparkline row
+// drawSparklines draws the sparkline row
 func (p *DetailPanel) drawSparklines() {
-	p.sparklinePanel.Clear()
-
 	if p.data == nil || p.data.NodeModel == nil {
 		return
 	}
 	node := p.data.NodeModel
 
-	// Update sparkline states with new data
+	// Update prometheus mode based on metrics source type
+	prometheusMode := (p.data.MetricsSourceType == metrics.SourceTypePrometheus)
+	p.sparklineRow.SetPrometheusMode(prometheusMode)
+
+	// Calculate CPU and MEM ratios
 	var cpuRatio, memRatio float64
 
 	if node.UsageCpuQty != nil && node.AllocatableCpuQty != nil && node.AllocatableCpuQty.MilliValue() > 0 {
@@ -374,79 +351,52 @@ func (p *DetailPanel) drawSparklines() {
 		memRatio = float64(node.RequestedPodMemQty.Value()) / float64(node.AllocatableMemQty.Value())
 	}
 
-	p.cpuSparkline.Push(cpuRatio)
-	p.memSparkline.Push(memRatio)
-	// Network and disk sparklines - push small values so they render (data not available from metrics server)
-	p.netSparkline.Push(0.01) // Small non-zero value to show baseline
-	p.diskSparkline.Push(0.01)
+	// Build titles with metrics values
+	// Label is "used" for prometheus/metrics-server (actual usage), "requests" for none mode
+	metricsLabel := "used"
+	if !prometheusMode && p.data.MetricsSourceType != metrics.SourceTypeMetricsServer {
+		metricsLabel = "requests"
+	}
 
-	// Build titles with metrics values (like summary panel)
 	cpuPercent := cpuRatio * 100
 	cpuPercentColor := ui.GetResourcePercentageColor(cpuPercent)
-	cpuTrend := p.cpuSparkline.TrendIndicator(cpuPercent)
+	cpuTrend := p.sparklineRow.CPUTrend(cpuPercent)
 	cpuUsed := "0m"
 	cpuTotal := "0m"
 	if node.UsageCpuQty != nil {
 		cpuUsed = formatCPU(node.UsageCpuQty)
+	} else if node.RequestedPodCpuQty != nil {
+		cpuUsed = formatCPU(node.RequestedPodCpuQty)
 	}
 	if node.AllocatableCpuQty != nil {
 		cpuTotal = formatCPU(node.AllocatableCpuQty)
 	}
-	cpuTitle := fmt.Sprintf(" CPU %s/%s ([%s]%.1f%% used[-]) %s ", cpuUsed, cpuTotal, cpuPercentColor, cpuPercent, cpuTrend)
+	cpuTitle := fmt.Sprintf(" CPU %s/%s ([%s]%.1f%% %s[-]) %s ", cpuUsed, cpuTotal, cpuPercentColor, cpuPercent, metricsLabel, cpuTrend)
 
 	memPercent := memRatio * 100
 	memPercentColor := ui.GetResourcePercentageColor(memPercent)
-	memTrend := p.memSparkline.TrendIndicator(memPercent)
+	memTrend := p.sparklineRow.MEMTrend(memPercent)
 	memUsed := "0Mi"
 	memTotal := "0Mi"
 	if node.UsageMemQty != nil {
 		memUsed = formatMemory(node.UsageMemQty)
+	} else if node.RequestedPodMemQty != nil {
+		memUsed = formatMemory(node.RequestedPodMemQty)
 	}
 	if node.AllocatableMemQty != nil {
 		memTotal = formatMemory(node.AllocatableMemQty)
 	}
-	memTitle := fmt.Sprintf(" MEM %s/%s ([%s]%.1f%% used[-]) %s ", memUsed, memTotal, memPercentColor, memPercent, memTrend)
+	memTitle := fmt.Sprintf(" MEM %s/%s ([%s]%.1f%% %s[-]) %s ", memUsed, memTotal, memPercentColor, memPercent, metricsLabel, memTrend)
 
-	// Create 4 sparkline columns with proper formatting
-	cpuPanel := p.createSparklineColumn(cpuTitle, p.cpuSparkline)
-	memPanel := p.createSparklineColumn(memTitle, p.memSparkline)
-	netPanel := p.createSparklineColumn(" NET [gray]↓n/a ↑n/a[-] ", p.netSparkline)
-	diskPanel := p.createSparklineColumn(" DISK [gray]R:n/a W:n/a[-] ", p.diskSparkline)
+	// Update sparkline row with new values and titles
+	p.sparklineRow.UpdateCPU(cpuRatio, cpuTitle)
+	p.sparklineRow.UpdateMEM(memRatio, memTitle)
 
-	p.sparklinePanel.AddItem(cpuPanel, 0, 1, false)
-	p.sparklinePanel.AddItem(memPanel, 0, 1, false)
-	p.sparklinePanel.AddItem(netPanel, 0, 1, false)
-	p.sparklinePanel.AddItem(diskPanel, 0, 1, false)
-}
-
-// createSparklineColumn creates a bordered sparkline column with title containing metrics
-func (p *DetailPanel) createSparklineColumn(title string, sparkline *ui.SparklineState) *tview.Flex {
-	panel := tview.NewFlex().SetDirection(tview.FlexRow)
-	panel.SetBorder(true)
-	panel.SetTitle(title)
-	panel.SetTitleAlign(tview.AlignCenter)
-	panel.SetBorderColor(tcell.ColorLightGray)
-
-	// Create text view for sparkline
-	textView := tview.NewTextView()
-	textView.SetDynamicColors(true)
-	textView.SetTextAlign(tview.AlignLeft)
-
-	// Get panel width and resize sparkline to fill available space
-	_, _, panelWidth, _ := p.sparklinePanel.GetInnerRect()
-	if panelWidth > 0 {
-		// Each of 4 panels gets 1/4 of the width, minus 2 for left/right border
-		sparklineWidth := (panelWidth / 4) - 2
-		if sparklineWidth > 10 {
-			sparkline.Resize(sparklineWidth)
-		}
+	// Update network/disk sparklines in prometheus mode
+	if prometheusMode {
+		p.sparklineRow.UpdateNET(0.01, " NET [gray]↓n/a ↑n/a[-] ")
+		p.sparklineRow.UpdateDisk(0.01, " DISK [gray]R:n/a W:n/a[-] ")
 	}
-
-	// Just render the sparkline graph (values are in the title)
-	textView.SetText(sparkline.Render())
-	panel.AddItem(textView, 0, 1, false)
-
-	return panel
 }
 
 // drawSystemDetailSection draws the 4-column system detail section
@@ -948,16 +898,49 @@ func (p *DetailPanel) calculatePanelHeights(terminalHeight int) nodeDetailHeight
 	}
 }
 
-// checkAndRebuildLayout checks if terminal size category changed and rebuilds layout if needed
-func (p *DetailPanel) checkAndRebuildLayout() {
-	// Get actual dimensions - don't rebuild until we have real values
+// buildLayout builds the initial layout with correct sizes based on terminal dimensions.
+// Called once on first DrawBody() when dimensions are available.
+func (p *DetailPanel) buildLayout() {
+	// Get actual dimensions - don't build until we have real values
 	_, _, _, height := p.root.GetRect()
 	if height <= 0 {
-		// Panel not rendered yet, skip rebuild - initial layout will be used
+		// Panel not rendered yet, will try again next frame
 		return
 	}
 
-	terminalHeight := height // Use actual height, not the default from GetTerminalHeight
+	terminalHeight := height
+	currentCategory := ui.GetHeightCategory(terminalHeight)
+	heights := p.calculatePanelHeights(terminalHeight)
+
+	// Build the layout with correct sizes
+	p.root.Clear()
+	if heights.infoHeader > 0 {
+		p.root.AddItem(p.infoHeaderPanel, heights.infoHeader, 0, false)
+	}
+	p.root.AddItem(p.sparklinePanel, heights.sparklines, 0, false)
+	p.root.AddItem(p.systemDetailPanel, heights.systemDetail, 0, false)
+	p.root.AddItem(p.podsPanel, 0, 1, true)
+
+	p.lastHeightCategory = currentCategory
+	p.lastSparklineHeight = heights.sparklines
+	p.lastInfoHeaderHeight = heights.infoHeader
+	p.layoutBuilt = true
+}
+
+// checkAndRebuildLayout checks if terminal size category changed and rebuilds layout if needed
+func (p *DetailPanel) checkAndRebuildLayout() {
+	// Only check for rebuild after initial layout is built
+	if !p.layoutBuilt {
+		return
+	}
+
+	// Get actual dimensions
+	_, _, _, height := p.root.GetRect()
+	if height <= 0 {
+		return
+	}
+
+	terminalHeight := height
 	currentCategory := ui.GetHeightCategory(terminalHeight)
 	heights := p.calculatePanelHeights(terminalHeight)
 
@@ -976,7 +959,7 @@ func (p *DetailPanel) checkAndRebuildLayout() {
 	if heights.infoHeader > 0 {
 		p.root.AddItem(p.infoHeaderPanel, heights.infoHeader, 0, false)
 	}
-	p.root.AddItem(p.sparklinePanel, heights.sparklines, 0, false) // Always include sparklines
+	p.root.AddItem(p.sparklinePanel, heights.sparklines, 0, false)
 	p.root.AddItem(p.systemDetailPanel, heights.systemDetail, 0, false)
 	p.root.AddItem(p.podsPanel, 0, 1, true)
 

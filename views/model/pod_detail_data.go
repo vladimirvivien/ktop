@@ -22,6 +22,10 @@ type PodDetailData struct {
 	// ContainerMetrics contains current CPU/memory usage for each container
 	// Key is container name, value is ContainerUsage
 	ContainerMetrics map[string]ContainerUsage
+
+	// MetricsSourceType indicates the active metrics source ("prometheus", "metrics-server", or "")
+	// Used by detail panels to determine which metrics visualizations to show
+	MetricsSourceType string
 }
 
 // ContainerUsage holds formatted CPU and memory usage strings for a container

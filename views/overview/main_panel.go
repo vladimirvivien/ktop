@@ -931,6 +931,11 @@ func (p *MainPanel) buildNodeDetailData(ctx context.Context, nodeName string, no
 		PodsOnNode: podsOnNode,
 	}
 
+	// Set metrics source type for conditional display in detail panel
+	if p.metricsSource != nil {
+		detailData.MetricsSourceType = p.metricsSource.GetSourceInfo().Type
+	}
+
 	// Fetch metrics history for sparklines (if available)
 	if p.metricsSource != nil && p.metricsSource.SupportsHistory() {
 		historyDuration := 5 * time.Minute
@@ -1009,6 +1014,11 @@ func (p *MainPanel) buildPodDetailData(ctx context.Context, podKey string, podMo
 	// Create detail data
 	detailData := &model.PodDetailData{
 		PodModel: podModel,
+	}
+
+	// Set metrics source type for conditional display in detail panel
+	if p.metricsSource != nil {
+		detailData.MetricsSourceType = p.metricsSource.GetSourceInfo().Type
 	}
 
 	// Fetch metrics history for sparklines (if available)
