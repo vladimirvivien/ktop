@@ -1,7 +1,7 @@
 # ktop
 
 <h1 align="center">
-    <img src="./docs/ktop.png" alt="ktop">
+    <img src="./docs/images/ktop.png" alt="ktop">
 </h1>
 
 A `top`-like tool for your Kubernetes cluster.
