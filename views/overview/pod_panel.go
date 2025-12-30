@@ -29,8 +29,8 @@ type podPanel struct {
 	filter      *ui.FilterState  // Filter state for row filtering
 
 	// Stateful sparklines for smooth sliding animation
-	cpuSparklines map[string]*ui.SparklineState // key: "namespace/podname"
-	memSparklines map[string]*ui.SparklineState
+	cpuSparklines map[string]*ui.Sparkline // key: "namespace/podname"
+	memSparklines map[string]*ui.Sparkline
 
 	// Callback for pod selection
 	onPodSelected PodSelectedCallback
@@ -43,8 +43,8 @@ func NewPodPanel(app *application.Application, title string) ui.Panel {
 		sortColumn:    "NAMESPACE", // Default sort by NAMESPACE then NAME
 		sortAsc:       true,        // Default ascending
 		filter:        &ui.FilterState{},
-		cpuSparklines: make(map[string]*ui.SparklineState),
-		memSparklines: make(map[string]*ui.SparklineState),
+		cpuSparklines: make(map[string]*ui.Sparkline),
+		memSparklines: make(map[string]*ui.Sparkline),
 	}
 	p.Layout(nil)
 
@@ -88,11 +88,12 @@ func (p *podPanel) getPodInfoFromRow(row int) (namespace, podName string) {
 }
 
 // getSparkline returns an existing sparkline or creates a new one
-func (p *podPanel) getSparkline(sparklines map[string]*ui.SparklineState, key string, width int, colors ui.ColorKeys) *ui.SparklineState {
+func (p *podPanel) getSparkline(sparklines map[string]*ui.Sparkline, key string, width int, colors ui.ColorKeys) *ui.Sparkline {
 	if spark, ok := sparklines[key]; ok {
+		spark.Resize(width)
 		return spark
 	}
-	spark := ui.NewSparklineState(width, colors)
+	spark := ui.NewSparkline().SetDimensions(width, 1).SetColorKeys(colors)
 	sparklines[key] = spark
 	return spark
 }
@@ -529,7 +530,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
 					// Push current value to sparkline (smooth sliding)
 					cpuSparkline.Push(float64(cpuRatio))
-					cpuGraph = cpuSparkline.Render()
+					cpuGraph = cpuSparkline.RenderText()
 					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
 						"[white][%s[white]] %5dm [%s]%5.1f%%[white] %s",
@@ -541,7 +542,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
 					// Push current value to sparkline (smooth sliding)
 					cpuSparkline.Push(float64(cpuRatio))
-					cpuGraph = cpuSparkline.Render()
+					cpuGraph = cpuSparkline.RenderText()
 					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
 						"[white][%s[white]] %5dm [%s]%5.1f%%[white] %s",
@@ -550,7 +551,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 				} else {
 					// Zero or unavailable: push zero to sparkline
 					cpuSparkline.Push(0)
-					cpuGraph = cpuSparkline.Render()
+					cpuGraph = cpuSparkline.RenderText()
 					cpuTrend := cpuSparkline.TrendIndicator(0) // 0% when no data
 					cpuMetrics = fmt.Sprintf(
 						"[white][%s[white]] %5dm [green]%5.1f%%[white] %s",
@@ -584,7 +585,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
 					// Push current value to sparkline (smooth sliding)
 					memSparkline.Push(float64(memRatio))
-					memGraph = memSparkline.Render()
+					memGraph = memSparkline.RenderText()
 					memTrend := memSparkline.TrendIndicator(memPercentage)
 					memMetrics = fmt.Sprintf(
 						"[white][%s[white]] %s [%s]%5.1f%%[white] %s",
@@ -598,7 +599,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
 					// Push current value to sparkline (smooth sliding)
 					memSparkline.Push(float64(memRatio))
-					memGraph = memSparkline.Render()
+					memGraph = memSparkline.RenderText()
 					memTrend := memSparkline.TrendIndicator(memPercentage)
 					memMetrics = fmt.Sprintf(
 						"[white][%s[white]] %s [%s]%5.1f%%[white] %s",
@@ -609,7 +610,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 				} else {
 					// Zero or unavailable: push zero to sparkline
 					memSparkline.Push(0)
-					memGraph = memSparkline.Render()
+					memGraph = memSparkline.RenderText()
 					memTrend := memSparkline.TrendIndicator(0) // 0% when no data
 					memMetrics = fmt.Sprintf(
 						"[white][%s[white]] %s [green]%5.1f%%[white] %s",

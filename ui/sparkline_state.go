@@ -189,6 +189,8 @@ func (s *SparklineState) renderMultiLine() string {
 		rowUpper := float64(s.height-row) / float64(s.height)
 		rowLower := float64(s.height-row-1) / float64(s.height)
 
+		isBottomRow := row == s.height-1
+
 		for _, val := range s.values {
 			// Determine color based on percentage value using ColorKeys
 			percent := int(val * 100)
@@ -221,6 +223,12 @@ func (s *SparklineState) renderMultiLine() string {
 				lines[row].WriteString(color)
 				lines[row].WriteString("]")
 				lines[row].WriteRune(blockBarChars[level])
+			} else if isBottomRow {
+				// On bottom row, show baseline for empty/zero values
+				lines[row].WriteString("[")
+				lines[row].WriteString(Theme.SparklineEmpty)
+				lines[row].WriteString("]")
+				lines[row].WriteRune('▁')
 			} else {
 				// Value doesn't reach this row - draw space
 				lines[row].WriteString(" ")

@@ -30,8 +30,8 @@ type nodePanel struct {
 	filter      *ui.FilterState   // Filter state for row filtering
 
 	// Stateful sparklines for smooth sliding animation
-	cpuSparklines map[string]*ui.SparklineState // key: node name
-	memSparklines map[string]*ui.SparklineState
+	cpuSparklines map[string]*ui.Sparkline // key: node name
+	memSparklines map[string]*ui.Sparkline
 
 	// Callback for node selection
 	onNodeSelected NodeSelectedCallback
@@ -44,8 +44,8 @@ func NewNodePanel(app *application.Application, title string) ui.Panel {
 		sortColumn:    "NAME", // Default sort by NAME
 		sortAsc:       true,   // Default ascending
 		filter:        &ui.FilterState{},
-		cpuSparklines: make(map[string]*ui.SparklineState),
-		memSparklines: make(map[string]*ui.SparklineState),
+		cpuSparklines: make(map[string]*ui.Sparkline),
+		memSparklines: make(map[string]*ui.Sparkline),
 	}
 	p.Layout(nil)
 	return p
@@ -88,11 +88,12 @@ func (p *nodePanel) getNodeNameFromRow(row int) string {
 }
 
 // getSparkline returns an existing sparkline or creates a new one
-func (p *nodePanel) getSparkline(sparklines map[string]*ui.SparklineState, key string, width int, colors ui.ColorKeys) *ui.SparklineState {
+func (p *nodePanel) getSparkline(sparklines map[string]*ui.Sparkline, key string, width int, colors ui.ColorKeys) *ui.Sparkline {
 	if spark, ok := sparklines[key]; ok {
+		spark.Resize(width)
 		return spark
 	}
-	spark := ui.NewSparklineState(width, colors)
+	spark := ui.NewSparkline().SetDimensions(width, 1).SetColorKeys(colors)
 	sparklines[key] = spark
 	return spark
 }
@@ -583,7 +584,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					cpuPercentage := float64(cpuRatio) * 100
 					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
 					cpuSparkline.Push(float64(cpuRatio))
-					cpuGraph = cpuSparkline.Render()
+					cpuGraph = cpuSparkline.RenderText()
 					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
 						"[white][%s[white]] %5dm [%s]%5.1f%%[white] %s",
@@ -594,7 +595,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					cpuPercentage := float64(cpuRatio) * 100
 					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
 					cpuSparkline.Push(float64(cpuRatio))
-					cpuGraph = cpuSparkline.Render()
+					cpuGraph = cpuSparkline.RenderText()
 					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
 						"[white][%s[white]] %5dm [%s]%5.1f%%[white] %s",
@@ -622,7 +623,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					memPercentage := float64(memRatio) * 100
 					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
 					memSparkline.Push(float64(memRatio))
-					memGraph = memSparkline.Render()
+					memGraph = memSparkline.RenderText()
 					memTrend := memSparkline.TrendIndicator(memPercentage)
 					memMetrics = fmt.Sprintf(
 						"[white][%s[white]] %s [%s]%5.1f%%[white] %s",
@@ -633,7 +634,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 					memPercentage := float64(memRatio) * 100
 					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
 					memSparkline.Push(float64(memRatio))
-					memGraph = memSparkline.Render()
+					memGraph = memSparkline.RenderText()
 					memTrend := memSparkline.TrendIndicator(memPercentage)
 					memMetrics = fmt.Sprintf(
 						"[white][%s[white]] %s [%s]%5.1f%%[white] %s",

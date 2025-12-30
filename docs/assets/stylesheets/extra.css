@@ -1,0 +1,79 @@
+/* Custom color scheme variables */
+:root {
+  --md-primary-fg-color: #0891b2;
+  --md-primary-fg-color--light: #22d3ee;
+  --md-primary-fg-color--dark: #0e7490;
+  --md-accent-fg-color: #6366f1;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: #22d3ee;
+  --md-primary-fg-color--light: #67e8f9;
+  --md-primary-fg-color--dark: #06b6d4;
+  --md-accent-fg-color: #818cf8;
+  --md-default-bg-color: #0f172a;
+  --md-default-bg-color--light: #1e293b;
+}
+
+/* Hero gradient for home page */
+.tx-container {
+  background: linear-gradient(135deg, var(--md-primary-fg-color) 0%, var(--md-accent-fg-color) 100%);
+}
+
+/* Feature cards styling */
+.feature-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.feature-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+}
+
+/* Code block styling */
+.md-typeset pre > code {
+  font-size: 0.85em;
+}
+
+/* Navigation tabs styling */
+.md-tabs {
+  background-color: var(--md-primary-fg-color--dark);
+}
+
+/* Logo sizing */
+.md-header__button.md-logo img {
+  height: 1.5rem;
+  width: auto;
+}
+
+/* Admonition styling */
+.md-typeset .admonition {
+  border-radius: 0.5rem;
+}
+
+/* Table styling */
+.md-typeset table:not([class]) {
+  border-radius: 0.5rem;
+  overflow: hidden;
+}
+
+.md-typeset table:not([class]) th {
+  background-color: var(--md-primary-fg-color);
+  color: var(--md-primary-bg-color);
+}
+
+/* Screenshot images */
+.md-typeset img {
+  border-radius: 0.5rem;
+}
+
+/* Button styling */
+.md-button {
+  border-radius: 0.375rem;
+  font-weight: 500;
+}
+
+/* Footer links */
+.md-footer-meta {
+  background-color: var(--md-default-bg-color--light);
+}

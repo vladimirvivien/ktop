@@ -17,22 +17,13 @@ type clusterSummaryPanel struct {
 	title     string
 	root      *tview.Flex     // Outer flex with border
 	statsView *tview.TextView // Stats row
-	cpuView   *tview.TextView // CPU sparkline
-	memView   *tview.TextView // MEM sparkline
 	children  []tview.Primitive
 
-	// Stateful sparklines for smooth sliding animation
-	cpuSparkline *ui.SparklineState
-	memSparkline *ui.SparklineState
+	// Sparkline row component for metrics visualization
+	sparklineRow *ui.SparklineRow
 
 	// Prometheus-only views (conditionally shown)
-	netView       *tview.TextView // Network I/O sparkline
-	diskView      *tview.TextView // Disk I/O sparkline
 	enhancedStats *tview.TextView // Enhanced stats row
-
-	// Prometheus-only sparklines
-	netSparkline  *ui.SparklineState
-	diskSparkline *ui.SparklineState
 
 	// Layout mode
 	prometheusMode bool
@@ -44,23 +35,11 @@ type clusterSummaryPanel struct {
 func NewClusterSummaryPanel(app *application.Application, title string) ui.Panel {
 	p := &clusterSummaryPanel{app: app, title: title}
 	p.Layout(nil)
-	p.children = append(p.children, p.cpuView, p.memView)
 	return p
 }
 
 func (p *clusterSummaryPanel) GetTitle() string {
 	return p.title
-}
-
-// createSparklineView creates a styled text view for sparklines
-func (p *clusterSummaryPanel) createSparklineView() *tview.TextView {
-	view := tview.NewTextView()
-	view.SetDynamicColors(true)
-	view.SetTextAlign(tview.AlignCenter)
-	view.SetBorder(true)
-	view.SetBorderPadding(0, 0, 0, 0)
-	view.SetTitleAlign(tview.AlignCenter)
-	return view
 }
 
 func (p *clusterSummaryPanel) Layout(data interface{}) {
@@ -87,39 +66,19 @@ func (p *clusterSummaryPanel) Layout(data interface{}) {
 	p.statsView.SetBorder(true)
 	p.statsView.SetBorderPadding(0, 0, 0, 0)
 
-	// CPU and MEM sparkline views (always shown)
-	p.cpuView = p.createSparklineView()
-	p.memView = p.createSparklineView()
+	// Initialize sparkline row with prometheus mode
+	p.sparklineRow = ui.NewSparklineRow(p.prometheusMode)
 
-	// Create graphFlex for sparklines
-	var graphFlex *tview.Flex
+	// Create graphFlex to hold sparkline row
+	graphFlex := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(p.sparklineRow, 0, 1, false)
 
 	if p.prometheusMode {
-		// === PROMETHEUS LAYOUT: 4 sparklines ===
-
-		// Network and Disk sparkline views
-		p.netView = p.createSparklineView()
-		p.diskView = p.createSparklineView()
-
-		// All 4 sparklines side-by-side, each 25% width
-		graphFlex = tview.NewFlex().SetDirection(tview.FlexColumn).
-			AddItem(p.cpuView, 0, 1, false).  // 25%
-			AddItem(p.memView, 0, 1, false).  // 25%
-			AddItem(p.netView, 0, 1, false).  // 25%
-			AddItem(p.diskView, 0, 1, false)  // 25%
-
 		// Enhanced stats row (always create for transitions)
 		p.enhancedStats = tview.NewTextView()
 		p.enhancedStats.SetDynamicColors(true)
 		p.enhancedStats.SetBorder(true)
 		p.enhancedStats.SetBorderPadding(0, 0, 0, 0)
-	} else {
-		// === METRICS SERVER LAYOUT: 2 sparklines ===
-
-		// Horizontal flex for CPU and MEM sparklines side by side
-		graphFlex = tview.NewFlex().SetDirection(tview.FlexColumn).
-			AddItem(p.cpuView, 0, 1, false). // 50%
-			AddItem(p.memView, 0, 1, false)  // 50%
 	}
 
 	// Create or clear root and rebuild layout
@@ -168,35 +127,16 @@ func (p *clusterSummaryPanel) checkAndRebuildLayout() {
 	p.Layout(nil)
 }
 
-// getSparklineContentHeight returns sparkline content height based on terminal size
-// Uses explicit heights matching detail pages for consistency across all pages
-func (p *clusterSummaryPanel) getSparklineContentHeight() int {
-	terminalHeight := p.app.GetTerminalHeight()
-	switch ui.GetHeightCategory(terminalHeight) {
-	case ui.HeightCategoryTooSmall:
-		return 1
-	case ui.HeightCategorySmall:
-		return 2 // Match detail pages
-	default:
-		return 3 // Match detail pages for medium/large/extralarge
-	}
-}
-
 func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 	// Check if terminal size category changed and rebuild layout if needed
 	p.checkAndRebuildLayout()
+
 	// Update title with disconnected state if applicable
 	if p.app.IsAPIDisconnected() {
 		p.root.SetTitle(fmt.Sprintf("%s [red][DISCONNECTED - Press R to reconnect]", p.GetTitle()))
 	} else {
 		p.root.SetTitle(p.GetTitle())
 	}
-
-	colorKeys := ui.ColorKeys{0: "olivedrab", 40: "yellow", 80: "red"}
-	const defaultWidth = 40 // Initial width before container dimensions are known
-
-	// Use explicit sparkline height for consistency with detail pages
-	sparklineHeight := p.getSparklineContentHeight()
 
 	switch summary := data.(type) {
 	case model.ClusterSummary:
@@ -205,23 +145,8 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 		// Check if usage metrics are actually available (non-zero)
 		hasUsageMetrics := summary.UsageNodeCpuTotal.MilliValue() > 0 || summary.UsageNodeMemTotal.MilliValue() > 0
 
-		// Initialize multi-line sparklines if needed, or recreate if height changed
-		if p.cpuSparkline == nil || p.cpuSparkline.Height() != sparklineHeight {
-			p.cpuSparkline = ui.NewSparklineStateWithHeight(defaultWidth, sparklineHeight, colorKeys)
-		}
-		if p.memSparkline == nil || p.memSparkline.Height() != sparklineHeight {
-			p.memSparkline = ui.NewSparklineStateWithHeight(defaultWidth, sparklineHeight, colorKeys)
-		}
-
-		// Get container width and resize sparklines to fill available space
-		_, _, cpuContainerWidth, _ := p.cpuView.GetRect()
-		if cpuContainerWidth > 2 {
-			p.cpuSparkline.Resize(cpuContainerWidth - 2)
-		}
-		_, _, memContainerWidth, _ := p.memView.GetRect()
-		if memContainerWidth > 2 {
-			p.memSparkline.Resize(memContainerWidth - 2)
-		}
+		// Update prometheus mode on sparkline row
+		p.sparklineRow.SetPrometheusMode(p.prometheusMode)
 
 		// === Stats row ===
 		// Color code Deploys ratio: >= 80% green, > 50% yellow, <= 50% red
@@ -299,109 +224,50 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 			memLabel = "used"
 		}
 
-		// Push values and render sparklines
-		p.cpuSparkline.Push(float64(cpuRatio))
-		cpuTrend := p.cpuSparkline.TrendIndicator(float64(cpuRatio) * 100)
-		cpuSparklineText := p.cpuSparkline.Render() // Multi-line with \n
-
-		p.memSparkline.Push(float64(memRatio))
-		memTrend := p.memSparkline.TrendIndicator(float64(memRatio) * 100)
-		memSparklineText := p.memSparkline.Render() // Multi-line with \n
-
-		// CPU view: title + sparkline
+		// Build sparkline titles
+		cpuTrend := p.sparklineRow.CPUTrend(float64(cpuRatio) * 100)
 		cpuTitle := fmt.Sprintf(" CPU %dm/%dm (%02.1f%% %s) %s ",
 			cpuValue, cpuTotal, cpuRatio*100, cpuLabel, cpuTrend)
-		p.cpuView.SetTitle(cpuTitle)
-		p.cpuView.SetText(cpuSparklineText)
 
-		// MEM view: title + sparkline
+		memTrend := p.sparklineRow.MEMTrend(float64(memRatio) * 100)
 		memTitle := fmt.Sprintf(" MEM %s/%s (%02.1f%% %s) %s ",
 			memValue, memTotal, memRatio*100, memLabel, memTrend)
-		p.memView.SetTitle(memTitle)
-		p.memView.SetText(memSparklineText)
+
+		// Update sparkline row
+		p.sparklineRow.UpdateCPU(float64(cpuRatio), cpuTitle)
+		p.sparklineRow.UpdateMEM(float64(memRatio), memTitle)
 
 		// === Prometheus-only: Network, Disk, Enhanced Stats ===
 		if p.prometheusMode {
-			p.drawNetworkSparkline(summary, colorKeys)
-			p.drawDiskSparkline(summary, colorKeys)
+			// Network sparkline
+			netTitle := fmt.Sprintf(" Net ↓%s ↑%s ",
+				ui.FormatBytesRate(summary.NetworkRxRate),
+				ui.FormatBytesRate(summary.NetworkTxRate))
+			combinedNetRate := summary.NetworkRxRate + summary.NetworkTxRate
+			netNormalized := combinedNetRate / (128 * 1024 * 1024) // 128 MB/s baseline
+			if netNormalized > 1 {
+				netNormalized = 1
+			}
+			p.sparklineRow.UpdateNET(netNormalized, netTitle)
+
+			// Disk sparkline
+			diskTitle := fmt.Sprintf(" Disk R:%s W:%s ",
+				ui.FormatBytesRate(summary.DiskReadRate),
+				ui.FormatBytesRate(summary.DiskWriteRate))
+			combinedDiskRate := summary.DiskReadRate + summary.DiskWriteRate
+			diskNormalized := combinedDiskRate / (500 * 1024 * 1024) // 500 MB/s baseline
+			if diskNormalized > 1 {
+				diskNormalized = 1
+			}
+			p.sparklineRow.UpdateDisk(diskNormalized, diskTitle)
+
+			// Enhanced stats
 			p.drawEnhancedStats(summary)
 		}
 
 	default:
 		panic(fmt.Sprintf("SummaryPanel.DrawBody: unexpected type %T", data))
 	}
-}
-
-// drawNetworkSparkline renders the network I/O sparkline (Prometheus mode only)
-func (p *clusterSummaryPanel) drawNetworkSparkline(summary model.ClusterSummary, colorKeys ui.ColorKeys) {
-	if p.netView == nil {
-		return
-	}
-
-	const defaultWidth = 40
-	height := p.getSparklineContentHeight()
-
-	// Initialize sparkline if needed, or recreate if height changed
-	if p.netSparkline == nil || p.netSparkline.Height() != height {
-		p.netSparkline = ui.NewSparklineStateWithHeight(defaultWidth, height, colorKeys)
-	}
-
-	// Resize to fit container
-	_, _, containerWidth, _ := p.netView.GetRect()
-	if containerWidth > 2 {
-		p.netSparkline.Resize(containerWidth - 2)
-	}
-
-	// Format title with rates
-	netTitle := fmt.Sprintf(" Net ↓%s ↑%s ",
-		ui.FormatBytesRate(summary.NetworkRxRate),
-		ui.FormatBytesRate(summary.NetworkTxRate))
-	p.netView.SetTitle(netTitle)
-
-	// Normalize combined rate (against 1 Gbps baseline = 128 MB/s)
-	combinedRate := summary.NetworkRxRate + summary.NetworkTxRate
-	normalized := combinedRate / (128 * 1024 * 1024) // 128 MB/s baseline
-	if normalized > 1 {
-		normalized = 1
-	}
-	p.netSparkline.Push(normalized)
-	p.netView.SetText(p.netSparkline.Render())
-}
-
-// drawDiskSparkline renders the disk I/O sparkline (Prometheus mode only)
-func (p *clusterSummaryPanel) drawDiskSparkline(summary model.ClusterSummary, colorKeys ui.ColorKeys) {
-	if p.diskView == nil {
-		return
-	}
-
-	const defaultWidth = 40
-	height := p.getSparklineContentHeight()
-
-	// Initialize sparkline if needed, or recreate if height changed
-	if p.diskSparkline == nil || p.diskSparkline.Height() != height {
-		p.diskSparkline = ui.NewSparklineStateWithHeight(defaultWidth, height, colorKeys)
-	}
-
-	// Resize to fit container
-	_, _, containerWidth, _ := p.diskView.GetRect()
-	if containerWidth > 2 {
-		p.diskSparkline.Resize(containerWidth - 2)
-	}
-
-	// Format title with rates
-	diskTitle := fmt.Sprintf(" Disk R:%s W:%s ",
-		ui.FormatBytesRate(summary.DiskReadRate),
-		ui.FormatBytesRate(summary.DiskWriteRate))
-	p.diskView.SetTitle(diskTitle)
-
-	// Normalize combined rate (against 500 MB/s baseline)
-	combinedRate := summary.DiskReadRate + summary.DiskWriteRate
-	normalized := combinedRate / (500 * 1024 * 1024) // 500 MB/s baseline
-	if normalized > 1 {
-		normalized = 1
-	}
-	p.diskSparkline.Push(normalized)
-	p.diskView.SetText(p.diskSparkline.Render())
 }
 
 // drawEnhancedStats renders the enhanced stats row (Prometheus mode only)

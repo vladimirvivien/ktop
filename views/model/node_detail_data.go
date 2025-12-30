@@ -20,6 +20,10 @@ type NodeDetailData struct {
 
 	// MetricsHistory contains historical CPU/memory samples for sparkline graphs
 	MetricsHistory []MetricSample
+
+	// MetricsSourceType indicates the active metrics source ("prometheus", "metrics-server", or "")
+	// Used by detail panels to determine which metrics visualizations to show
+	MetricsSourceType string
 }
 
 // MetricSample represents a single point in time for metrics history

@@ -1,0 +1,206 @@
+{% extends "main.html" %}
+
+{% block tabs %}
+{{ super() }}
+
+<style>
+  .md-main {
+    flex-grow: 0;
+  }
+  .md-main__inner {
+    display: flex;
+    height: 100%;
+  }
+  .tx-container {
+    padding-top: 1rem;
+    background: linear-gradient(to bottom, var(--md-primary-fg-color), #6366f1);
+  }
+  .tx-hero {
+    margin: 0 .8rem;
+    color: var(--md-primary-bg-color);
+  }
+  .tx-hero h1 {
+    margin-bottom: 1rem;
+    color: currentColor;
+    font-weight: 700;
+  }
+  .tx-hero__content {
+    padding-bottom: 6rem;
+  }
+  @media screen and (min-width: 60em) {
+    .tx-hero {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .tx-hero__content {
+      max-width: 22rem;
+      margin-top: 3.5rem;
+      padding-bottom: 14vw;
+    }
+  }
+  @media screen and (min-width: 76.25em) {
+    .tx-hero__content {
+      max-width: 24rem;
+    }
+  }
+  .tx-hero__image {
+    width: 17rem;
+    height: 17rem;
+    order: 1;
+    padding-right: 2.5rem;
+  }
+  @media screen and (max-width: 59.9375em) {
+    .tx-hero__image {
+      width: 10rem;
+      height: 10rem;
+      margin: 0 auto;
+    }
+  }
+  .tx-hero .md-button {
+    margin-top: .5rem;
+    margin-right: .5rem;
+    color: var(--md-primary-bg-color);
+    border-color: var(--md-primary-bg-color);
+  }
+  .tx-hero .md-button:focus,
+  .tx-hero .md-button:hover {
+    background-color: var(--md-primary-bg-color);
+    color: var(--md-primary-fg-color);
+    border-color: var(--md-primary-bg-color);
+  }
+  .tx-hero .md-button--primary {
+    background-color: var(--md-primary-bg-color);
+    color: var(--md-primary-fg-color);
+    border-color: var(--md-primary-bg-color);
+  }
+  .tx-hero .md-button--primary:focus,
+  .tx-hero .md-button--primary:hover {
+    background-color: var(--md-accent-fg-color);
+    color: var(--md-primary-bg-color);
+    border-color: var(--md-accent-fg-color);
+  }
+</style>
+
+<section class="tx-container">
+  <div class="md-grid md-typeset">
+    <div class="tx-hero">
+      <div class="tx-hero__image">
+        <img src="images/ktop.png" alt="ktop" draggable="false">
+      </div>
+      <div class="tx-hero__content">
+        <h1>ktop</h1>
+        <p>A <strong>top-like tool</strong> for Kubernetes clusters. Real-time monitoring of nodes, pods, and containers from your terminal.</p>
+        <a href="guide/" class="md-button md-button--primary">
+          Get Started
+        </a>
+        <a href="https://github.com/vladimirvivien/ktop" class="md-button">
+          View on GitHub
+        </a>
+      </div>
+    </div>
+  </div>
+</section>
+
+{% endblock %}
+
+{% block content %}
+<style>
+  .feature-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+    margin: 2rem 0;
+  }
+  .feature-card {
+    padding: 1.5rem;
+    border-radius: 0.5rem;
+    background: var(--md-code-bg-color);
+    border: 1px solid var(--md-typeset-table-color);
+  }
+  .feature-card h3 {
+    margin-top: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .feature-card p {
+    margin-bottom: 0;
+    color: var(--md-typeset-color);
+    opacity: 0.8;
+  }
+  .install-section {
+    margin: 3rem 0;
+  }
+  .screenshot-section {
+    margin: 3rem 0;
+  }
+  .screenshot-section img {
+    border-radius: 0.5rem;
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+  }
+</style>
+
+<h2>Features</h2>
+<div class="feature-grid">
+  <div class="feature-card">
+    <h3>:material-chart-line: Real-Time Monitoring</h3>
+    <p>Continuously updated view of nodes, pods, and containers with CPU and memory metrics.</p>
+  </div>
+  <div class="feature-card">
+    <h3>:material-arrow-decision: Drill-Down Navigation</h3>
+    <p>Navigate from cluster overview to node to pod to container logs with Enter/ESC.</p>
+  </div>
+  <div class="feature-card">
+    <h3>:material-text-box-search: Container Logs</h3>
+    <p>Stream, filter, and search container logs in real-time with full-screen mode.</p>
+  </div>
+  <div class="feature-card">
+    <h3>:material-flash: Zero Installation</h3>
+    <p>Single binary that runs locally. No agents or server-side components needed.</p>
+  </div>
+  <div class="feature-card">
+    <h3>:material-kubernetes: Works Anywhere</h3>
+    <p>Connects through the Kubernetes API. Works anywhere kubectl works.</p>
+  </div>
+  <div class="feature-card">
+    <h3>:material-gauge: Multiple Metrics Sources</h3>
+    <p>Prometheus for enhanced metrics, Metrics Server, or graceful fallback to requests/limits.</p>
+  </div>
+</div>
+
+<h2>Quick Install</h2>
+<div class="install-section">
+
+=== "kubectl plugin"
+
+    ```bash
+    kubectl krew install ktop
+    kubectl ktop
+    ```
+
+=== "Homebrew"
+
+    ```bash
+    brew tap vladimirvivien/oss-tools
+    brew install ktop
+    ```
+
+=== "Go install"
+
+    ```bash
+    go install github.com/vladimirvivien/ktop@latest
+    ```
+
+=== "Binary"
+
+    Download from [GitHub Releases](https://github.com/vladimirvivien/ktop/releases/latest)
+
+</div>
+
+<h2>Screenshot</h2>
+<div class="screenshot-section">
+  <img src="images/ktop-cluster-summary.png" alt="ktop cluster summary" width="100%">
+</div>
+
+{% endblock %}
