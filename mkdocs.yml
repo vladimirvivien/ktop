@@ -8,9 +8,9 @@ repo_url: https://github.com/vladimirvivien/ktop
 
 theme:
   name: material
-  custom_dir: overrides
-  logo: images/ktop.png
-  favicon: images/ktop.png
+  custom_dir: docs/overrides
+  logo: images/ktop-logo.svg
+  favicon: images/ktop-logo.svg
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default

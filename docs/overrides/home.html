@@ -7,63 +7,75 @@
   .md-main {
     flex-grow: 0;
   }
+
   .md-main__inner {
     display: flex;
     height: 100%;
   }
+
   .tx-container {
     padding-top: 1rem;
     background: linear-gradient(to bottom, var(--md-primary-fg-color), #6366f1);
   }
+
   .tx-hero {
     margin: 0 .8rem;
     color: var(--md-primary-bg-color);
     text-align: center;
   }
+
   .tx-hero h1 {
     margin-bottom: 1rem;
     color: currentColor;
     font-weight: 700;
     font-size: 2.5rem;
   }
+
   .tx-hero__content {
     padding-bottom: 2rem;
     max-width: 40rem;
     margin: 0 auto;
   }
+
   .tx-hero__content p {
     font-size: 1.2rem;
     margin-bottom: 1.5rem;
   }
+
   .tx-hero__image {
     width: 100%;
     max-width: 900px;
     margin: 2rem auto 0;
     padding: 0 1rem 2rem;
   }
+
   .tx-hero__image img {
     width: 100%;
     height: auto;
     border-radius: 0.5rem;
     box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
   }
+
   .tx-hero .md-button {
     margin-top: .5rem;
     margin-right: .5rem;
     color: var(--md-primary-bg-color);
     border-color: var(--md-primary-bg-color);
   }
+
   .tx-hero .md-button:focus,
   .tx-hero .md-button:hover {
     background-color: var(--md-primary-bg-color);
     color: var(--md-primary-fg-color);
     border-color: var(--md-primary-bg-color);
   }
+
   .tx-hero .md-button--primary {
     background-color: var(--md-primary-bg-color);
     color: var(--md-primary-fg-color);
     border-color: var(--md-primary-bg-color);
   }
+
   .tx-hero .md-button--primary:focus,
   .tx-hero .md-button--primary:hover {
     background-color: var(--md-accent-fg-color);
@@ -77,7 +89,7 @@
     <div class="tx-hero">
       <div class="tx-hero__content">
         <h1>ktop</h1>
-        <p>A <strong>top-like tool</strong> for Kubernetes clusters. Real-time monitoring of nodes, pods, and containers from your terminal.</p>
+        <p>A <strong>top-like tool</strong> for viewing Kubernetes cluster metrics from your terminal.</p>
         <a href="guide/" class="md-button md-button--primary">
           Get Started
         </a>
@@ -102,32 +114,38 @@
     gap: 1.5rem;
     margin: 2rem 0;
   }
+
   .feature-card {
     padding: 1.5rem;
     border-radius: 0.5rem;
     background: var(--md-code-bg-color);
     border: 1px solid var(--md-typeset-table-color);
   }
+
   .feature-card h3 {
     margin-top: 0;
     display: flex;
     align-items: center;
     gap: 0.5rem;
   }
+
   .feature-card h3 svg {
     width: 1.2em;
     height: 1.2em;
     fill: currentColor;
     flex-shrink: 0;
   }
+
   .feature-card p {
     margin-bottom: 0;
     color: var(--md-typeset-color);
     opacity: 0.8;
   }
+
   .install-section {
     margin: 3rem 0;
   }
+
   /* Tab styles for Quick Install */
   .install-tabs {
     display: flex;
@@ -135,9 +153,11 @@
     border-bottom: 1px solid var(--md-typeset-table-color);
     margin-bottom: 1rem;
   }
+
   .install-tabs input[type="radio"] {
     display: none;
   }
+
   .install-tabs label {
     padding: 0.75rem 1.25rem;
     cursor: pointer;
@@ -147,20 +167,25 @@
     opacity: 0.7;
     transition: opacity 0.2s, border-color 0.2s;
   }
+
   .install-tabs label:hover {
     opacity: 1;
   }
-  .install-tabs input[type="radio"]:checked + label {
+
+  .install-tabs input[type="radio"]:checked+label {
     border-bottom-color: var(--md-accent-fg-color);
     opacity: 1;
   }
+
   .install-content {
     display: none;
     padding: 1rem 0;
   }
+
   .install-content.active {
     display: block;
   }
+
   .install-content pre {
     margin: 0;
     padding: 1rem;
@@ -168,6 +193,7 @@
     border-radius: 0.25rem;
     overflow-x: auto;
   }
+
   .install-content code {
     font-family: var(--md-code-font-family);
   }
@@ -177,45 +203,52 @@
 <div class="feature-grid">
   <div class="feature-card">
     <h3>
-      <svg viewBox="0 0 24 24"><path d="M16,11.78L20.24,4.45L21.97,5.45L16.74,14.5L10.23,10.75L5.46,19H22V21H2V3H4V17.54L9.5,8L16,11.78Z"/></svg>
-      Real-Time Monitoring
+      <svg viewBox="0 0 24 24">
+        <path d="M16,11.78L20.24,4.45L21.97,5.45L16.74,14.5L10.23,10.75L5.46,19H22V21H2V3H4V17.54L9.5,8L16,11.78Z" />
+      </svg>
+      Real-Time Metrics
     </h3>
     <p>Continuously updated view of nodes, pods, and containers with CPU and memory metrics.</p>
   </div>
   <div class="feature-card">
     <h3>
-      <svg viewBox="0 0 24 24"><path d="M11,6H14L17.29,2.7A1,1 0 0,1 18.71,2.7L21.29,5.29A1,1 0 0,1 21.29,6.71L19,9H11V11H8V9H6V11H4V8C4,6.89 4.89,6 6,6H8V4H11V6M19.59,12.59L13.59,18.59L11.59,16.59L12.59,15.59L13.59,16.59L18.59,11.59L19.59,12.59M11,15V18C11,19.1 10.1,20 9,20H6C4.89,20 4,19.1 4,18V13H6V18H9V13H11V15Z"/></svg>
-      Drill-Down Navigation
-    </h3>
-    <p>Navigate from cluster overview to node to pod to container logs with Enter/ESC.</p>
-  </div>
-  <div class="feature-card">
-    <h3>
-      <svg viewBox="0 0 24 24"><path d="M15.5,12C18,12 20,14 20,16.5C20,17.38 19.75,18.21 19.31,18.9L22.39,22L21,23.39L17.88,20.32C17.19,20.75 16.37,21 15.5,21C13,21 11,19 11,16.5C11,14 13,12 15.5,12M15.5,14A2.5,2.5 0 0,0 13,16.5A2.5,2.5 0 0,0 15.5,19A2.5,2.5 0 0,0 18,16.5A2.5,2.5 0 0,0 15.5,14M5,3H19C20.11,3 21,3.89 21,5V13.03C20.5,12.23 19.81,11.54 19,11V5H5V19H9.5C9.81,19.75 10.26,20.42 10.81,21H5C3.89,21 3,20.11 3,19V5C3,3.89 3.89,3 5,3M7,7H17V9H7V7M7,11H12.03C11.23,11.5 10.54,12.19 10,13H7V11M7,15H9.17C9.06,15.5 9,16 9,16.5V17H7V15Z"/></svg>
-      Container Logs
-    </h3>
-    <p>Stream, filter, and search container logs in real-time with full-screen mode.</p>
-  </div>
-  <div class="feature-card">
-    <h3>
-      <svg viewBox="0 0 24 24"><path d="M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z"/></svg>
-      Zero Installation
-    </h3>
-    <p>Single binary that runs locally. No agents or server-side components needed.</p>
-  </div>
-  <div class="feature-card">
-    <h3>
-      <svg viewBox="0 0 24 24"><path d="M13.95 13.5H10.05L9.25 16H7.12L10.7 6H13.3L16.87 16H14.75L13.95 13.5M10.55 11.75H13.45L12 7.5L10.55 11.75M22 20V22H2V20H4V4C4 2.9 4.9 2 6 2H18C19.1 2 20 2.9 20 4V20H22Z"/></svg>
-      Works Anywhere
-    </h3>
-    <p>Connects through the Kubernetes API. Works anywhere kubectl works.</p>
-  </div>
-  <div class="feature-card">
-    <h3>
-      <svg viewBox="0 0 24 24"><path d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12C20,14.4 19,16.5 17.3,18C15.9,16.7 14,16 12,16C10,16 8.2,16.7 6.7,18C5,16.5 4,14.4 4,12A8,8 0 0,1 12,4M14,5.89C13.62,5.9 13.26,6.15 13.1,6.54L11.81,9.77L11.71,10C11,10.13 10.41,10.6 10.14,11.26C9.73,12.29 10.23,13.45 11.26,13.86C12.29,14.27 13.45,13.77 13.86,12.74C14.12,12.08 14,11.32 13.57,10.76L13.67,10.5L14.96,7.29L14.97,7.26C15.2,6.67 14.92,6 14.34,5.76C14.23,5.82 14.11,5.88 14,5.89M10,6A1,1 0 0,0 9,7A1,1 0 0,0 10,8A1,1 0 0,0 11,7A1,1 0 0,0 10,6M7,9A1,1 0 0,0 6,10A1,1 0 0,0 7,11A1,1 0 0,0 8,10A1,1 0 0,0 7,9M17,9A1,1 0 0,0 16,10A1,1 0 0,0 17,11A1,1 0 0,0 18,10A1,1 0 0,0 17,9Z"/></svg>
+      <svg viewBox="0 0 24 24">
+        <path
+          d="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12C20,14.4 19,16.5 17.3,18C15.9,16.7 14,16 12,16C10,16 8.2,16.7 6.7,18C5,16.5 4,14.4 4,12A8,8 0 0,1 12,4M14,5.89C13.62,5.9 13.26,6.15 13.1,6.54L11.81,9.77L11.71,10C11,10.13 10.41,10.6 10.14,11.26C9.73,12.29 10.23,13.45 11.26,13.86C12.29,14.27 13.45,13.77 13.86,12.74C14.12,12.08 14,11.32 13.57,10.76L13.67,10.5L14.96,7.29L14.97,7.26C15.2,6.67 14.92,6 14.34,5.76C14.23,5.82 14.11,5.88 14,5.89M10,6A1,1 0 0,0 9,7A1,1 0 0,0 10,8A1,1 0 0,0 11,7A1,1 0 0,0 10,6M7,9A1,1 0 0,0 6,10A1,1 0 0,0 7,11A1,1 0 0,0 8,10A1,1 0 0,0 7,9M17,9A1,1 0 0,0 16,10A1,1 0 0,0 17,11A1,1 0 0,0 18,10A1,1 0 0,0 17,9Z" />
+      </svg>
       Multiple Metrics Sources
     </h3>
     <p>Prometheus for enhanced metrics, Metrics Server, or graceful fallback to requests/limits.</p>
+  </div>
+  <div class="feature-card">
+    <h3>
+      <svg viewBox="0 0 24 24">
+        <path
+          d="M13.95 13.5H10.05L9.25 16H7.12L10.7 6H13.3L16.87 16H14.75L13.95 13.5M10.55 11.75H13.45L12 7.5L10.55 11.75M22 20V22H2V20H4V4C4 2.9 4.9 2 6 2H18C19.1 2 20 2.9 20 4V20H22Z" />
+      </svg>
+      Uses kubectl
+    </h3>
+    <p>Connects through the Kubernetes API and works anywhere kubectl is supported.</p>
+  </div>
+  <div class="feature-card">
+    <h3>
+      <svg viewBox="0 0 24 24">
+        <path
+          d="M15.5,12C18,12 20,14 20,16.5C20,17.38 19.75,18.21 19.31,18.9L22.39,22L21,23.39L17.88,20.32C17.19,20.75 16.37,21 15.5,21C13,21 11,19 11,16.5C11,14 13,12 15.5,12M15.5,14A2.5,2.5 0 0,0 13,16.5A2.5,2.5 0 0,0 15.5,19A2.5,2.5 0 0,0 18,16.5A2.5,2.5 0 0,0 15.5,14M5,3H19C20.11,3 21,3.89 21,5V13.03C20.5,12.23 19.81,11.54 19,11V5H5V19H9.5C9.81,19.75 10.26,20.42 10.81,21H5C3.89,21 3,20.11 3,19V5C3,3.89 3.89,3 5,3M7,7H17V9H7V7M7,11H12.03C11.23,11.5 10.54,12.19 10,13H7V11M7,15H9.17C9.06,15.5 9,16 9,16.5V17H7V15Z" />
+      </svg>
+      User Friendly
+    </h3>
+    <p>Drill-down navigation with filter and mertrics sorting. View, stream, and search container logs.</p>
+  </div>
+  <div class="feature-card">
+    <h3>
+      <svg viewBox="0 0 24 24">
+        <path
+          d="M11,9H13V7H11M12,20C7.59,20 4,16.41 4,12C4,7.59 7.59,4 12,4C16.41,4 20,7.59 20,12C20,16.41 16.41,20 12,20M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M11,17H13V11H11V17Z" />
+      </svg>
+      Local Installation
+    </h3>
+    <p>Single binary that runs locally. No agents or server-side components needed.</p>
   </div>
 </div>
 
@@ -253,7 +286,7 @@ brew install ktop</code></pre>
 
 <script>
   document.querySelectorAll('.install-tabs input[type="radio"]').forEach(radio => {
-    radio.addEventListener('change', function() {
+    radio.addEventListener('change', function () {
       // Hide all content panels
       document.querySelectorAll('.install-content').forEach(c => c.classList.remove('active'));
       // Show the selected panel
