@@ -67,7 +67,4 @@ ktop --metrics-source=prometheus
 
 ## Documentation
 
-| Document | Description |
-|----------|-------------|
-| [User Guide](docs/user-guide.md) | Complete documentation: CLI reference, metrics configuration, navigation |
-| [Prometheus Integration](docs/prom.md) | Enhanced metrics from kubelet/cAdvisor endpoints |
+> See [ktop's](https://vladimirvivien.github.io/ktop/) website for documetation.
