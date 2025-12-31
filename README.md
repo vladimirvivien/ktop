@@ -1,8 +1,11 @@
-# ktop
+<p align="center">
+    <img src="./docs/images/ktop-logo.svg" alt="ktop" height="96">
+</p>
 
-<h1 align="center">
+
+<p align="left">
     <img src="./docs/images/ktop.png" alt="ktop">
-</h1>
+</p>
 
 A `top`-like tool for your Kubernetes cluster.
 
