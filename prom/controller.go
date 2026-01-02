@@ -65,17 +65,11 @@ func (cc *CollectorController) Stop() error {
 // TestScrape performs a quick test to verify connectivity to prometheus endpoints.
 // It makes a direct API call to test RBAC permissions for nodes/proxy.
 // Returns nil if the metrics endpoints are accessible.
+// This can be called before Start() to verify connectivity before starting collection.
 func (cc *CollectorController) TestScrape(ctx context.Context) error {
-	cc.mutex.RLock()
-	if !cc.running {
-		cc.mutex.RUnlock()
-		return fmt.Errorf("controller is not running")
-	}
-	kubeConfig := cc.kubeConfig
-	cc.mutex.RUnlock()
-
 	// Create a quick client to test connectivity
-	clientset, err := kubernetes.NewForConfig(kubeConfig)
+	// Note: kubeConfig is set at construction time, no lock needed
+	clientset, err := kubernetes.NewForConfig(cc.kubeConfig)
 	if err != nil {
 		return fmt.Errorf("creating test client: %w", err)
 	}
@@ -128,8 +122,13 @@ func (cc *CollectorController) runCollector(ctx context.Context) {
 		return
 	}
 
-	// Run immediate first collection (don't wait for ticker)
-	cc.collectFromAllComponents(ctx)
+	// Run first collection NON-BLOCKING with timeout
+	// This prevents startup hangs - UI will show loading state while metrics populate
+	go func() {
+		firstCtx, cancel := context.WithTimeout(ctx, cc.config.Timeout)
+		defer cancel()
+		cc.collectFromAllComponents(firstCtx)
+	}()
 
 	ticker := time.NewTicker(cc.config.Interval)
 	defer ticker.Stop()
