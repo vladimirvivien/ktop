@@ -100,18 +100,19 @@ func NewKtopCmd() *cobra.Command {
 }
 
 // tryPrometheus attempts to create, start, and verify a prometheus metrics source.
-// It performs a test scrape to verify connectivity before returning.
+// It performs a connectivity test FIRST before starting the expensive collection.
 func tryPrometheus(ctx context.Context, restConfig *rest.Config, cfg *promMetrics.PromConfig) (*promMetrics.PromMetricsSource, error) {
 	source, err := promMetrics.NewPromMetricsSource(restConfig, cfg)
 	if err != nil {
 		return nil, err
 	}
-	if err := source.Start(ctx); err != nil {
-		source.Stop()
+	// TEST FIRST - quick connectivity check before starting expensive collection
+	// This prevents hanging on Start() if the cluster is unreachable
+	if err := source.TestConnection(ctx); err != nil {
 		return nil, err
 	}
-	// Verify connectivity with a test scrape
-	if err := source.TestConnection(ctx); err != nil {
+	// THEN start collection (now non-blocking)
+	if err := source.Start(ctx); err != nil {
 		source.Stop()
 		return nil, err
 	}

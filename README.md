@@ -24,7 +24,7 @@ Following the tradition of Unix/Linux `top` tools, `ktop` is a tool that display
 
 ## Installation
 
-### kubectl plugin (recommended)
+### kubectl plugin
 
 ```bash
 kubectl krew install ktop

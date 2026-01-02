@@ -97,41 +97,58 @@ func (ks *KubernetesScraper) ScrapeComponent(ctx context.Context, component Comp
 	return ks.scrapeTarget(ctx, target)
 }
 
-// scrapeAllTargets scrapes all targets and merges results into a single ScrapedMetrics
+// scrapeAllTargets scrapes all targets IN PARALLEL and merges results into a single ScrapedMetrics
 // This is used for node-based components where we need metrics from all nodes
 func (ks *KubernetesScraper) scrapeAllTargets(ctx context.Context, targets []*ScrapeTarget) (*ScrapedMetrics, error) {
 	if len(targets) == 0 {
 		return nil, fmt.Errorf("no targets to scrape")
 	}
 
-	// Merged result
+	// Result type for collecting scrape results from goroutines
+	type scrapeResult struct {
+		target  *ScrapeTarget
+		metrics *ScrapedMetrics
+		err     error
+	}
+
+	startTime := time.Now()
+	results := make(chan scrapeResult, len(targets))
+
+	// Scrape all targets in parallel
+	for _, target := range targets {
+		go func(t *ScrapeTarget) {
+			metrics, err := ks.scrapeTarget(ctx, t)
+			results <- scrapeResult{target: t, metrics: metrics, err: err}
+		}(target)
+	}
+
+	// Collect results and merge families
 	mergedFamilies := make(map[string]*MetricFamily)
 	var firstEndpoint string
 	var totalDuration time.Duration
-	startTime := time.Now()
 	var lastErr error
 
-	for _, target := range targets {
-		metrics, err := ks.scrapeTarget(ctx, target)
-		if err != nil {
-			lastErr = err
+	for i := 0; i < len(targets); i++ {
+		result := <-results
+		if result.err != nil {
+			lastErr = result.err
 			continue // Skip failed targets but continue with others
 		}
 
 		if firstEndpoint == "" {
-			firstEndpoint = metrics.Endpoint
+			firstEndpoint = result.metrics.Endpoint
 		}
-		totalDuration += metrics.ScrapeDuration
+		totalDuration += result.metrics.ScrapeDuration
 
 		// Merge families, adding node label to each time series
-		for name, family := range metrics.Families {
+		for name, family := range result.metrics.Families {
 			// Add node label to each time series in this family
 			for _, ts := range family.TimeSeries {
 				// Add node label if this is a node-based target
-				if target.NodeName != "" {
+				if result.target.NodeName != "" {
 					ts.Labels = append(ts.Labels, labels.Label{
 						Name:  "node",
-						Value: target.NodeName,
+						Value: result.target.NodeName,
 					})
 				}
 			}
@@ -340,17 +357,22 @@ func (ks *KubernetesScraper) scrapeComponentPeriodically(ctx context.Context, co
 
 // scrapeTarget scrapes metrics from a single target using RESTClient
 func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTarget) (*ScrapedMetrics, error) {
+	// Add per-request timeout to prevent indefinite blocking on slow/unresponsive nodes
+	reqCtx, cancel := context.WithTimeout(ctx, ks.config.Timeout)
+	defer cancel()
+
 	startTime := time.Now()
 
 	var result rest.Result
 	var endpoint string
 
 	// Build the appropriate RESTClient request based on target type
+	// Use reqCtx (with timeout) for all requests to prevent indefinite blocking
 	switch target.Component {
 	case ComponentAPIServer:
 		// API server metrics via direct path
 		endpoint = "/metrics"
-		result = ks.restClient.Get().AbsPath("/metrics").Do(ctx)
+		result = ks.restClient.Get().AbsPath("/metrics").Do(reqCtx)
 
 	case ComponentKubelet, ComponentCAdvisor:
 		// Node-based components via node proxy
@@ -360,7 +382,7 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 			Name(target.NodeName).
 			SubResource("proxy").
 			Suffix(target.Path).
-			Do(ctx)
+			Do(reqCtx)
 
 	case ComponentEtcd, ComponentScheduler, ComponentControllerManager, ComponentKubeProxy:
 		// Pod-based components via pod proxy
@@ -372,7 +394,7 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 			Name(podNameWithPort).
 			SubResource("proxy").
 			Suffix(target.Path).
-			Do(ctx)
+			Do(reqCtx)
 
 	default:
 		return nil, fmt.Errorf("unsupported component type: %s", target.Component)
