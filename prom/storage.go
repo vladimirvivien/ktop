@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unique"
 
 	"github.com/prometheus/prometheus/model/labels"
 )
@@ -21,6 +22,10 @@ type InMemoryStore struct {
 	metricNames map[string]bool
 	labelNames  map[string]bool
 	labelValues map[string]map[string]bool // labelName -> values
+
+	// String interning - keeps handles alive to retain canonical strings
+	stringHandles map[string]unique.Handle[string]
+	handlesMu     sync.RWMutex
 
 	// Configuration
 	maxSamples    int
@@ -39,10 +44,43 @@ func NewInMemoryStore(config *ScrapeConfig) *InMemoryStore {
 		metricNames:   make(map[string]bool),
 		labelNames:    make(map[string]bool),
 		labelValues:   make(map[string]map[string]bool),
+		stringHandles: make(map[string]unique.Handle[string]),
 		maxSamples:    config.MaxSamples,
 		retentionTime: config.RetentionTime,
 		lastCleanup:   time.Now(),
 	}
+}
+
+// InternString returns the canonical version of a string.
+// Uses Go's unique package to deduplicate repeated strings.
+func (store *InMemoryStore) InternString(s string) string {
+	store.handlesMu.RLock()
+	if h, ok := store.stringHandles[s]; ok {
+		store.handlesMu.RUnlock()
+		return h.Value()
+	}
+	store.handlesMu.RUnlock()
+
+	store.handlesMu.Lock()
+	defer store.handlesMu.Unlock()
+	if h, ok := store.stringHandles[s]; ok {
+		return h.Value()
+	}
+	h := unique.Make(s)
+	store.stringHandles[s] = h
+	return h.Value()
+}
+
+// internLabels creates a new labels.Labels with all strings interned.
+func (store *InMemoryStore) internLabels(lbls labels.Labels) labels.Labels {
+	interned := make(labels.Labels, len(lbls))
+	for i, l := range lbls {
+		interned[i] = labels.Label{
+			Name:  store.InternString(l.Name),
+			Value: store.InternString(l.Value),
+		}
+	}
+	return interned
 }
 
 // AddMetrics stores scraped metrics in the store
@@ -55,6 +93,9 @@ func (store *InMemoryStore) AddMetrics(metrics *ScrapedMetrics) error {
 	defer store.mutex.Unlock()
 
 	for metricName, family := range metrics.Families {
+		// Intern metric name for consistent memory usage
+		metricName = store.InternString(metricName)
+
 		// Ensure metric exists in index
 		store.metricNames[metricName] = true
 
@@ -67,21 +108,23 @@ func (store *InMemoryStore) AddMetrics(metrics *ScrapedMetrics) error {
 		for _, ts := range family.TimeSeries {
 			seriesKey := ts.Labels.String()
 
-			// Update label indexes
+			// Update label indexes with interned strings
 			for _, label := range ts.Labels {
-				store.labelNames[label.Name] = true
-				if store.labelValues[label.Name] == nil {
-					store.labelValues[label.Name] = make(map[string]bool)
+				name := store.InternString(label.Name)
+				value := store.InternString(label.Value)
+				store.labelNames[name] = true
+				if store.labelValues[name] == nil {
+					store.labelValues[name] = make(map[string]bool)
 				}
-				store.labelValues[label.Name][label.Value] = true
+				store.labelValues[name][value] = true
 			}
 
 			// Get or create time series
 			existingSeries, exists := store.series[metricName][seriesKey]
 			if !exists {
-				// Create new series with ring buffer
+				// Create new series with ring buffer and interned labels
 				existingSeries = &TimeSeries{
-					Labels:  ts.Labels,
+					Labels:  store.internLabels(ts.Labels),
 					Samples: NewRingBuffer[MetricSample](store.maxSamples),
 				}
 				store.series[metricName][seriesKey] = existingSeries

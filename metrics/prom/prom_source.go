@@ -44,9 +44,9 @@ type PromConfig struct {
 func DefaultPromConfig() *PromConfig {
 	return &PromConfig{
 		Enabled:        true,
-		ScrapeInterval: 5 * time.Second,
-		RetentionTime:  1 * time.Hour,
-		MaxSamples:     10000,
+		ScrapeInterval: 4 * time.Second,
+		RetentionTime:  5 * time.Minute,
+		MaxSamples:     50,
 		Components: []prom.ComponentType{
 			prom.ComponentKubelet,
 			prom.ComponentCAdvisor,
@@ -444,26 +444,26 @@ func (p *PromMetricsSource) GetMetricsForPod(ctx context.Context, pod metav1.Obj
 
 // GetAllPodMetrics retrieves metrics for all pods
 func (p *PromMetricsSource) GetAllPodMetrics(ctx context.Context) ([]*metrics.PodMetrics, error) {
+	// Check health and get store reference under lock
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-
 	if !p.isHealthyLocked() {
+		p.mu.RUnlock()
 		return nil, fmt.Errorf("prometheus source is not healthy")
 	}
-
 	if p.store == nil {
+		p.mu.RUnlock()
 		return nil, fmt.Errorf("metrics store not initialized")
 	}
+	store := p.store
+	p.mu.RUnlock()
 
-	// Get all unique pod/namespace combinations from labels
-	// This requires querying the store for label values
-	namespaces := p.store.GetLabelValues("namespace")
-	pods := p.store.GetLabelValues("pod")
+	// Get label values (store has its own lock)
+	namespaces := store.GetLabelValues("namespace")
+	pods := store.GetLabelValues("pod")
 
 	var allPodMetrics []*metrics.PodMetrics
 
-	// This is a simplified implementation - in production would need better logic
-	// to match pods with their namespaces
+	// Call GetPodMetrics without holding p.mu to avoid deadlock
 	for _, namespace := range namespaces {
 		for _, pod := range pods {
 			if podMetrics, err := p.GetPodMetrics(ctx, namespace, pod); err == nil {
@@ -539,12 +539,8 @@ func (p *PromMetricsSource) SetHealthCallback(callback func(healthy bool, info m
 }
 
 // buildSourceInfoLocked builds SourceInfo while holding the lock.
-// Must be called with p.mu held.
-func (p *PromMetricsSource) buildSourceInfoLocked(healthy bool) metrics.SourceInfo {
-	metricCount := 0
-	if p.store != nil {
-		metricCount = len(p.store.GetMetricNames())
-	}
+// metricCount must be obtained before acquiring lock to avoid nested locking.
+func (p *PromMetricsSource) buildSourceInfoLocked(healthy bool, metricCount int) metrics.SourceInfo {
 	return metrics.SourceInfo{
 		Type:         metrics.SourceTypePrometheus,
 		Version:      "v1.0.0",
@@ -557,6 +553,12 @@ func (p *PromMetricsSource) buildSourceInfoLocked(healthy bool) metrics.SourceIn
 
 // handleError is called when an error occurs during metrics collection
 func (p *PromMetricsSource) handleError(component prom.ComponentType, err error) {
+	// Get metric count BEFORE acquiring lock to avoid nested locking
+	metricCount := 0
+	if p.store != nil {
+		metricCount = len(p.store.GetMetricNames())
+	}
+
 	var shouldNotify bool
 	var info metrics.SourceInfo
 
@@ -572,7 +574,7 @@ func (p *PromMetricsSource) handleError(component prom.ComponentType, err error)
 	// Check if we need to notify (overall state changed from healthy to unhealthy)
 	if wasHealthy && !nowHealthy {
 		shouldNotify = true
-		info = p.buildSourceInfoLocked(false)
+		info = p.buildSourceInfoLocked(false, metricCount)
 	}
 	p.mu.Unlock()
 
@@ -584,6 +586,12 @@ func (p *PromMetricsSource) handleError(component prom.ComponentType, err error)
 
 // handleMetricsCollected is called when metrics are successfully collected
 func (p *PromMetricsSource) handleMetricsCollected(component prom.ComponentType, collectedMetrics *prom.ScrapedMetrics) {
+	// Get metric count BEFORE acquiring lock to avoid nested locking
+	metricCount := 0
+	if p.store != nil {
+		metricCount = len(p.store.GetMetricNames())
+	}
+
 	var shouldNotify bool
 	var info metrics.SourceInfo
 
@@ -604,7 +612,7 @@ func (p *PromMetricsSource) handleMetricsCollected(component prom.ComponentType,
 	// Check if we need to notify (overall state changed from unhealthy to healthy)
 	if !wasHealthy && nowHealthy {
 		shouldNotify = true
-		info = p.buildSourceInfoLocked(true)
+		info = p.buildSourceInfoLocked(true, metricCount)
 	}
 	p.mu.Unlock()
 

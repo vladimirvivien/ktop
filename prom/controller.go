@@ -138,7 +138,9 @@ func (cc *CollectorController) runCollector(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			cc.collectFromAllComponents(ctx)
+			cycleCtx, cancel := context.WithTimeout(ctx, cc.config.Timeout)
+			cc.collectFromAllComponents(cycleCtx)
+			cancel()
 		}
 	}
 }

@@ -23,6 +23,19 @@ const (
 	ComponentKubeProxy         ComponentType = "kube-proxy"
 )
 
+// DefaultMetricAllowlist contains only the metrics ktop actually uses.
+// All other metrics are filtered out during scraping to reduce memory usage.
+var DefaultMetricAllowlist = map[string]bool{
+	"container_cpu_usage_seconds_total":      true,
+	"container_memory_working_set_bytes":     true,
+	"container_network_receive_bytes_total":  true,
+	"container_network_transmit_bytes_total": true,
+	"container_fs_reads_bytes_total":         true,
+	"container_fs_writes_bytes_total":        true,
+	"kubelet_running_pods":                   true,
+	"container_count":                        true,
+}
+
 // MetricSample represents a single metric data point
 type MetricSample struct {
 	Timestamp int64
