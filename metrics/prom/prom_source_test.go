@@ -204,16 +204,16 @@ func TestNewPromMetricsSource_WithNilConfig(t *testing.T) {
 	}
 
 	// Verify default config values
-	if source.config.ScrapeInterval != 5*time.Second {
-		t.Errorf("Expected default scrape interval 5s, got %v", source.config.ScrapeInterval)
+	if source.config.ScrapeInterval != 4*time.Second {
+		t.Errorf("Expected default scrape interval 4s, got %v", source.config.ScrapeInterval)
 	}
 
-	if source.config.RetentionTime != 1*time.Hour {
-		t.Errorf("Expected default retention time 1h, got %v", source.config.RetentionTime)
+	if source.config.RetentionTime != 5*time.Minute {
+		t.Errorf("Expected default retention time 5m, got %v", source.config.RetentionTime)
 	}
 
-	if source.config.MaxSamples != 10000 {
-		t.Errorf("Expected default max samples 10000, got %d", source.config.MaxSamples)
+	if source.config.MaxSamples != 50 {
+		t.Errorf("Expected default max samples 50, got %d", source.config.MaxSamples)
 	}
 }
 
@@ -224,16 +224,16 @@ func TestDefaultPromConfig(t *testing.T) {
 		t.Error("Expected Enabled to be true")
 	}
 
-	if config.ScrapeInterval != 5*time.Second {
-		t.Errorf("Expected ScrapeInterval 5s, got %v", config.ScrapeInterval)
+	if config.ScrapeInterval != 4*time.Second {
+		t.Errorf("Expected ScrapeInterval 4s, got %v", config.ScrapeInterval)
 	}
 
-	if config.RetentionTime != 1*time.Hour {
-		t.Errorf("Expected RetentionTime 1h, got %v", config.RetentionTime)
+	if config.RetentionTime != 5*time.Minute {
+		t.Errorf("Expected RetentionTime 5m, got %v", config.RetentionTime)
 	}
 
-	if config.MaxSamples != 10000 {
-		t.Errorf("Expected MaxSamples 10000, got %d", config.MaxSamples)
+	if config.MaxSamples != 50 {
+		t.Errorf("Expected MaxSamples 50, got %d", config.MaxSamples)
 	}
 
 	// Check default components

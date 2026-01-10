@@ -437,9 +437,12 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 		}, err
 	}
 
-	// Convert to our internal format
+	// Convert to our internal format, filtering to only allowed metrics
 	metricFamilies := make(map[string]*MetricFamily)
 	for name, family := range families {
+		if !DefaultMetricAllowlist[name] {
+			continue
+		}
 		metricFamily := ks.convertMetricFamily(name, family)
 		metricFamilies[name] = metricFamily
 	}
