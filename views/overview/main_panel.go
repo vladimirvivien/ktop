@@ -934,6 +934,15 @@ func (p *MainPanel) buildNodeDetailData(ctx context.Context, nodeName string, no
 	// Set metrics source type for conditional display in detail panel
 	if p.metricsSource != nil {
 		detailData.MetricsSourceType = p.metricsSource.GetSourceInfo().Type
+
+		// Fetch per-node network/disk rates for sparklines (Prometheus only)
+		// GetNodeMetrics uses label filter {node: nodeName} to get only this node's metrics
+		if nodeMetrics, err := p.metricsSource.GetNodeMetrics(ctx, nodeName); err == nil && nodeMetrics != nil {
+			detailData.NetworkRxRate = nodeMetrics.NetworkRxRate
+			detailData.NetworkTxRate = nodeMetrics.NetworkTxRate
+			detailData.DiskReadRate = nodeMetrics.DiskReadRate
+			detailData.DiskWriteRate = nodeMetrics.DiskWriteRate
+		}
 	}
 
 	// Fetch metrics history for sparklines (if available)
@@ -1019,6 +1028,14 @@ func (p *MainPanel) buildPodDetailData(ctx context.Context, podKey string, podMo
 	// Set metrics source type for conditional display in detail panel
 	if p.metricsSource != nil {
 		detailData.MetricsSourceType = p.metricsSource.GetSourceInfo().Type
+
+		// Fetch pod-level network/disk rates for sparklines (Prometheus only)
+		if netRx, netTx, diskRead, diskWrite, err := p.metricsSource.GetPodNetworkDiskMetrics(ctx, namespace, podName); err == nil {
+			detailData.NetworkRxRate = netRx
+			detailData.NetworkTxRate = netTx
+			detailData.DiskReadRate = diskRead
+			detailData.DiskWriteRate = diskWrite
+		}
 	}
 
 	// Fetch metrics history for sparklines (if available)
