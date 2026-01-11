@@ -20,6 +20,12 @@ type MetricsSource interface {
 	// Returns PodMetrics containing per-container resource usage.
 	GetPodMetrics(ctx context.Context, namespace, podName string) (*PodMetrics, error)
 
+	// GetPodNetworkDiskMetrics retrieves network and disk I/O rates for a specific pod.
+	// Network metrics are at the pod level (shared network namespace).
+	// Disk metrics are aggregated across containers in the pod.
+	// Returns zero values if metrics are not available (e.g., for metrics-server source).
+	GetPodNetworkDiskMetrics(ctx context.Context, namespace, podName string) (netRx, netTx, diskRead, diskWrite float64, err error)
+
 	// GetMetricsForPod retrieves metrics for a specific pod object.
 	// This method exists for compatibility with existing code that passes v1.Pod objects.
 	// Implementations may delegate to GetPodMetrics(pod.GetNamespace(), pod.GetName()).

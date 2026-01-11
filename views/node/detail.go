@@ -62,6 +62,10 @@ type DetailPanel struct {
 	onPodSelected         NodeSelectedCallback
 	onBack                func()
 	onFooterContextChange func(focusedPanel string)
+
+	// Adaptive scaling for Net/Disk sparklines
+	peakNetRate  float64
+	peakDiskRate float64
 }
 
 // NewDetailPanel creates a new node detail panel
@@ -256,6 +260,8 @@ func (p *DetailPanel) DrawBody(data interface{}) {
 	}
 	if newNodeName != p.currentNodeName {
 		p.resetSparklines()
+		p.peakNetRate = 0  // Reset adaptive scaling peaks
+		p.peakDiskRate = 0
 		p.currentNodeName = newNodeName
 
 		// Populate sparklines from history if available
@@ -394,8 +400,45 @@ func (p *DetailPanel) drawSparklines() {
 
 	// Update network/disk sparklines in prometheus mode
 	if prometheusMode {
-		p.sparklineRow.UpdateNET(0.01, " NET [gray]↓n/a ↑n/a[-] ")
-		p.sparklineRow.UpdateDisk(0.01, " DISK [gray]R:n/a W:n/a[-] ")
+		// Network sparkline with adaptive scaling
+		netTitle := fmt.Sprintf(" Net ↓%s ↑%s ",
+			ui.FormatBytesRate(p.data.NetworkRxRate),
+			ui.FormatBytesRate(p.data.NetworkTxRate))
+		combinedNetRate := p.data.NetworkRxRate + p.data.NetworkTxRate
+
+		// Adaptive scaling: track peak, use minimum 512 KB/s baseline
+		if combinedNetRate > p.peakNetRate {
+			p.peakNetRate = combinedNetRate
+		}
+		effectiveNetMax := p.peakNetRate
+		if effectiveNetMax < 512*1024 {
+			effectiveNetMax = 512 * 1024
+		}
+		netNormalized := combinedNetRate / effectiveNetMax
+		if netNormalized > 1 {
+			netNormalized = 1
+		}
+		p.sparklineRow.UpdateNET(netNormalized, netTitle)
+
+		// Disk sparkline with adaptive scaling
+		diskTitle := fmt.Sprintf(" Disk R:%s W:%s ",
+			ui.FormatBytesRate(p.data.DiskReadRate),
+			ui.FormatBytesRate(p.data.DiskWriteRate))
+		combinedDiskRate := p.data.DiskReadRate + p.data.DiskWriteRate
+
+		// Adaptive scaling: track peak, use minimum 512 KB/s baseline
+		if combinedDiskRate > p.peakDiskRate {
+			p.peakDiskRate = combinedDiskRate
+		}
+		effectiveDiskMax := p.peakDiskRate
+		if effectiveDiskMax < 512*1024 {
+			effectiveDiskMax = 512 * 1024
+		}
+		diskNormalized := combinedDiskRate / effectiveDiskMax
+		if diskNormalized > 1 {
+			diskNormalized = 1
+		}
+		p.sparklineRow.UpdateDisk(diskNormalized, diskTitle)
 	}
 }
 

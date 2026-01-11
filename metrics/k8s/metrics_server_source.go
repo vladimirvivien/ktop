@@ -135,6 +135,11 @@ func (m *MetricsServerSource) GetMetricsForPod(ctx context.Context, pod metav1.O
 	return m.GetPodMetrics(ctx, pod.GetNamespace(), pod.GetName())
 }
 
+// GetPodNetworkDiskMetrics returns zero values - metrics-server doesn't provide network/disk metrics
+func (m *MetricsServerSource) GetPodNetworkDiskMetrics(ctx context.Context, namespace, podName string) (netRx, netTx, diskRead, diskWrite float64, err error) {
+	return 0, 0, 0, 0, nil
+}
+
 // GetAllPodMetrics retrieves metrics for all pods.
 func (m *MetricsServerSource) GetAllPodMetrics(ctx context.Context) ([]*metrics.PodMetrics, error) {
 	// Call Metrics Server API directly

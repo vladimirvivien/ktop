@@ -26,6 +26,12 @@ type PodDetailData struct {
 	// MetricsSourceType indicates the active metrics source ("prometheus", "metrics-server", or "")
 	// Used by detail panels to determine which metrics visualizations to show
 	MetricsSourceType string
+
+	// Network/Disk I/O rates for this pod (Prometheus only)
+	NetworkRxRate float64
+	NetworkTxRate float64
+	DiskReadRate  float64
+	DiskWriteRate float64
 }
 
 // ContainerUsage holds formatted CPU and memory usage strings for a container

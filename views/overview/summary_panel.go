@@ -30,6 +30,10 @@ type clusterSummaryPanel struct {
 
 	// Dynamic layout tracking
 	lastTerminalHeight int
+
+	// Adaptive scaling for Net/Disk sparklines
+	peakNetRate  float64
+	peakDiskRate float64
 }
 
 func NewClusterSummaryPanel(app *application.Application, title string) ui.Panel {
@@ -239,23 +243,41 @@ func (p *clusterSummaryPanel) DrawBody(data interface{}) {
 
 		// === Prometheus-only: Network, Disk, Enhanced Stats ===
 		if p.prometheusMode {
-			// Network sparkline
+			// Network sparkline with adaptive scaling
 			netTitle := fmt.Sprintf(" Net ↓%s ↑%s ",
 				ui.FormatBytesRate(summary.NetworkRxRate),
 				ui.FormatBytesRate(summary.NetworkTxRate))
 			combinedNetRate := summary.NetworkRxRate + summary.NetworkTxRate
-			netNormalized := combinedNetRate / (128 * 1024 * 1024) // 128 MB/s baseline
+
+			// Adaptive scaling: track peak, use minimum 512 KB/s baseline
+			if combinedNetRate > p.peakNetRate {
+				p.peakNetRate = combinedNetRate
+			}
+			effectiveNetMax := p.peakNetRate
+			if effectiveNetMax < 512*1024 { // Min 512 KB/s baseline
+				effectiveNetMax = 512 * 1024
+			}
+			netNormalized := combinedNetRate / effectiveNetMax
 			if netNormalized > 1 {
 				netNormalized = 1
 			}
 			p.sparklineRow.UpdateNET(netNormalized, netTitle)
 
-			// Disk sparkline
+			// Disk sparkline with adaptive scaling
 			diskTitle := fmt.Sprintf(" Disk R:%s W:%s ",
 				ui.FormatBytesRate(summary.DiskReadRate),
 				ui.FormatBytesRate(summary.DiskWriteRate))
 			combinedDiskRate := summary.DiskReadRate + summary.DiskWriteRate
-			diskNormalized := combinedDiskRate / (500 * 1024 * 1024) // 500 MB/s baseline
+
+			// Adaptive scaling: track peak, use minimum 512 KB/s baseline
+			if combinedDiskRate > p.peakDiskRate {
+				p.peakDiskRate = combinedDiskRate
+			}
+			effectiveDiskMax := p.peakDiskRate
+			if effectiveDiskMax < 512*1024 { // Min 512 KB/s baseline
+				effectiveDiskMax = 512 * 1024
+			}
+			diskNormalized := combinedDiskRate / effectiveDiskMax
 			if diskNormalized > 1 {
 				diskNormalized = 1
 			}

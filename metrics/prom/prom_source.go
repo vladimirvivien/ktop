@@ -435,6 +435,44 @@ func (p *PromMetricsSource) GetPodMetrics(ctx context.Context, namespace, podNam
 	return podMetrics, nil
 }
 
+// GetPodNetworkDiskMetrics retrieves network and disk I/O rates for a specific pod.
+// Network metrics are at the pod level (shared network namespace via pause container).
+// Disk metrics are aggregated across containers in the pod.
+// Returns zero values if metrics are not available.
+// Note: Pod-level network metrics are not available on containerd-based clusters.
+func (p *PromMetricsSource) GetPodNetworkDiskMetrics(ctx context.Context, namespace, podName string) (netRx, netTx, diskRead, diskWrite float64, err error) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	if !p.isHealthyLocked() {
+		return 0, 0, 0, 0, fmt.Errorf("prometheus source is not healthy")
+	}
+
+	if p.store == nil {
+		return 0, 0, 0, 0, nil
+	}
+
+	// Pod-level metrics: filter by pod and namespace
+	labelMatchers := map[string]string{
+		"pod":       podName,
+		"namespace": namespace,
+	}
+
+	// Query Disk Read rate from cAdvisor
+	if rate, calcErr := p.calculateCPURate("container_fs_reads_bytes_total", labelMatchers, 40*time.Second); calcErr == nil {
+		diskRead = rate
+	}
+
+	// Query Disk Write rate from cAdvisor
+	if rate, calcErr := p.calculateCPURate("container_fs_writes_bytes_total", labelMatchers, 40*time.Second); calcErr == nil {
+		diskWrite = rate
+	}
+
+	// Note: netRx and netTx remain 0 - pod-level network metrics are not available
+	// on containerd-based Kubernetes clusters (cAdvisor only exports node-level network)
+	return netRx, netTx, diskRead, diskWrite, nil
+}
+
 // GetMetricsForPod retrieves metrics for a specific pod object
 func (p *PromMetricsSource) GetMetricsForPod(ctx context.Context, pod metav1.Object) (*metrics.PodMetrics, error) {
 	// Extract namespace and name from pod object

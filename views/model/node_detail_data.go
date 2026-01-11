@@ -24,6 +24,12 @@ type NodeDetailData struct {
 	// MetricsSourceType indicates the active metrics source ("prometheus", "metrics-server", or "")
 	// Used by detail panels to determine which metrics visualizations to show
 	MetricsSourceType string
+
+	// Network/Disk I/O rates for this specific node (Prometheus only)
+	NetworkRxRate float64
+	NetworkTxRate float64
+	DiskReadRate  float64
+	DiskWriteRate float64
 }
 
 // MetricSample represents a single point in time for metrics history
