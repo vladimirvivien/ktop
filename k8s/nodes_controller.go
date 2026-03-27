@@ -2,7 +2,6 @@ package k8s
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/vladimirvivien/ktop/views/model"
@@ -27,10 +26,6 @@ func (c *Controller) GetNode(ctx context.Context, nodeName string) (*coreV1.Node
 func (c *Controller) GetNodeList(ctx context.Context) ([]*coreV1.Node, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
-	}
-
-	if err := c.assertNodeAuthz(ctx); err != nil {
-		return nil, err
 	}
 
 	items, err := c.nodeInformer.Lister().List(labels.Everything())
@@ -76,17 +71,6 @@ func (c *Controller) GetNodeModels(ctx context.Context) (models []model.NodeMode
 		models = append(models, *nodeModel)
 	}
 	return
-}
-
-func (c *Controller) assertNodeAuthz(ctx context.Context) error {
-	authzd, err := c.client.IsAuthz(ctx, "nodes", []string{"get", "list"})
-	if err != nil {
-		return fmt.Errorf("failed to check node authorization: %w", err)
-	}
-	if !authzd {
-		return fmt.Errorf("node get, list not authorized")
-	}
-	return nil
 }
 
 func (c *Controller) setupNodeHandler(ctx context.Context, handlerFunc RefreshNodesFunc) {

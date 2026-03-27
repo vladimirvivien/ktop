@@ -7,8 +7,8 @@ import (
 	"time"
 
 	appsV1 "k8s.io/api/apps/v1"
-	authzV1 "k8s.io/api/authorization/v1"
 	batchV1 "k8s.io/api/batch/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/version"
@@ -42,8 +42,6 @@ var (
 		"jobs":                   {Group: batchV1.GroupName, Version: "v1", Resource: "jobs"},
 		"cronjobs":               {Group: batchV1.GroupName, Version: "v1", Resource: "cronjobs"},
 	}
-
-	authzdTable = make(map[string]bool)
 )
 
 type Client struct {
@@ -194,65 +192,32 @@ func (k8s *Client) GetMetricsClient() *metricsclient.Clientset {
 	return k8s.metricsClient
 }
 
-// IsAuthz checks access authorization using SelfSubjectAccessReview
-func (k8s *Client) IsAuthz(ctx context.Context, resource string, verbs []string) (bool, error) {
-	k8s.Lock()
-	defer k8s.Unlock()
-
-	gvr, ok := GVRs[resource]
-	if !ok {
-		return false, fmt.Errorf("unsupported resource %s", resource)
-	}
-
-	makeAccessReview := func(grv schema.GroupVersionResource, verb string) *authzV1.SelfSubjectAccessReview {
-		return &authzV1.SelfSubjectAccessReview{
-			Spec: authzV1.SelfSubjectAccessReviewSpec{
-				ResourceAttributes: &authzV1.ResourceAttributes{
-					Namespace: k8s.Namespace(),
-					Group:     grv.Group,
-					Version:   grv.Version,
-					Resource:  grv.Resource,
-					Verb:      verb,
-				},
-			},
-		}
-	}
-
-	arClient := k8s.kubeClient.AuthorizationV1().SelfSubjectAccessReviews()
-	result := true
-	for _, verb := range verbs {
-		key := fmt.Sprintf("%s/%s/%s", gvr.String(), k8s.Namespace(), verb)
-		if authzd, ok := authzdTable[key]; ok {
-			result = result && authzd
-			continue
-		}
-		ar := makeAccessReview(gvr, verb)
-		arResult, err := arClient.Create(ctx, ar, metav1.CreateOptions{})
-		if err != nil {
-			delete(authzdTable, key)
-			return false, err
-		}
-		allowed := arResult.Status.Allowed
-		authzdTable[key] = allowed
-		result = result && allowed
-	}
-
-	return result, nil
-}
-
-// AssertCoreAuthz asserts that user/context can access node and pods
+// AssertCoreAuthz verifies read access to core resources using lightweight
+// GET requests instead of SelfSubjectAccessReview, keeping ktop fully read-only.
 func (k8s *Client) AssertCoreAuthz(ctx context.Context) error {
-	resources := []string{"namespaces", "nodes", "pods"}
-	accessible := true
-	for _, res := range resources {
-		authzd, err := k8s.IsAuthz(ctx, res, []string{"get", "list"})
-		if err != nil {
-			return err
+	listOpts := metav1.ListOptions{Limit: 1}
+
+	if _, err := k8s.kubeClient.CoreV1().Namespaces().List(ctx, listOpts); err != nil {
+		if apierrors.IsForbidden(err) {
+			return fmt.Errorf("user not authorized to list namespaces: %w", err)
 		}
-		accessible = accessible && authzd
+		return fmt.Errorf("failed to list namespaces: %w", err)
 	}
-	if !accessible {
-		return fmt.Errorf("user missing required authorizations")
+
+	if _, err := k8s.kubeClient.CoreV1().Nodes().List(ctx, listOpts); err != nil {
+		if apierrors.IsForbidden(err) {
+			return fmt.Errorf("user not authorized to list nodes: %w", err)
+		}
+		return fmt.Errorf("failed to list nodes: %w", err)
 	}
+
+	if _, err := k8s.kubeClient.CoreV1().Pods(k8s.namespace).List(ctx, listOpts); err != nil {
+		if apierrors.IsForbidden(err) {
+			return fmt.Errorf("user not authorized to list pods: %w", err)
+		}
+		return fmt.Errorf("failed to list pods: %w", err)
+	}
+
 	return nil
 }
+
