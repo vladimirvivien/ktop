@@ -24,8 +24,8 @@ type appPanel struct {
 	title           string
 	header          *tview.Table
 	pages           *tview.Pages
-	footer          *tview.Table    // Legacy footer for page buttons (future use)
-	footerComponent *ui.Footer      // Context-aware navigation footer
+	footer          *tview.Table // Legacy footer for page buttons (future use)
+	footerComponent *ui.Footer   // Context-aware navigation footer
 	modals          []tview.Primitive
 	root            *tview.Pages // CHANGED: from *tview.Flex to *tview.Pages
 
@@ -71,8 +71,8 @@ func (p *appPanel) Layout(data interface{}) {
 
 	// Existing layout with navigation footer
 	mainLayout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.header, 3, 1, true).                   // header - focusable for input handling
-		AddItem(p.pages, 0, 1, true).                    // body
+		AddItem(p.header, 3, 1, true).                    // header - focusable for input handling
+		AddItem(p.pages, 0, 1, true).                     // body
 		AddItem(p.footerComponent.GetView(), 3, 0, false) // navigation footer - 3 rows for border
 
 	// NEW: Wrap in Pages for toast layering

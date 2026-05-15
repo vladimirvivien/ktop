@@ -3,7 +3,7 @@ package k8s
 import (
 	"context"
 	"errors"
-	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/vladimirvivien/ktop/health"
@@ -167,7 +167,7 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	); !ok {
 		// Timeout or error - continue anyway with graceful degradation
 		// UI will render with empty/partial data initially
-		fmt.Println("Note: Initial data sync still in progress, UI may show partial data briefly")
+		slog.Warn("initial informer cache sync incomplete; continuing with partial data")
 	}
 
 	// defer waiting for non-core resources to sync

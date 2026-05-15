@@ -3,6 +3,7 @@ package prom
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -44,6 +45,12 @@ func (cc *CollectorController) Start(ctx context.Context) error {
 	// Start component discovery (for periodic re-discovery)
 	go cc.runComponentDiscovery(ctx)
 
+	slog.Info("prometheus collector started",
+		"scrape_interval", cc.config.Interval,
+		"retention", cc.config.RetentionTime,
+		"max_samples", cc.config.MaxSamples,
+		"components", cc.config.Components,
+	)
 	return nil
 }
 
@@ -58,6 +65,7 @@ func (cc *CollectorController) Stop() error {
 
 	cc.running = false
 
+	slog.Info("prometheus collector stopped")
 	// Cleanup would be handled by context cancellation
 	return nil
 }
@@ -169,6 +177,10 @@ func (cc *CollectorController) collectFromComponent(ctx context.Context, compone
 	metrics, err := cc.collector.ScrapeComponent(ctx, component)
 	if err != nil {
 		cc.setLastError(err)
+		slog.Warn("component scrape failed (will retry)",
+			"component", component,
+			"error", err,
+		)
 		if cc.onError != nil {
 			cc.onError(component, err)
 		}
@@ -178,6 +190,10 @@ func (cc *CollectorController) collectFromComponent(ctx context.Context, compone
 	// Store the metrics
 	if err := cc.store.AddMetrics(metrics); err != nil {
 		cc.setLastError(err)
+		slog.Warn("storing scraped metrics failed",
+			"component", component,
+			"error", err,
+		)
 		if cc.onError != nil {
 			cc.onError(component, err)
 		}

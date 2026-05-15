@@ -8,6 +8,7 @@ require (
 	github.com/rivo/tview v0.0.0-20211202162923-2a6de950f73b
 	github.com/spf13/cobra v1.4.0
 	github.com/spf13/pflag v1.0.5
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 	k8s.io/api v0.27.4
 	k8s.io/apimachinery v0.27.4
 	k8s.io/cli-runtime v0.24.1

@@ -3,6 +3,8 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,7 +13,9 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/spf13/cobra"
 	"github.com/vladimirvivien/ktop/application"
+	"github.com/vladimirvivien/ktop/buildinfo"
 	"github.com/vladimirvivien/ktop/config"
+	"github.com/vladimirvivien/ktop/internal/logging"
 	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/metrics"
 	k8sMetrics "github.com/vladimirvivien/ktop/metrics/k8s"
@@ -55,6 +59,10 @@ type ktopCmdOptions struct {
 	prometheusRetention      string
 	prometheusMaxSamples     int
 	prometheusComponents     []string
+
+	// Logging configuration
+	logLevel  string
+	logFormat string
 }
 
 // NewKtopCmd returns a command for ktop
@@ -95,6 +103,12 @@ func NewKtopCmd() *cobra.Command {
 		[]string{"kubelet", "cadvisor"},
 		"Kubernetes components to scrape (comma-separated: kubelet,cadvisor,apiserver,etcd,scheduler,controller-manager,kube-proxy)")
 
+	// Logging flags
+	cmd.Flags().StringVar(&o.logLevel, "log-level", "info",
+		"Log verbosity: debug, info, warn, error")
+	cmd.Flags().StringVar(&o.logFormat, "log-format", "text",
+		"Log record format: text or json")
+
 	o.kubeFlags.AddFlags(cmd.Flags())
 	return cmd
 }
@@ -130,29 +144,29 @@ func selectMetricsSource(
 ) (metrics.MetricsSource, *promMetrics.PromMetricsSource, error) {
 	switch sourceType {
 	case "prometheus":
-		fmt.Print("Connecting to Prometheus... ")
+		slog.Info("connecting to metrics source", "source", "prometheus")
 		promSource, err := tryPrometheus(ctx, k8sC.RESTConfig(), promConfig)
 		if err == nil {
-			fmt.Println("✓")
+			slog.Info("metrics source ready", "source", "prometheus")
 			return promSource, promSource, nil
 		}
-		fmt.Println("✗")
 		if !enableFallback {
+			slog.Error("prometheus required but unreachable", "error", err)
 			return nil, nil, fmt.Errorf("prometheus not available: %v", err)
 		}
-		fmt.Print("Falling back to Metrics Server... ")
+		slog.Warn("prometheus unavailable, falling back to metrics-server", "error", err)
 		source := k8sMetrics.NewMetricsServerSource(k8sC.Controller())
-		fmt.Println("✓")
+		slog.Info("metrics source ready", "source", "metrics-server", "reason", "prometheus-fallback")
 		return source, nil, nil
 
 	case "metrics-server":
-		fmt.Print("Connecting to Metrics Server... ")
+		slog.Info("connecting to metrics source", "source", "metrics-server")
 		source := k8sMetrics.NewMetricsServerSource(k8sC.Controller())
-		fmt.Println("✓")
+		slog.Info("metrics source ready", "source", "metrics-server")
 		return source, nil, nil
 
 	case "none":
-		fmt.Println("Using metrics source: None")
+		slog.Info("metrics source disabled", "source", "none")
 		return nil, nil, nil
 
 	default:
@@ -163,6 +177,26 @@ func selectMetricsSource(
 func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Initialize structured logging before any other work so subsequent
+	// diagnostics land in ~/.ktop/ktop.log. A failure here is non-fatal:
+	// ktop continues with logging silenced rather than letting slog
+	// fall back to stderr (which would corrupt the TUI).
+	logCloser, err := logging.Init(logging.Config{
+		Level:  o.logLevel,
+		Format: o.logFormat,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ktop: logging disabled: %v\n", err)
+		slog.SetDefault(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	}
+	defer func() { _ = logCloser.Close() }()
+
+	slog.Info("ktop starting",
+		"version", buildinfo.Version,
+		"log_level", o.logLevel,
+		"metrics_source", o.metricsSource,
+	)
 
 	if o.allNamespaces {
 		o.namespace = k8s.AllNamespaces
@@ -177,6 +211,7 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	if c.Flags().Changed("prometheus-scrape-interval") {
 		interval, err := time.ParseDuration(o.prometheusScrapeInterval)
 		if err != nil {
+			slog.Error("invalid prometheus-scrape-interval", "value", o.prometheusScrapeInterval, "error", err)
 			return fmt.Errorf("invalid prometheus-scrape-interval: %w", err)
 		}
 		cfg.Prometheus.ScrapeInterval = interval
@@ -185,6 +220,7 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	if c.Flags().Changed("prometheus-retention") {
 		retention, err := time.ParseDuration(o.prometheusRetention)
 		if err != nil {
+			slog.Error("invalid prometheus-retention", "value", o.prometheusRetention, "error", err)
 			return fmt.Errorf("invalid prometheus-retention: %w", err)
 		}
 		cfg.Prometheus.RetentionTime = retention
@@ -197,6 +233,7 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	if c.Flags().Changed("prometheus-components") {
 		components, err := config.ParseComponents(o.prometheusComponents)
 		if err != nil {
+			slog.Error("invalid prometheus-components", "value", o.prometheusComponents, "error", err)
 			return fmt.Errorf("invalid prometheus-components: %w", err)
 		}
 		cfg.Prometheus.Components = components
@@ -204,14 +241,16 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 
 	// Validate configuration
 	if err := cfg.Validate(); err != nil {
+		slog.Error("invalid configuration", "error", err)
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	k8sC, err := k8s.New(o.kubeFlags)
 	if err != nil {
+		slog.Error("kubernetes client creation failed", "error", err)
 		return fmt.Errorf("ktop: failed to create Kubernetes client: %s", err)
 	}
-	fmt.Printf("Connected to: %s\n", k8sC.RESTConfig().Host)
+	slog.Info("cluster connected", "host", k8sC.RESTConfig().Host)
 
 	// Initialize metrics source based on configuration
 	// Fallback is enabled only when using default (not explicitly set)
@@ -257,8 +296,10 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	app.AddPage(overview.NewWithColumnOptions(app, "Overview", o.showAllColumns, nodeColumns, podColumns))
 
 	if err := k8sC.AssertCoreAuthz(ctx); err != nil {
+		slog.Error("kubernetes authorization check failed", "error", err)
 		return fmt.Errorf("ktop: %s", err)
 	}
+	slog.Info("kubernetes authorization checks passed")
 
 	// Check terminal height before starting TUI
 	screen, err := tcell.NewScreen()
@@ -267,6 +308,7 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 			_, height := screen.Size()
 			screen.Fini()
 			if height < ui.MinTerminalHeight {
+				slog.Error("terminal too small", "height", height, "min", ui.MinTerminalHeight)
 				return fmt.Errorf("terminal height too small (%d rows). Minimum required: %d rows", height, ui.MinTerminalHeight)
 			}
 		}
@@ -281,7 +323,7 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	select {
 	case err := <-appErr:
 		if err != nil {
-			fmt.Printf("app error: %s\n", err)
+			slog.Error("application exited with error", "error", err)
 			os.Exit(1)
 		}
 	case <-ctx.Done():
