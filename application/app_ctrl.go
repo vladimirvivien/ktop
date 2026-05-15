@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -40,9 +41,9 @@ type Application struct {
 	navStack *NavigationStack
 
 	// Detail view callbacks
-	nodeDetailCallback     func(nodeName string)
-	podDetailCallback      func(namespace, podName string)
-	containerLogsCallback  func(namespace, podName, containerName string)
+	nodeDetailCallback    func(nodeName string)
+	podDetailCallback     func(namespace, podName string)
+	containerLogsCallback func(namespace, podName, containerName string)
 
 	// Health state tracking for transitions
 	lastHealthyState      bool
@@ -558,6 +559,7 @@ func (app *Application) Run(ctx context.Context) error {
 
 	// setup application UI
 	if err := app.setup(ctx); err != nil {
+		slog.Error("application setup failed", "error", err)
 		return err
 	}
 
@@ -568,6 +570,7 @@ func (app *Application) Run(ctx context.Context) error {
 		}
 	}()
 
+	slog.Info("tui started", "pages", app.getPageTitles())
 	return app.tviewApp.Run()
 }
 
@@ -576,7 +579,7 @@ func (app *Application) Stop() error {
 		return errors.New("failed to stop, tview.Application nil")
 	}
 	app.tviewApp.Stop()
-	fmt.Println("ktop finished")
+	slog.Info("ktop stopped")
 	return nil
 }
 
@@ -603,7 +606,7 @@ func (app *Application) handleMetricsHealthChange(healthy bool, info metrics.Sou
 	}
 
 	// Debouncing constants (prevents flapping during server restart)
-	const requiredConsecOK = 2            // Require 2 consecutive successes
+	const requiredConsecOK = 2               // Require 2 consecutive successes
 	const minUnhealthyTime = 5 * time.Second // Must be unhealthy for at least 5s before recovery
 
 	// Update header immediately
@@ -644,6 +647,7 @@ func (app *Application) handleMetricsHealthChange(healthy bool, info metrics.Sou
 				ui.ToastSuccess,
 				3*time.Second,
 			)
+			slog.Info("metrics source healthy", "source", info.Type)
 			app.lastHealthyState = true
 		}
 	} else {
@@ -658,6 +662,7 @@ func (app *Application) handleMetricsHealthChange(healthy bool, info metrics.Sou
 				ui.ToastError,
 				5*time.Second,
 			)
+			slog.Warn("metrics source unhealthy", "source", info.Type)
 			app.lastHealthyState = false
 		}
 	}
@@ -942,4 +947,3 @@ func (app *Application) updateFooterContext() {
 func (app *Application) SetFooterContext(ctx ui.FooterContext) {
 	app.panel.setFooterContext(ctx)
 }
-

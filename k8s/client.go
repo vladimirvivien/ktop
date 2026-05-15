@@ -220,4 +220,3 @@ func (k8s *Client) AssertCoreAuthz(ctx context.Context) error {
 
 	return nil
 }
-
