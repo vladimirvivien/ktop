@@ -36,8 +36,7 @@ type Destination string
 const (
 	// DestFile routes logs to ~/.ktop/ktop.log (the default).
 	DestFile Destination = "file"
-	// DestStderr routes logs to standard error. Reserved for v0.6.1's
-	// --noui --log=stderr flag; the handler supports it today.
+	// DestStderr routes logs to standard error.
 	DestStderr Destination = "stderr"
 )
 

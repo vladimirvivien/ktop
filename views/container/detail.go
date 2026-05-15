@@ -64,7 +64,7 @@ type DetailPanel struct {
 	// Filter state
 	filterMode  bool
 	filterQuery string
-	allLogs     []string    // Store full logs for filtering
+	allLogs     []string // Store full logs for filtering
 	filterInput *tview.InputField
 
 	// Streaming control
@@ -92,10 +92,10 @@ type DetailPanel struct {
 func NewDetailPanel() *DetailPanel {
 	p := &DetailPanel{
 		root:             tview.NewFlex().SetDirection(tview.FlexRow),
-		following:        true, // Default to streaming (auto-tail)
+		following:        true,  // Default to streaming (auto-tail)
 		wrapText:         false, // Default to no wrap
-		tailLines:        100,  // Default tail lines (fast initial load)
-		totalLinesLoaded: 100,  // Track cumulative for "load more"
+		tailLines:        100,   // Default tail lines (fast initial load)
+		totalLinesLoaded: 100,   // Track cumulative for "load more"
 	}
 
 	p.setupInputCapture()

@@ -73,6 +73,7 @@ nav:
   - Metrics:
     - Prometheus: prometheus.md
     - Metrics Server: metrics-server.md
+    - PSI (Pressure Stall): psi.md
 
 extra:
   social:

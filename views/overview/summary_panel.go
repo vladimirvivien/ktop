@@ -321,14 +321,30 @@ func (p *clusterSummaryPanel) drawEnhancedStats(summary model.ClusterSummary) {
 		pressureColor = "red"
 	}
 
+	stallText := formatSummaryStall(summary)
+
 	enhancedText := fmt.Sprintf(
-		"[yellow]Restarts: [%s]%d[yellow] │ Failures: [%s]%d[yellow] │ Evicted: [%s]%d[yellow] │ Pressure: [%s]%d",
+		"[yellow]Restarts: [%s]%d[yellow] │ Failures: [%s]%d[yellow] │ Evicted: [%s]%d[yellow] │ Pressure: [%s]%d[yellow] │ Stall: %s",
 		restartsColor, summary.ContainerRestarts,
 		failuresColor, summary.FailedPods,
 		evictedColor, summary.EvictedPods,
 		pressureColor, summary.NodePressureCount,
+		stallText,
 	)
 	p.enhancedStats.SetText(enhancedText)
+}
+
+// formatSummaryStall renders the cluster-wide PSI cell for the summary strip.
+// Shows the dominant axis across nodes (max of CPU/MEM/IO cluster averages),
+// with the same format and color thresholds as the per-row STALL column. The
+// beta caveat for K8s versions below 1.36 (GA) is documented in docs/psi.md.
+func formatSummaryStall(s model.ClusterSummary) string {
+	psi := metrics.PSIMetrics{
+		CPUStallPct: s.AvgNodeCPUStallPct,
+		MemStallPct: s.AvgNodeMemStallPct,
+		IOStallPct:  s.AvgNodeIOStallPct,
+	}
+	return renderStallCell(psi, true)
 }
 
 func (p *clusterSummaryPanel) DrawFooter(data interface{}) {}

@@ -9,19 +9,19 @@ var Icons = struct {
 	BargraphLBorder  string
 	BargraphRBorder  string
 	Factory          string
-	Battery         string
-	Package         string
-	Anchor          string
-	Rocket          string
-	Thermometer     string
-	Sun             string
-	Knobs           string
-	Drum            string
-	M               string
-	Plane           string
-	Controller      string
-	Clock           string
-	TrafficLight    string
+	Battery          string
+	Package          string
+	Anchor           string
+	Rocket           string
+	Thermometer      string
+	Sun              string
+	Knobs            string
+	Drum             string
+	M                string
+	Plane            string
+	Controller       string
+	Clock            string
+	TrafficLight     string
 	// Status icons for visual indicators (using strings for multi-byte emojis)
 	Healthy   string
 	Error     string
@@ -41,19 +41,19 @@ var Icons = struct {
 	BargraphLBorder:  "[",
 	BargraphRBorder:  "]",
 	Factory:          "🏭",
-	Battery:         "🔋",
-	Package:         "📦",
-	Anchor:          "⚓",
-	Rocket:          "🚀",
-	Thermometer:     "🌡",
-	Sun:             "☀",
-	Knobs:           "🎛",
-	Drum:            "🥁",
-	M:               "Ⓜ",
-	Plane:           "🛩",
-	Controller:      "🛂",
-	Clock:           "⏰",
-	TrafficLight:    "🚦",
+	Battery:          "🔋",
+	Package:          "📦",
+	Anchor:           "⚓",
+	Rocket:           "🚀",
+	Thermometer:      "🌡",
+	Sun:              "☀",
+	Knobs:            "🎛",
+	Drum:             "🥁",
+	M:                "Ⓜ",
+	Plane:            "🛩",
+	Controller:       "🛂",
+	Clock:            "⏰",
+	TrafficLight:     "🚦",
 	// Status icons
 	Healthy:   "✅",
 	Error:     "❌",
