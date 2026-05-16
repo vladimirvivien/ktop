@@ -53,8 +53,8 @@ type MainPanel struct {
 	viewState *ViewStateManager
 
 	// Dynamic layout tracking
-	lastHeightCategory  int // 0=small, 1=medium, 2=large, 3=extraLarge - for detecting resize category changes
-	lastTerminalHeight  int // Track height for dynamic resizing in ExtraLarge category
+	lastHeightCategory int // 0=small, 1=medium, 2=large, 3=extraLarge - for detecting resize category changes
+	lastTerminalHeight int // Track height for dynamic resizing in ExtraLarge category
 }
 
 func New(app *application.Application, title string) *MainPanel {
@@ -79,8 +79,8 @@ func NewWithColumnOptions(app *application.Application, title string, showAllCol
 
 func (p *MainPanel) Layout(data interface{}) {
 	// Define the default columns
-	allNodeColumns := []string{"NAME", "STATUS", "RST", "PODS", "TAINTS", "PRESSURE", "IP", "VOLS", "DISK", "CPU", "MEM"}
-	allPodColumns := []string{"NAMESPACE", "POD", "READY", "STATUS", "RST", "AGE", "VOLS", "IP", "NODE", "CPU", "MEMORY"}
+	allNodeColumns := []string{"NAME", "STATUS", "RST", "PODS", "TAINTS", "PRESSURE", "IP", "VOLS", "DISK", "CPU", "MEM", "STALL"}
+	allPodColumns := []string{"NAMESPACE", "POD", "READY", "STATUS", "RST", "AGE", "VOLS", "IP", "NODE", "CPU", "MEMORY", "STALL"}
 
 	// Use filtered columns if specified
 	nodeColumnsToDisplay := allNodeColumns
@@ -677,6 +677,7 @@ func (p *MainPanel) refreshNodeView(ctx context.Context, models []model.NodeMode
 				// Update the model's metrics fields
 				existingModel.UsageCpuQty = nodeMetrics.CPUUsage
 				existingModel.UsageMemQty = nodeMetrics.MemoryUsage
+				existingModel.PSI = nodeMetrics.PSI
 			}
 			// If err != nil, graceful degradation: keep existing model as-is
 		}
@@ -733,6 +734,15 @@ func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) er
 		allPodMetrics, err = p.metricsSource.GetAllPodMetrics(ctx)
 	}
 
+	// Build a map for each pod's node-kernel-PSI-support flag, so the pod
+	// table can render the per-row warning glyph without a separate lookup.
+	// Snapshot of cachedNodeModels — a transient race here yields at most a
+	// one-cycle warning delay, which is acceptable.
+	nodeKernelSupport := make(map[string]bool, len(p.cachedNodeModels))
+	for _, n := range p.cachedNodeModels {
+		nodeKernelSupport[n.Name] = n.PSIKernelSupported
+	}
+
 	// Update models with metrics first (before caching)
 	updatedModels := models
 	if p.metricsSource != nil && err == nil {
@@ -760,7 +770,9 @@ func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) er
 					existingModel.PodUsageCpuQty = totalCpu
 					existingModel.PodUsageMemQty = totalMem
 				}
+				existingModel.PSI = podMetrics.PSI
 			}
+			existingModel.NodePSIKernelSupported = nodeKernelSupport[existingModel.Node]
 			updatedModels = append(updatedModels, existingModel)
 		}
 	}

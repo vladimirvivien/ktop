@@ -3,6 +3,8 @@ package model
 import (
 	"sort"
 
+	"github.com/vladimirvivien/ktop/internal/psi"
+	"github.com/vladimirvivien/ktop/metrics"
 	coreV1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -50,6 +52,14 @@ type NodeModel struct {
 
 	UsageCpuQty *resource.Quantity
 	UsageMemQty *resource.Quantity
+
+	// PSI carries pressure stall percentages for the node's root cgroup.
+	// Zero when the metrics source does not provide PSI (e.g., metrics-server).
+	PSI metrics.PSIMetrics
+
+	// PSIKernelSupported is true when the node's Linux kernel is >= 4.20.
+	// PSI values from a node with this set to false are not reliable.
+	PSIKernelSupported bool
 }
 
 func NewNodeModel(node *coreV1.Node, metrics *v1beta1.NodeMetrics) *NodeModel {
@@ -85,6 +95,8 @@ func NewNodeModel(node *coreV1.Node, metrics *v1beta1.NodeMetrics) *NodeModel {
 
 		UsageCpuQty: metrics.Usage.Cpu(),
 		UsageMemQty: metrics.Usage.Memory(),
+
+		PSIKernelSupported: psi.KernelVersionOK(node.Status.NodeInfo.KernelVersion),
 	}
 }
 
@@ -290,6 +302,26 @@ func SortNodeModelsBy(nodes []NodeModel, column string, ascending bool) {
 				return nodes[i].Name < nodes[j].Name
 			}
 			return memI < memJ
+		}
+
+	case "STALL":
+		// Sort by the dominant stall axis (max of CPU/MEM/IO waiting %).
+		sortFunc = func(i, j int) bool {
+			dom := func(n NodeModel) float64 {
+				m := n.PSI.CPUStallPct
+				if n.PSI.MemStallPct > m {
+					m = n.PSI.MemStallPct
+				}
+				if n.PSI.IOStallPct > m {
+					m = n.PSI.IOStallPct
+				}
+				return m
+			}
+			si, sj := dom(nodes[i]), dom(nodes[j])
+			if si == sj {
+				return nodes[i].Name < nodes[j].Name
+			}
+			return si < sj
 		}
 
 	default:

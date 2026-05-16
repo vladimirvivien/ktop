@@ -72,6 +72,29 @@ type MetricsSource interface {
 	SupportsHistory() bool
 }
 
+// PSIMetrics holds Pressure Stall Information for a node, pod, or container.
+// Values are percentages [0..100] of wall time spent stalled on the resource
+// during the most recent scrape window.
+//
+// A zero value is indistinguishable at this layer between a genuinely idle
+// cgroup and a host kernel that does not expose PSI (kernel <4.20, cgroup v1,
+// or an unpatched kubelet hitting kubernetes/kubernetes#136333). Callers that
+// need to interpret zeros should consult the node's kernel version and the
+// cluster's server version separately.
+type PSIMetrics struct {
+	// "Waiting" axis — at least one task in the cgroup blocked on the
+	// resource. This is the value rendered in the STALL column.
+	CPUStallPct float64
+	MemStallPct float64
+	IOStallPct  float64
+
+	// "Stalled" axis — every task blocked. Not every kernel emits the
+	// CPU-stalled counter; absent values arrive here as zero.
+	CPUStalledPct float64
+	MemStalledPct float64
+	IOStalledPct  float64
+}
+
 // NodeMetrics represents resource usage metrics for a Kubernetes node.
 // Contains both basic metrics (CPU, memory) available from all sources,
 // and enhanced metrics (network, load, disk) available only from Prometheus.
@@ -123,6 +146,10 @@ type NodeMetrics struct {
 
 	// ContainerCount is the total number of containers running on this node
 	ContainerCount int
+
+	// PSI captures resource pressure for the node's root cgroup.
+	// Zero when the source does not provide PSI (e.g., metrics-server).
+	PSI PSIMetrics
 }
 
 // PodMetrics represents resource usage metrics for a Kubernetes pod.
@@ -139,6 +166,11 @@ type PodMetrics struct {
 
 	// Containers contains metrics for each container in the pod
 	Containers []ContainerMetrics
+
+	// PSI captures the worst-affected axis across containers in the pod.
+	// Computed as max(container.PSI.*) per axis — a pod with any heavily
+	// stalled container surfaces that container's stall percentage.
+	PSI PSIMetrics
 }
 
 // ContainerMetrics represents resource usage metrics for a single container.
@@ -166,6 +198,10 @@ type ContainerMetrics struct {
 
 	// RestartCount is the number of times this container has restarted
 	RestartCount int
+
+	// PSI captures resource pressure for this container's cgroup.
+	// Zero when the source does not provide PSI.
+	PSI PSIMetrics
 }
 
 // SourceInfo provides metadata about a metrics source.

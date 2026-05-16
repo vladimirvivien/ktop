@@ -166,8 +166,8 @@ func (p *DetailPanel) Layout(_ interface{}) {
 
 		// Center column: vertical flex with Conditions+Events and Resources
 		centerColumn := tview.NewFlex().SetDirection(tview.FlexRow)
-		centerColumn.AddItem(p.middleDetailTable, 0, 1, false)  // Conditions+Events (flex)
-		centerColumn.AddItem(p.resourcesTextView, 3, 0, false)  // Resources (fixed 3 rows)
+		centerColumn.AddItem(p.middleDetailTable, 0, 1, false) // Conditions+Events (flex)
+		centerColumn.AddItem(p.resourcesTextView, 3, 0, false) // Resources (fixed 3 rows)
 
 		// Right column: vertical flex with Labels and Annotations
 		rightColumn := tview.NewFlex().SetDirection(tview.FlexRow)
@@ -186,7 +186,7 @@ func (p *DetailPanel) Layout(_ interface{}) {
 		p.containersPanel.SetBorderColor(tcell.ColorLightGray)
 
 		p.containersTable = tview.NewTable()
-		p.containersTable.SetFixed(1, 0) // Fixed header row
+		p.containersTable.SetFixed(1, 0)              // Fixed header row
 		p.containersTable.SetSelectable(false, false) // Start unselectable, enable on focus
 		p.containersTable.SetBorder(false)
 		p.containersTable.SetBorders(false)

@@ -203,6 +203,7 @@ func (p *nodePanel) formatColumnHeader(col string) string {
 		"DISK":     'd',
 		"CPU":      'c',
 		"MEM":      'm',
+		"STALL":    'l',
 	}
 
 	// Find the shortcut key for this column
@@ -345,6 +346,7 @@ func (p *nodePanel) handleSortKey(key rune) bool {
 		'd': "DISK",
 		'c': "CPU",
 		'm': "MEM",
+		'l': "STALL",
 	}
 
 	columnName, exists := keyToColumn[key]
@@ -648,6 +650,16 @@ func (p *nodePanel) DrawBody(data interface{}) {
 						Text:  memMetrics,
 						Color: rowColor,
 						Align: tview.AlignLeft,
+					},
+				)
+
+			case "STALL":
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:     renderStallCell(node.PSI, node.PSIKernelSupported),
+						Align:    tview.AlignLeft,
+						MaxWidth: 12,
 					},
 				)
 			}
