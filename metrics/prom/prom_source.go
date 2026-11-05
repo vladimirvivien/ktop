@@ -196,6 +196,32 @@ func (p *PromMetricsSource) calculateCPURateWithFilter(metricName string, labelM
 	return totalRate, nil
 }
 
+// seriesLabelValue extracts the exact value of labelName from a Prometheus series key
+// formatted as {k1="v1", k2="v2"} without heap allocations.
+// It checks that the label name is preceded by a delimiter ('{', ',', or ' ') so a
+// suffix of another label name cannot false-match.
+func seriesLabelValue(seriesKey, labelName string) (string, bool) {
+	search := labelName + `="`
+	offset := 0
+	for offset < len(seriesKey) {
+		idx := strings.Index(seriesKey[offset:], search)
+		if idx < 0 {
+			return "", false
+		}
+		pos := offset + idx
+		if pos == 0 || seriesKey[pos-1] == '{' || seriesKey[pos-1] == ',' || seriesKey[pos-1] == ' ' {
+			valStart := pos + len(search)
+			valEnd := strings.IndexByte(seriesKey[valStart:], '"')
+			if valEnd < 0 {
+				return "", false
+			}
+			return seriesKey[valStart : valStart+valEnd], true
+		}
+		offset = pos + len(search)
+	}
+	return "", false
+}
+
 // isWorkloadContainerCPUTotal returns true if the seriesKey represents:
 // 1. A valid pod metric (container="" is the pod aggregate, which is what we want)
 // 2. The total CPU metric (not per-CPU breakdown)
@@ -211,14 +237,11 @@ func (p *PromMetricsSource) calculateCPURateWithFilter(metricName string, labelM
 // The series key format from labels.Labels.String() is:
 // {__name__="metric", container="", cpu="total", namespace="ns", pod="pod-name", ...}
 func isWorkloadContainerCPUTotal(seriesKey string) bool {
-	// Exclude POD (pause) container - not useful for pod metrics
-	if strings.Contains(seriesKey, `container="POD"`) {
+	if container, ok := seriesLabelValue(seriesKey, "container"); ok && container == "POD" {
 		return false
 	}
 
-	// For CPU metrics, only include cpu="total", not per-CPU breakdowns
-	// If cpu label exists but is not "total", exclude it
-	if strings.Contains(seriesKey, `cpu="`) && !strings.Contains(seriesKey, `cpu="total"`) {
+	if cpu, ok := seriesLabelValue(seriesKey, "cpu"); ok && cpu != "total" {
 		return false
 	}
 
@@ -231,15 +254,7 @@ func isWorkloadContainerCPUTotal(seriesKey string) bool {
 // - Exclude container="POD" (pause container)
 // Only sum individual container metrics like metrics-server does.
 func isWorkloadContainerMemory(seriesKey string) bool {
-	// Exclude POD (pause) container - not useful for pod metrics
-	if strings.Contains(seriesKey, `container="POD"`) {
-		return false
-	}
-
-	// Exclude pod-level aggregate (container="") to avoid double counting
-	// when individual container metrics also exist.
-	// Metrics-server uses container!="" to get only individual containers.
-	if strings.Contains(seriesKey, `container=""`) {
+	if container, ok := seriesLabelValue(seriesKey, "container"); ok && (container == "POD" || container == "") {
 		return false
 	}
 
@@ -250,12 +265,8 @@ func isWorkloadContainerMemory(seriesKey string) bool {
 // aggregate metric (container=""). Used as fallback for pods that don't expose
 // individual container metrics (e.g., static pods like kube-apiserver).
 func isPodAggregateMemory(seriesKey string) bool {
-	// Only accept container="" (pod aggregate)
-	// Exclude container="POD" (pause container)
-	if strings.Contains(seriesKey, `container="POD"`) {
-		return false
-	}
-	return strings.Contains(seriesKey, `container=""`)
+	container, ok := seriesLabelValue(seriesKey, "container")
+	return ok && container == ""
 }
 
 // isPSIWorkloadContainer returns true if the seriesKey represents a workload
@@ -263,10 +274,7 @@ func isPodAggregateMemory(seriesKey string) bool {
 // the pod-level aggregate (container="") — PSI is meaningful per workload
 // container, and the pod-level signal is computed as max across them.
 func isPSIWorkloadContainer(seriesKey string) bool {
-	if strings.Contains(seriesKey, `container="POD"`) {
-		return false
-	}
-	if strings.Contains(seriesKey, `container=""`) {
+	if container, ok := seriesLabelValue(seriesKey, "container"); ok && (container == "POD" || container == "") {
 		return false
 	}
 	return true
@@ -595,9 +603,9 @@ func (p *PromMetricsSource) GetMetricsForPod(ctx context.Context, pod metav1.Obj
 	return p.GetPodMetrics(ctx, pod.GetNamespace(), pod.GetName())
 }
 
-// GetAllPodMetrics retrieves metrics for all pods
+// GetAllPodMetrics retrieves metrics for all pods using a single pass per metric
+// instead of a Cartesian namespaces × pods loop.
 func (p *PromMetricsSource) GetAllPodMetrics(ctx context.Context) ([]*metrics.PodMetrics, error) {
-	// Check health and get store reference under lock
 	p.mu.RLock()
 	if !p.isHealthyLocked() {
 		p.mu.RUnlock()
@@ -610,19 +618,166 @@ func (p *PromMetricsSource) GetAllPodMetrics(ctx context.Context) ([]*metrics.Po
 	store := p.store
 	p.mu.RUnlock()
 
-	// Get label values (store has its own lock)
-	namespaces := store.GetLabelValues("namespace")
-	pods := store.GetLabelValues("pod")
+	type podKey struct {
+		namespace string
+		pod       string
+	}
+	type podAgg struct {
+		cpuRate        float64
+		hasCPU         bool
+		workloadMem    float64
+		hasWorkloadMem bool
+		aggMem         float64
+		hasAggMem      bool
+		psi            metrics.PSIMetrics
+	}
 
-	var allPodMetrics []*metrics.PodMetrics
+	now := time.Now()
+	rateStart := now.Add(-40 * time.Second)
+	memStart := now.Add(-5 * time.Minute)
 
-	// Call GetPodMetrics without holding p.mu to avoid deadlock
-	for _, namespace := range namespaces {
-		for _, pod := range pods {
-			if podMetrics, err := p.GetPodMetrics(ctx, namespace, pod); err == nil {
-				allPodMetrics = append(allPodMetrics, podMetrics)
+	pods := make(map[podKey]*podAgg)
+	getOrCreate := func(ns, pod string) *podAgg {
+		k := podKey{namespace: ns, pod: pod}
+		agg, ok := pods[k]
+		if !ok {
+			agg = &podAgg{}
+			pods[k] = agg
+		}
+		return agg
+	}
+
+	// 1. Single pass over CPU usage series
+	if cpuSeries, err := store.QueryRangePerSeries("container_cpu_usage_seconds_total", nil, rateStart, now); err == nil {
+		for seriesKey, samples := range cpuSeries {
+			ns, ok1 := seriesLabelValue(seriesKey, "namespace")
+			pod, ok2 := seriesLabelValue(seriesKey, "pod")
+			if !ok1 || !ok2 || ns == "" || pod == "" || !isWorkloadContainerCPUTotal(seriesKey) || len(samples) < 2 {
+				continue
+			}
+			first := samples[0]
+			last := samples[len(samples)-1]
+			deltaSec := float64(last.Timestamp-first.Timestamp) / 1000.0
+			if deltaSec <= 0 {
+				continue
+			}
+			deltaVal := last.Value - first.Value
+			if deltaVal < 0 {
+				deltaVal = last.Value
+			}
+			agg := getOrCreate(ns, pod)
+			agg.cpuRate += deltaVal / deltaSec
+			agg.hasCPU = true
+		}
+	}
+
+	// 2. Single pass over memory working set series
+	if memSeries, err := store.QueryRangePerSeries("container_memory_working_set_bytes", nil, memStart, now); err == nil {
+		for seriesKey, samples := range memSeries {
+			if len(samples) == 0 {
+				continue
+			}
+			ns, ok1 := seriesLabelValue(seriesKey, "namespace")
+			pod, ok2 := seriesLabelValue(seriesKey, "pod")
+			if !ok1 || !ok2 || ns == "" || pod == "" {
+				continue
+			}
+			latestVal := samples[len(samples)-1].Value
+			if isWorkloadContainerMemory(seriesKey) {
+				agg := getOrCreate(ns, pod)
+				agg.workloadMem += latestVal
+				agg.hasWorkloadMem = true
+			} else if isPodAggregateMemory(seriesKey) {
+				agg := getOrCreate(ns, pod)
+				agg.aggMem += latestVal
+				agg.hasAggMem = true
 			}
 		}
+	}
+
+	// 3. Single pass per PSI metric axis
+	collectPSI := func(metricName string, assign func(psi *metrics.PSIMetrics, pct float64)) {
+		seriesMap, err := store.QueryRangePerSeries(metricName, nil, rateStart, now)
+		if err != nil {
+			return
+		}
+		for seriesKey, samples := range seriesMap {
+			if !isPSIWorkloadContainer(seriesKey) || len(samples) < 2 {
+				continue
+			}
+			ns, ok1 := seriesLabelValue(seriesKey, "namespace")
+			pod, ok2 := seriesLabelValue(seriesKey, "pod")
+			if !ok1 || !ok2 || ns == "" || pod == "" {
+				continue
+			}
+			first := samples[0]
+			last := samples[len(samples)-1]
+			deltaSec := float64(last.Timestamp-first.Timestamp) / 1000.0
+			if deltaSec <= 0 {
+				continue
+			}
+			deltaVal := last.Value - first.Value
+			if deltaVal < 0 {
+				deltaVal = last.Value
+			}
+			pct := (deltaVal / deltaSec) * 100
+			agg := getOrCreate(ns, pod)
+			assign(&agg.psi, pct)
+		}
+	}
+
+	collectPSI("container_pressure_cpu_waiting_seconds_total", func(psi *metrics.PSIMetrics, pct float64) {
+		if pct > psi.CPUStallPct {
+			psi.CPUStallPct = pct
+		}
+	})
+	collectPSI("container_pressure_cpu_stalled_seconds_total", func(psi *metrics.PSIMetrics, pct float64) {
+		if pct > psi.CPUStalledPct {
+			psi.CPUStalledPct = pct
+		}
+	})
+	collectPSI("container_pressure_memory_waiting_seconds_total", func(psi *metrics.PSIMetrics, pct float64) {
+		if pct > psi.MemStallPct {
+			psi.MemStallPct = pct
+		}
+	})
+	collectPSI("container_pressure_memory_stalled_seconds_total", func(psi *metrics.PSIMetrics, pct float64) {
+		if pct > psi.MemStalledPct {
+			psi.MemStalledPct = pct
+		}
+	})
+	collectPSI("container_pressure_io_waiting_seconds_total", func(psi *metrics.PSIMetrics, pct float64) {
+		if pct > psi.IOStallPct {
+			psi.IOStallPct = pct
+		}
+	})
+	collectPSI("container_pressure_io_stalled_seconds_total", func(psi *metrics.PSIMetrics, pct float64) {
+		if pct > psi.IOStalledPct {
+			psi.IOStalledPct = pct
+		}
+	})
+
+	allPodMetrics := make([]*metrics.PodMetrics, 0, len(pods))
+	for k, agg := range pods {
+		pm := &metrics.PodMetrics{
+			PodName:   k.pod,
+			Namespace: k.namespace,
+			Timestamp: now,
+			PSI:       agg.psi,
+		}
+		cm := metrics.ContainerMetrics{Name: "main"}
+		if agg.hasCPU {
+			cm.CPUUsage = resource.NewMilliQuantity(int64(math.Ceil(agg.cpuRate*1000)), resource.DecimalSI)
+		}
+		if agg.hasWorkloadMem {
+			cm.MemoryUsage = resource.NewQuantity(int64(agg.workloadMem), resource.BinarySI)
+		} else if agg.hasAggMem {
+			cm.MemoryUsage = resource.NewQuantity(int64(agg.aggMem), resource.BinarySI)
+		}
+		if cm.CPUUsage != nil || cm.MemoryUsage != nil {
+			pm.Containers = append(pm.Containers, cm)
+		}
+		allPodMetrics = append(allPodMetrics, pm)
 	}
 
 	return allPodMetrics, nil

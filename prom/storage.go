@@ -108,20 +108,20 @@ func (store *InMemoryStore) AddMetrics(metrics *ScrapedMetrics) error {
 		for _, ts := range family.TimeSeries {
 			seriesKey := ts.Labels.String()
 
-			// Update label indexes with interned strings
-			for _, label := range ts.Labels {
-				name := store.InternString(label.Name)
-				value := store.InternString(label.Value)
-				store.labelNames[name] = true
-				if store.labelValues[name] == nil {
-					store.labelValues[name] = make(map[string]bool)
-				}
-				store.labelValues[name][value] = true
-			}
-
 			// Get or create time series
 			existingSeries, exists := store.series[metricName][seriesKey]
 			if !exists {
+				// Update label indexes with interned strings only when a new series is registered
+				for _, label := range ts.Labels {
+					name := store.InternString(label.Name)
+					value := store.InternString(label.Value)
+					store.labelNames[name] = true
+					if store.labelValues[name] == nil {
+						store.labelValues[name] = make(map[string]bool)
+					}
+					store.labelValues[name][value] = true
+				}
+
 				// Create new series with ring buffer and interned labels
 				existingSeries = &TimeSeries{
 					Labels:  store.internLabels(ts.Labels),
@@ -303,7 +303,7 @@ func (store *InMemoryStore) QueryRangePerSeries(metricName string, labelMatchers
 		}
 
 		var seriesSamples []*MetricSample
-		// Iterate over ring buffer samples
+		// Iterate over ring buffer samples (RingBuffer.Range yields samples in chronological order)
 		ts.Samples.Range(func(_ int, sample MetricSample) bool {
 			if sample.Timestamp >= startMs && sample.Timestamp <= endMs {
 				sampleCopy := &MetricSample{
@@ -317,10 +317,6 @@ func (store *InMemoryStore) QueryRangePerSeries(metricName string, labelMatchers
 
 		// Only add if we have samples in this time range
 		if len(seriesSamples) > 0 {
-			// Sort by timestamp within this series
-			sort.Slice(seriesSamples, func(i, j int) bool {
-				return seriesSamples[i].Timestamp < seriesSamples[j].Timestamp
-			})
 			result[seriesKey] = seriesSamples
 		}
 	}

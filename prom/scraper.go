@@ -1,9 +1,9 @@
 package prom
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -48,24 +48,12 @@ func NewKubernetesScraper(kubeConfig *rest.Config, config *ScrapeConfig) (*Kuber
 	return scraper, nil
 }
 
-// Start begins the metrics collection process
+// Start discovers available scrape targets. Periodic scraping and storage are
+// driven by CollectorController.runCollector.
 func (ks *KubernetesScraper) Start(ctx context.Context) error {
-	// Discover available targets
 	if err := ks.discoverTargets(ctx); err != nil {
 		return fmt.Errorf("discovering targets: %w", err)
 	}
-
-	// Start scraping goroutines for each enabled component
-	ks.targetsMutex.RLock()
-	for _, component := range ks.config.Components {
-		targets, exists := ks.targets[component]
-		if !exists || len(targets) == 0 {
-			continue
-		}
-
-		go ks.scrapeComponentPeriodically(ctx, component)
-	}
-	ks.targetsMutex.RUnlock()
 
 	return nil
 }
@@ -336,25 +324,6 @@ func (ks *KubernetesScraper) discoverPodTargets(ctx context.Context) error {
 	return nil
 }
 
-// scrapeComponentPeriodically runs periodic scraping for a component
-func (ks *KubernetesScraper) scrapeComponentPeriodically(ctx context.Context, component ComponentType) {
-	ticker := time.NewTicker(ks.config.Interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			_, err := ks.ScrapeComponent(ctx, component)
-			if err != nil {
-				// Log error but continue scraping
-				continue
-			}
-		}
-	}
-}
-
 // scrapeTarget scrapes metrics from a single target using RESTClient
 func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTarget) (*ScrapedMetrics, error) {
 	// Add per-request timeout to prevent indefinite blocking on slow/unresponsive nodes
@@ -459,7 +428,7 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 // parseMetricsBody parses raw metrics response body into MetricFamily map
 func (ks *KubernetesScraper) parseMetricsBody(body []byte) (map[string]*dto.MetricFamily, error) {
 	var parser expfmt.TextParser
-	return parser.TextToMetricFamilies(strings.NewReader(string(body)))
+	return parser.TextToMetricFamilies(bytes.NewReader(body))
 }
 
 // convertMetricFamily converts Prometheus DTO to our internal format

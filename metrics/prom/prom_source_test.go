@@ -852,9 +852,10 @@ func TestIsPSIWorkloadContainer(t *testing.T) {
 	}{
 		{`{container="app", pod="p"}`, true},
 		{`{container="worker", pod="p"}`, true},
-		{`{container="POD", pod="p"}`, false}, // pause
-		{`{container="", pod="p"}`, false},    // pod aggregate
-		{`{pod="p"}`, true},                   // no container label = pass
+		{`{container="POD", pod="p"}`, false},             // pause
+		{`{container="", pod="p"}`, false},                // pod aggregate
+		{`{init_container="POD", container="app"}`, true}, // suffix of another label must not false-match
+		{`{pod="p"}`, true},                               // no container label = pass
 	}
 	for _, tc := range cases {
 		t.Run(tc.seriesKey, func(t *testing.T) {
@@ -862,5 +863,78 @@ func TestIsPSIWorkloadContainer(t *testing.T) {
 				t.Errorf("isPSIWorkloadContainer(%q) = %v, want %v", tc.seriesKey, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGetAllPodMetrics_SinglePassParity(t *testing.T) {
+	store := newPSITestStore()
+	// Populate 3 pods across 2 namespaces (6 Cartesian combinations, only 3 real pods)
+	store.set("container_cpu_usage_seconds_total", `{container="", cpu="total", namespace="ns-a", pod="pod-1"}`, 10, 14, 40) // 100m
+	store.set("container_memory_working_set_bytes", `{container="app", namespace="ns-a", pod="pod-1"}`, 128*1024*1024, 128*1024*1024, 40)
+	store.set("container_pressure_cpu_waiting_seconds_total", `{container="app", namespace="ns-a", pod="pod-1"}`, 0, 2, 40) // 5%
+
+	store.set("container_cpu_usage_seconds_total", `{container="", cpu="total", namespace="ns-a", pod="pod-2"}`, 0, 8, 40) // 200m
+	store.set("container_memory_working_set_bytes", `{container="", namespace="ns-a", pod="pod-2"}`, 64*1024*1024, 64*1024*1024, 40)
+
+	store.set("container_cpu_usage_seconds_total", `{container="", cpu="total", namespace="ns-b", pod="pod-3"}`, 0, 2, 40) // 50m
+	store.set("container_memory_working_set_bytes", `{container="web", namespace="ns-b", pod="pod-3"}`, 256*1024*1024, 256*1024*1024, 40)
+
+	src, err := NewPromMetricsSource(&rest.Config{}, DefaultPromConfig())
+	if err != nil {
+		t.Fatalf("NewPromMetricsSource: %v", err)
+	}
+	src.store = store
+	src.setHealthyForTesting(true)
+
+	all, err := src.GetAllPodMetrics(context.Background())
+	if err != nil {
+		t.Fatalf("GetAllPodMetrics unexpected error: %v", err)
+	}
+	if len(all) != 3 {
+		t.Fatalf("expected 3 actual pods (no Cartesian ghosts), got %d", len(all))
+	}
+
+	byKey := make(map[string]int64)
+	for _, pm := range all {
+		if len(pm.Containers) != 1 {
+			t.Fatalf("pod %s/%s expected 1 container entry, got %d", pm.Namespace, pm.PodName, len(pm.Containers))
+		}
+		byKey[pm.Namespace+"/"+pm.PodName] = pm.Containers[0].CPUUsage.MilliValue()
+		if pm.Namespace == "ns-a" && pm.PodName == "pod-1" && pm.PSI.CPUStallPct != 5 {
+			t.Errorf("ns-a/pod-1 PSI.CPUStallPct = %v, want 5", pm.PSI.CPUStallPct)
+		}
+	}
+
+	if byKey["ns-a/pod-1"] != 100 || byKey["ns-a/pod-2"] != 200 || byKey["ns-b/pod-3"] != 50 {
+		t.Errorf("unexpected CPU millicores map: %v", byKey)
+	}
+}
+
+func BenchmarkGetAllPodMetrics(b *testing.B) {
+	store := newPSITestStore()
+	// 20 namespaces x 25 pods per namespace = 500 pods total
+	for nsIdx := 0; nsIdx < 20; nsIdx++ {
+		ns := fmt.Sprintf("ns-%02d", nsIdx)
+		for podIdx := 0; podIdx < 25; podIdx++ {
+			pod := fmt.Sprintf("pod-%02d-%02d", nsIdx, podIdx)
+			cpuKey := fmt.Sprintf(`{container="", cpu="total", namespace=%q, pod=%q}`, ns, pod)
+			memKey := fmt.Sprintf(`{container="app", namespace=%q, pod=%q}`, ns, pod)
+			store.set("container_cpu_usage_seconds_total", cpuKey, 10, 14, 40)
+			store.set("container_memory_working_set_bytes", memKey, 128*1024*1024, 128*1024*1024, 40)
+		}
+	}
+
+	src, _ := NewPromMetricsSource(&rest.Config{}, DefaultPromConfig())
+	src.store = store
+	src.setHealthyForTesting(true)
+	ctx := context.Background()
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		res, err := src.GetAllPodMetrics(ctx)
+		if err != nil || len(res) != 500 {
+			b.Fatalf("unexpected result: len=%d err=%v", len(res), err)
+		}
 	}
 }
