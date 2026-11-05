@@ -30,24 +30,24 @@ func (s APIState) String() string {
 
 // APIHealthTracker monitors Kubernetes API server health with retry logic
 type APIHealthTracker struct {
-	state             APIState
-	retryCount        int
-	maxRetries        int
-	baseBackoff       time.Duration
-	lastError         error
-	lastSuccessTime   time.Time
-	lastErrorTime     time.Time // Track when we last saw an error
-	retryTimer        *time.Timer
-	consecutiveOK     int           // Consecutive successful checks needed to recover
-	requiredConsecOK  int           // Number of consecutive OKs required before declaring healthy
-	minUnhealthyTime  time.Duration // Minimum time to stay unhealthy before recovery
-	mu                sync.RWMutex
+	state            APIState
+	retryCount       int
+	maxRetries       int
+	baseBackoff      time.Duration
+	lastError        error
+	lastSuccessTime  time.Time
+	lastErrorTime    time.Time // Track when we last saw an error
+	retryTimer       *time.Timer
+	consecutiveOK    int           // Consecutive successful checks needed to recover
+	requiredConsecOK int           // Number of consecutive OKs required before declaring healthy
+	minUnhealthyTime time.Duration // Minimum time to stay unhealthy before recovery
+	mu               sync.RWMutex
 
 	// Callbacks
-	onStateChange    func(APIState, string) // For toast notifications
-	onHealthy        func()                 // Resume normal operation
-	onDisconnected   func()                 // Zero out UI values
-	onTryReconnect   func()                 // Trigger immediate health check
+	onStateChange  func(APIState, string) // For toast notifications
+	onHealthy      func()                 // Resume normal operation
+	onDisconnected func()                 // Zero out UI values
+	onTryReconnect func()                 // Trigger immediate health check
 }
 
 // NewAPIHealthTracker creates a new health tracker with the given state change callback
@@ -58,7 +58,7 @@ func NewAPIHealthTracker(onStateChange func(APIState, string)) *APIHealthTracker
 		baseBackoff:      2 * time.Second,
 		lastSuccessTime:  time.Now(),
 		onStateChange:    onStateChange,
-		requiredConsecOK: 3,               // Require 3 consecutive successful checks before declaring healthy
+		requiredConsecOK: 3,                // Require 3 consecutive successful checks before declaring healthy
 		minUnhealthyTime: 10 * time.Second, // Must stay unhealthy for at least 10 seconds before recovery
 	}
 }

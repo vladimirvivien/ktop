@@ -197,13 +197,14 @@ func (p *podPanel) formatColumnHeader(col string) string {
 		"POD":       'p',
 		"READY":     'r',
 		"STATUS":    's',
-		"RST":  't', // Uses 't' at position 3
+		"RST":       't', // Uses 't' at position 3
 		"AGE":       'a',
 		"VOLS":      'v',
 		"IP":        'i',
 		"NODE":      'o', // Uses 'o' at position 1
 		"CPU":       'c',
 		"MEMORY":    'm',
+		"STALL":     'l', // 'L' at position 3 to avoid 's' (STATUS) collision
 	}
 
 	// Find the shortcut key for this column
@@ -333,6 +334,7 @@ func (p *podPanel) handleSortKey(key rune) bool {
 		'o': "NODE",
 		'c': "CPU",
 		'm': "MEMORY",
+		'l': "STALL",
 	}
 
 	columnName, exists := keyToColumn[key]
@@ -624,6 +626,16 @@ func (p *podPanel) DrawBody(data interface{}) {
 						Text:  memMetrics,
 						Color: rowColor,
 						Align: tview.AlignLeft,
+					},
+				)
+
+			case "STALL":
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:     renderStallCell(pod.PSI, pod.NodePSIKernelSupported),
+						Align:    tview.AlignLeft,
+						MaxWidth: 12,
 					},
 				)
 			}

@@ -11,8 +11,8 @@ import (
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/prom"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
+	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
 
 // historyDataPoint is a simple struct for storing historical values

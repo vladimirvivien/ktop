@@ -708,3 +708,159 @@ func TestGetMetricsForPod_NotImplemented(t *testing.T) {
 		t.Errorf("Expected pod name 'test-pod', got '%s'", metrics.PodName)
 	}
 }
+
+// psiTestStore is a minimal MetricsStore that returns caller-supplied
+// per-series sample pairs verbatim. Used to exercise calculatePSIMaxRate's
+// MAX semantics, which the shared MockMetricsStore cannot demonstrate
+// (its QueryRangePerSeries forces a fixed 4.0 delta on every series).
+type psiTestStore struct {
+	samples map[string]map[string][]*prom.MetricSample // metric -> seriesKey -> samples
+}
+
+func newPSITestStore() *psiTestStore {
+	return &psiTestStore{samples: map[string]map[string][]*prom.MetricSample{}}
+}
+
+func (s *psiTestStore) set(metric, seriesKey string, first, last float64, windowSec int64) {
+	now := time.Now()
+	if s.samples[metric] == nil {
+		s.samples[metric] = map[string][]*prom.MetricSample{}
+	}
+	s.samples[metric][seriesKey] = []*prom.MetricSample{
+		{Timestamp: now.Add(-time.Duration(windowSec) * time.Second).UnixMilli(), Value: first},
+		{Timestamp: now.UnixMilli(), Value: last},
+	}
+}
+
+func (s *psiTestStore) AddMetrics(*prom.ScrapedMetrics) error                     { return nil }
+func (s *psiTestStore) QueryLatest(string, map[string]string) (float64, error)    { return 0, nil }
+func (s *psiTestStore) QueryLatestSum(string, map[string]string) (float64, error) { return 0, nil }
+func (s *psiTestStore) QueryRange(string, map[string]string, time.Time, time.Time) ([]*prom.MetricSample, error) {
+	return nil, nil
+}
+func (s *psiTestStore) QueryRangePerSeries(metric string, _ map[string]string, _, _ time.Time) (map[string][]*prom.MetricSample, error) {
+	series, ok := s.samples[metric]
+	if !ok {
+		return nil, fmt.Errorf("metric %s not found", metric)
+	}
+	return series, nil
+}
+func (s *psiTestStore) GetMetricNames() []string       { return nil }
+func (s *psiTestStore) GetLabelValues(string) []string { return nil }
+func (s *psiTestStore) Cleanup() error                 { return nil }
+
+func TestCalculatePSIMaxRate(t *testing.T) {
+	const metric = "container_pressure_cpu_waiting_seconds_total"
+	type series struct {
+		key         string
+		first, last float64
+	}
+	cases := []struct {
+		name    string
+		series  []series
+		filter  func(string) bool
+		wantPct float64
+		wantErr bool
+	}{
+		{
+			name: "single workload series, 10% stall",
+			series: []series{
+				{`{container="app", pod="p"}`, 0, 4},
+			},
+			filter:  isPSIWorkloadContainer,
+			wantPct: 10,
+		},
+		{
+			name: "two workload series, max wins",
+			series: []series{
+				{`{container="app",    pod="p"}`, 0, 4},  // 10%
+				{`{container="worker", pod="p"}`, 0, 12}, // 30%
+			},
+			filter:  isPSIWorkloadContainer,
+			wantPct: 30,
+		},
+		{
+			name: "pause container ignored even when highest",
+			series: []series{
+				{`{container="POD", pod="p"}`, 0, 40}, // 100% if counted
+				{`{container="app", pod="p"}`, 0, 4},  // 10%
+			},
+			filter:  isPSIWorkloadContainer,
+			wantPct: 10,
+		},
+		{
+			name: "pod aggregate ignored even when highest",
+			series: []series{
+				{`{container="",    pod="p"}`, 0, 40},
+				{`{container="app", pod="p"}`, 0, 4},
+			},
+			filter:  isPSIWorkloadContainer,
+			wantPct: 10,
+		},
+		{
+			name: "counter reset uses last value as basis",
+			series: []series{
+				// last < first → reset detected → rate = last/40s = 0.05 → 5%
+				{`{container="app", pod="p"}`, 100, 2},
+			},
+			filter:  isPSIWorkloadContainer,
+			wantPct: 5,
+		},
+		{
+			name:    "no series → error",
+			series:  nil,
+			filter:  isPSIWorkloadContainer,
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newPSITestStore()
+			for _, s := range tc.series {
+				store.set(metric, s.key, s.first, s.last, 40)
+			}
+			cfg := DefaultPromConfig()
+			src, err := NewPromMetricsSource(&rest.Config{}, cfg)
+			if err != nil {
+				t.Fatalf("NewPromMetricsSource: %v", err)
+			}
+			src.store = store
+			src.setHealthyForTesting(true)
+
+			got, err := src.calculatePSIMaxRate(metric, nil, 40*time.Second, tc.filter)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got %v", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.wantPct {
+				t.Errorf("got %v%%, want %v%%", got, tc.wantPct)
+			}
+		})
+	}
+}
+
+func TestIsPSIWorkloadContainer(t *testing.T) {
+	cases := []struct {
+		seriesKey string
+		want      bool
+	}{
+		{`{container="app", pod="p"}`, true},
+		{`{container="worker", pod="p"}`, true},
+		{`{container="POD", pod="p"}`, false}, // pause
+		{`{container="", pod="p"}`, false},    // pod aggregate
+		{`{pod="p"}`, true},                   // no container label = pass
+	}
+	for _, tc := range cases {
+		t.Run(tc.seriesKey, func(t *testing.T) {
+			if got := isPSIWorkloadContainer(tc.seriesKey); got != tc.want {
+				t.Errorf("isPSIWorkloadContainer(%q) = %v, want %v", tc.seriesKey, got, tc.want)
+			}
+		})
+	}
+}

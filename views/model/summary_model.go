@@ -57,15 +57,26 @@ type ClusterSummary struct {
 	DiskWriteRate  float64 // Bytes/sec written
 
 	// Health indicators
-	ContainerRestarts int     // Total container restarts (cumulative)
-	FailedPods        int     // Pods in Failed state
-	EvictedPods       int     // Pods that were evicted
-	OOMKillCount      int     // OOM kills
-	NodePressureCount int     // Nodes with memory/disk/PID pressure
+	ContainerRestarts   int     // Total container restarts (cumulative)
+	FailedPods          int     // Pods in Failed state
+	EvictedPods         int     // Pods that were evicted
+	OOMKillCount        int     // OOM kills
+	NodePressureCount   int     // Nodes with memory/disk/PID pressure
 	CPUThrottledPercent float64 // Avg CPU throttling across containers
 
 	// Load averages (cluster-wide average)
 	LoadAverage1m  float64
 	LoadAverage5m  float64
 	LoadAverage15m float64
+
+	// PSI stall percentages averaged across nodes — cluster-wide health.
+	// The summary strip renders the dominant axis (max of the three averages).
+	// Zero when the metrics source does not provide PSI.
+	AvgNodeCPUStallPct float64
+	AvgNodeMemStallPct float64
+	AvgNodeIOStallPct  float64
+
+	// PSIBeta is true when the cluster's Kubernetes version is below 1.36 (GA).
+	// Surfaced by the UI to mark stall values as best-effort.
+	PSIBeta bool
 }

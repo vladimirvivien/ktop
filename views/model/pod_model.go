@@ -5,6 +5,7 @@ import (
 	"sort"
 	"time"
 
+	ktopmetrics "github.com/vladimirvivien/ktop/metrics"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -36,6 +37,14 @@ type PodModel struct {
 	Restarts        int
 	Volumes         int
 	VolMounts       int
+
+	// PSI carries pressure stall percentages for this pod (max across its
+	// containers, per axis). Zero when the metrics source does not provide PSI.
+	PSI ktopmetrics.PSIMetrics
+
+	// NodePSIKernelSupported mirrors NodeModel.PSIKernelSupported for the pod's
+	// node, denormalized here to avoid a per-row node lookup at render time.
+	NodePSIKernelSupported bool
 }
 
 type PodContainerSummary struct {
@@ -208,6 +217,27 @@ func SortPodModelsBy(pods []PodModel, column string, ascending bool) {
 				return pods[i].Name < pods[j].Name
 			}
 			return memI < memJ
+		}
+
+	case "STALL":
+		// Sort by the dominant stall axis (max of CPU/MEM/IO waiting %).
+		// Same axis selection the STALL column displays.
+		sortFunc = func(i, j int) bool {
+			dom := func(p PodModel) float64 {
+				m := p.PSI.CPUStallPct
+				if p.PSI.MemStallPct > m {
+					m = p.PSI.MemStallPct
+				}
+				if p.PSI.IOStallPct > m {
+					m = p.PSI.IOStallPct
+				}
+				return m
+			}
+			si, sj := dom(pods[i]), dom(pods[j])
+			if si == sj {
+				return pods[i].Name < pods[j].Name
+			}
+			return si < sj
 		}
 
 	default:

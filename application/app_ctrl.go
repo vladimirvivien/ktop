@@ -672,6 +672,8 @@ func (app *Application) handleMetricsHealthChange(healthy bool, info metrics.Sou
 // namespaceDisplay is the namespace value to show (may include filter styling)
 func (app *Application) buildHeaderString(namespaceDisplay string) string {
 	var hdr strings.Builder
+	client := app.GetK8sClient()
+
 	// Format: Context: name | K8s: version | User: user | Namespace: value | Metrics: status
 	hdr.WriteString("[green]Context: [white]%s [green]| K8s: [white]%s [green]| User: [white]%s [green]| Namespace: [white]%s [green]| Metrics:")
 
@@ -682,8 +684,6 @@ func (app *Application) buildHeaderString(namespaceDisplay string) string {
 	} else {
 		hdr.WriteString(" [red]not connected")
 	}
-
-	client := app.GetK8sClient()
 
 	// Truncate long values to prevent header overflow
 	context := truncateString(client.ClusterName(), 25)

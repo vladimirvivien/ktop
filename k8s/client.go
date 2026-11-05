@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/vladimirvivien/ktop/internal/psi"
 	appsV1 "k8s.io/api/apps/v1"
 	batchV1 "k8s.io/api/batch/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -145,6 +146,13 @@ func (k8s *Client) Username() string {
 
 func (k8s *Client) GetServerVersion() string {
 	return k8s.clusterVersion.String()
+}
+
+// PSIVersionOK reports whether the cluster's Kubernetes server version is at
+// or above the PSI GA release (1.36). Below 1.36 PSI values are best-effort
+// and may include the zero-emission bug on certain kubelet builds.
+func (k8s *Client) PSIVersionOK() bool {
+	return psi.ServerVersionOK(k8s.clusterVersion)
 }
 
 // AssertMetricsAvailable checks for available metrics server every 10th invocation.

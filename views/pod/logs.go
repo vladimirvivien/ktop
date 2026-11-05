@@ -49,9 +49,9 @@ type LogsPanel struct {
 func NewLogsPanel() *LogsPanel {
 	p := &LogsPanel{
 		root:      tview.NewFlex().SetDirection(tview.FlexRow),
-		following: true,  // Default to following
-		wrapText:  true,  // Default to wrapped
-		tailLines: 1000,  // Default tail lines
+		following: true, // Default to following
+		wrapText:  true, // Default to wrapped
+		tailLines: 1000, // Default tail lines
 	}
 
 	p.setupInputCapture()

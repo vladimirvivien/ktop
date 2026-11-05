@@ -258,6 +258,75 @@ func isPodAggregateMemory(seriesKey string) bool {
 	return strings.Contains(seriesKey, `container=""`)
 }
 
+// isPSIWorkloadContainer returns true if the seriesKey represents a workload
+// container's PSI series. Excludes the pause container (container="POD") and
+// the pod-level aggregate (container="") — PSI is meaningful per workload
+// container, and the pod-level signal is computed as max across them.
+func isPSIWorkloadContainer(seriesKey string) bool {
+	if strings.Contains(seriesKey, `container="POD"`) {
+		return false
+	}
+	if strings.Contains(seriesKey, `container=""`) {
+		return false
+	}
+	return true
+}
+
+// calculatePSIMaxRate returns the maximum per-series stall percentage across
+// all matching series, in [0..100].
+//
+// PSI percentages from sibling containers are independent — a pod with one
+// 50%-stalled container and one idle container is not 25% stalled, it has a
+// 50%-stalled container. Use MAX, not SUM or MEAN.
+func (p *PromMetricsSource) calculatePSIMaxRate(metricName string, labelMatchers map[string]string, window time.Duration, filterFn func(seriesKey string) bool) (float64, error) {
+	now := time.Now()
+	start := now.Add(-window)
+
+	seriesSamples, err := p.store.QueryRangePerSeries(metricName, labelMatchers, start, now)
+	if err != nil {
+		return 0, err
+	}
+	if len(seriesSamples) == 0 {
+		return 0, fmt.Errorf("no matching series found for psi rate calculation")
+	}
+
+	var maxRate float64
+	validSeriesCount := 0
+
+	for seriesKey, samples := range seriesSamples {
+		if filterFn != nil && !filterFn(seriesKey) {
+			continue
+		}
+		if len(samples) < 2 {
+			continue
+		}
+
+		first := samples[0]
+		last := samples[len(samples)-1]
+
+		deltaValue := last.Value - first.Value
+		deltaTimeSec := float64(last.Timestamp-first.Timestamp) / 1000.0
+		if deltaTimeSec <= 0 {
+			continue
+		}
+		// Counter reset (container restart): treat last value as the rate basis.
+		if deltaValue < 0 {
+			deltaValue = last.Value
+		}
+
+		rate := deltaValue / deltaTimeSec
+		if rate > maxRate {
+			maxRate = rate
+		}
+		validSeriesCount++
+	}
+
+	if validSeriesCount == 0 {
+		return 0, fmt.Errorf("insufficient samples for psi rate calculation")
+	}
+	return maxRate * 100, nil
+}
+
 // queryLatestSumFiltered queries latest values and sums them, applying a filter function
 // This is used for memory metrics where we need to sum across workload containers only
 func (p *PromMetricsSource) queryLatestSumFiltered(metricName string, labelMatchers map[string]string, filterFn func(seriesKey string) bool) (float64, error) {
@@ -373,6 +442,29 @@ func (p *PromMetricsSource) GetNodeMetrics(ctx context.Context, nodeName string)
 		nodeMetrics.ContainerCount = int(containerCount)
 	}
 
+	// Pressure Stall Information for the node's root cgroup (id="/").
+	// Rate of a seconds counter over the window is fraction-stalled in [0..1];
+	// percent values stored on PSIMetrics multiply by 100.
+	const psiWindow = 40 * time.Second
+	if v, err := p.calculateCPURate("container_pressure_cpu_waiting_seconds_total", labelMatchers, psiWindow); err == nil {
+		nodeMetrics.PSI.CPUStallPct = v * 100
+	}
+	if v, err := p.calculateCPURate("container_pressure_cpu_stalled_seconds_total", labelMatchers, psiWindow); err == nil {
+		nodeMetrics.PSI.CPUStalledPct = v * 100
+	}
+	if v, err := p.calculateCPURate("container_pressure_memory_waiting_seconds_total", labelMatchers, psiWindow); err == nil {
+		nodeMetrics.PSI.MemStallPct = v * 100
+	}
+	if v, err := p.calculateCPURate("container_pressure_memory_stalled_seconds_total", labelMatchers, psiWindow); err == nil {
+		nodeMetrics.PSI.MemStalledPct = v * 100
+	}
+	if v, err := p.calculateCPURate("container_pressure_io_waiting_seconds_total", labelMatchers, psiWindow); err == nil {
+		nodeMetrics.PSI.IOStallPct = v * 100
+	}
+	if v, err := p.calculateCPURate("container_pressure_io_stalled_seconds_total", labelMatchers, psiWindow); err == nil {
+		nodeMetrics.PSI.IOStalledPct = v * 100
+	}
+
 	return nodeMetrics, nil
 }
 
@@ -430,6 +522,29 @@ func (p *PromMetricsSource) GetPodMetrics(ctx context.Context, namespace, podNam
 	// Only add container metrics if we got at least one metric
 	if containerMetrics.CPUUsage != nil || containerMetrics.MemoryUsage != nil {
 		podMetrics.Containers = append(podMetrics.Containers, containerMetrics)
+	}
+
+	// Pressure Stall Information at pod scope. PSI percentages don't sum
+	// meaningfully across containers; pod-level signal is the worst-affected
+	// container per axis.
+	const psiWindow = 40 * time.Second
+	if v, err := p.calculatePSIMaxRate("container_pressure_cpu_waiting_seconds_total", labelMatchers, psiWindow, isPSIWorkloadContainer); err == nil {
+		podMetrics.PSI.CPUStallPct = v
+	}
+	if v, err := p.calculatePSIMaxRate("container_pressure_cpu_stalled_seconds_total", labelMatchers, psiWindow, isPSIWorkloadContainer); err == nil {
+		podMetrics.PSI.CPUStalledPct = v
+	}
+	if v, err := p.calculatePSIMaxRate("container_pressure_memory_waiting_seconds_total", labelMatchers, psiWindow, isPSIWorkloadContainer); err == nil {
+		podMetrics.PSI.MemStallPct = v
+	}
+	if v, err := p.calculatePSIMaxRate("container_pressure_memory_stalled_seconds_total", labelMatchers, psiWindow, isPSIWorkloadContainer); err == nil {
+		podMetrics.PSI.MemStalledPct = v
+	}
+	if v, err := p.calculatePSIMaxRate("container_pressure_io_waiting_seconds_total", labelMatchers, psiWindow, isPSIWorkloadContainer); err == nil {
+		podMetrics.PSI.IOStallPct = v
+	}
+	if v, err := p.calculatePSIMaxRate("container_pressure_io_stalled_seconds_total", labelMatchers, psiWindow, isPSIWorkloadContainer); err == nil {
+		podMetrics.PSI.IOStalledPct = v
 	}
 
 	return podMetrics, nil

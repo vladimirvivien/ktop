@@ -1,6 +1,5 @@
 // Package userdir resolves and provisions the per-user ktop directory
-// (default ~/.ktop), where ktop stores its log file and, from v0.6.3,
-// its config file. Honor $KTOP_DIR to relocate the entire tree.
+// (default ~/.ktop). Set $KTOP_DIR to relocate the entire tree.
 package userdir
 
 import (

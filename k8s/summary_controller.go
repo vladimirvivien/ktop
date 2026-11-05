@@ -233,7 +233,23 @@ func (c *Controller) collectPrometheusEnhancedMetrics(ctx context.Context, summa
 		summary.LoadAverage1m += nodeMetrics.LoadAverage1m
 		summary.LoadAverage5m += nodeMetrics.LoadAverage5m
 		summary.LoadAverage15m += nodeMetrics.LoadAverage15m
+
+		// PSI: sum per-axis, divide after the loop for cluster-wide averages.
+		// Per-node values are surfaced separately in the Nodes table.
+		summary.AvgNodeCPUStallPct += nodeMetrics.PSI.CPUStallPct
+		summary.AvgNodeMemStallPct += nodeMetrics.PSI.MemStallPct
+		summary.AvgNodeIOStallPct += nodeMetrics.PSI.IOStallPct
 	}
+
+	// Average the PSI sums across all nodes.
+	if len(nodes) > 0 {
+		summary.AvgNodeCPUStallPct /= float64(len(nodes))
+		summary.AvgNodeMemStallPct /= float64(len(nodes))
+		summary.AvgNodeIOStallPct /= float64(len(nodes))
+	}
+
+	// PSIBeta is a cluster-wide capability flag; set once from the client.
+	summary.PSIBeta = !c.client.PSIVersionOK()
 
 	// Average the load across nodes (will be 0 without node_exporter)
 	if len(nodes) > 0 {

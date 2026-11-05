@@ -25,7 +25,10 @@ const (
 
 // DefaultMetricAllowlist contains only the metrics ktop actually uses.
 // All other metrics are filtered out during scraping to reduce memory usage.
+// The scraper filters by exact name match; adding entries here is sufficient
+// to make them available to the store.
 var DefaultMetricAllowlist = map[string]bool{
+	// CPU, memory, network, disk — used by node/pod tables and sparklines.
 	"container_cpu_usage_seconds_total":      true,
 	"container_memory_working_set_bytes":     true,
 	"container_network_receive_bytes_total":  true,
@@ -34,6 +37,16 @@ var DefaultMetricAllowlist = map[string]bool{
 	"container_fs_writes_bytes_total":        true,
 	"kubelet_running_pods":                   true,
 	"container_count":                        true,
+
+	// Pressure Stall Information (PSI). The "waiting" axis carries the
+	// dominant stall signal; "stalled" is for detail-page rendering. Not
+	// every kernel emits container_pressure_cpu_stalled_seconds_total.
+	"container_pressure_cpu_waiting_seconds_total":    true,
+	"container_pressure_cpu_stalled_seconds_total":    true,
+	"container_pressure_memory_waiting_seconds_total": true,
+	"container_pressure_memory_stalled_seconds_total": true,
+	"container_pressure_io_waiting_seconds_total":     true,
+	"container_pressure_io_stalled_seconds_total":     true,
 }
 
 // MetricSample represents a single metric data point

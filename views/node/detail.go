@@ -35,9 +35,9 @@ type DetailPanel struct {
 	lastInfoHeaderHeight int
 
 	// Focus management for tab cycling
-	focusedChildIdx int              // Index of currently focused child (-1 = none)
-	focusableItems  []tview.Primitive // Ordered list of focusable primitives
-	focusablePanels []*tview.Flex     // Corresponding parent panels (for border updates)
+	focusedChildIdx int                     // Index of currently focused child (-1 = none)
+	focusableItems  []tview.Primitive       // Ordered list of focusable primitives
+	focusablePanels []*tview.Flex           // Corresponding parent panels (for border updates)
 	setAppFocus     func(p tview.Primitive) // Callback to set tview app focus
 
 	// Sub-panels
@@ -159,7 +159,7 @@ func (p *DetailPanel) Layout(_ interface{}) {
 		p.podsPanel.SetBorderColor(tcell.ColorLightGray)
 
 		p.podsTable = tview.NewTable()
-		p.podsTable.SetFixed(1, 0) // Fixed header row
+		p.podsTable.SetFixed(1, 0)              // Fixed header row
 		p.podsTable.SetSelectable(false, false) // Start unselectable, enable on focus
 		p.podsTable.SetBorder(false)
 		p.podsTable.SetBorders(false)
@@ -260,7 +260,7 @@ func (p *DetailPanel) DrawBody(data interface{}) {
 	}
 	if newNodeName != p.currentNodeName {
 		p.resetSparklines()
-		p.peakNetRate = 0  // Reset adaptive scaling peaks
+		p.peakNetRate = 0 // Reset adaptive scaling peaks
 		p.peakDiskRate = 0
 		p.currentNodeName = newNodeName
 
