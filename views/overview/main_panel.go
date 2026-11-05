@@ -320,7 +320,7 @@ func (p *MainPanel) Run(ctx context.Context) error {
 	p.app.SetContainerLogsCallback(p.showContainerLogs)
 
 	if err := ctrl.Start(ctx, time.Second*10); err != nil {
-		panic(fmt.Sprintf("main panel: controller start: %s", err))
+		return fmt.Errorf("main panel: controller start: %w", err)
 	}
 	return nil
 }

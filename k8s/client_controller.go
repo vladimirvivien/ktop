@@ -184,7 +184,7 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 			cronJobHasSynced,
 		)
 		if !ok {
-			panic("resource failed to sync")
+			slog.Warn("some non-core informers failed to sync", "namespace", c.client.namespace)
 		}
 	}()
 
@@ -239,11 +239,13 @@ func (c *Controller) checkAPIHealth(ctx context.Context) {
 	defer cancel()
 
 	// Invalidate discovery cache to ensure fresh API call
-	c.client.discoClient.Invalidate()
+	if c.client.discoClient != nil {
+		c.client.discoClient.Invalidate()
+	}
 
-	// Make a direct API call that cannot be cached - list namespaces with a fresh request
-	// This is the most reliable way to check if the API server is reachable
-	_, err := c.client.kubeClient.CoreV1().Namespaces().List(checkCtx, metav1.ListOptions{
+	// Make a direct API call that cannot be cached - list pods in the configured namespace
+	// so both cluster-wide and namespace-scoped RBAC users can verify connectivity
+	_, err := c.client.kubeClient.CoreV1().Pods(c.client.namespace).List(checkCtx, metav1.ListOptions{
 		Limit: 1,
 	})
 	if err != nil {

@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -202,21 +203,35 @@ func (k8s *Client) GetMetricsClient() *metricsclient.Clientset {
 
 // AssertCoreAuthz verifies read access to core resources using lightweight
 // GET requests instead of SelfSubjectAccessReview, keeping ktop fully read-only.
+// When a specific namespace is configured, 403 Forbidden on cluster-scoped
+// resources (namespaces, nodes) logs a warning and continues so users with
+// namespace-only RoleBindings can still inspect workload pods.
 func (k8s *Client) AssertCoreAuthz(ctx context.Context) error {
 	listOpts := metav1.ListOptions{Limit: 1}
+	namespaceScoped := k8s.namespace != AllNamespaces
 
 	if _, err := k8s.kubeClient.CoreV1().Namespaces().List(ctx, listOpts); err != nil {
 		if apierrors.IsForbidden(err) {
-			return fmt.Errorf("user not authorized to list namespaces: %w", err)
+			if namespaceScoped {
+				slog.Warn("user not authorized to list namespaces; continuing in namespace-scoped mode", "namespace", k8s.namespace)
+			} else {
+				return fmt.Errorf("user not authorized to list namespaces: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to list namespaces: %w", err)
 		}
-		return fmt.Errorf("failed to list namespaces: %w", err)
 	}
 
 	if _, err := k8s.kubeClient.CoreV1().Nodes().List(ctx, listOpts); err != nil {
 		if apierrors.IsForbidden(err) {
-			return fmt.Errorf("user not authorized to list nodes: %w", err)
+			if namespaceScoped {
+				slog.Warn("user not authorized to list nodes; continuing in namespace-scoped mode", "namespace", k8s.namespace)
+			} else {
+				return fmt.Errorf("user not authorized to list nodes: %w", err)
+			}
+		} else {
+			return fmt.Errorf("failed to list nodes: %w", err)
 		}
-		return fmt.Errorf("failed to list nodes: %w", err)
 	}
 
 	if _, err := k8s.kubeClient.CoreV1().Pods(k8s.namespace).List(ctx, listOpts); err != nil {
