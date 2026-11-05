@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -75,7 +76,7 @@ func NewWithColumnOptions(app *application.Application, title string, showAllCol
 	return ctrl
 }
 
-func (p *MainPanel) Layout(data interface{}) {
+func (p *MainPanel) Layout(data any) {
 	// Define the default columns
 	allNodeColumns := []string{"NAME", "STATUS", "RST", "PODS", "TAINTS", "PRESSURE", "IP", "VOLS", "DISK", "CPU", "MEM", "STALL"}
 	allPodColumns := []string{"NAMESPACE", "POD", "READY", "STATUS", "RST", "AGE", "VOLS", "IP", "NODE", "CPU", "MEMORY", "STALL"}
@@ -224,9 +225,9 @@ func (p *MainPanel) checkAndRebuildLayout() {
 	p.lastTerminalHeight = terminalHeight
 }
 
-func (p *MainPanel) DrawHeader(_ interface{}) {}
-func (p *MainPanel) DrawBody(_ interface{})   {}
-func (p *MainPanel) DrawFooter(_ interface{}) {}
+func (p *MainPanel) DrawHeader(_ any) {}
+func (p *MainPanel) DrawBody(_ any)   {}
+func (p *MainPanel) DrawFooter(_ any) {}
 func (p *MainPanel) Clear()                   {}
 
 func (p *MainPanel) GetTitle() string {
@@ -1124,11 +1125,8 @@ func filterColumns(allColumns []string, filterCols []string) []string {
 
 	result := []string{}
 	for _, col := range allColumns {
-		for _, filterCol := range filterCols {
-			if strings.EqualFold(col, filterCol) {
-				result = append(result, col)
-				break
-			}
+		if slices.ContainsFunc(filterCols, func(f string) bool { return strings.EqualFold(col, f) }) {
+			result = append(result, col)
 		}
 	}
 

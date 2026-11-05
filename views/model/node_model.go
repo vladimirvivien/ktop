@@ -1,7 +1,7 @@
 package model
 
 import (
-	"sort"
+	"slices"
 
 	"github.com/vladimirvivien/ktop/internal/psi"
 	"github.com/vladimirvivien/ktop/metrics"
@@ -168,176 +168,159 @@ func SortNodeModels(nodes []NodeModel) {
 	SortNodeModelsBy(nodes, "NAME", true)
 }
 
-// SortNodeModelsBy sorts nodes by the specified column and direction
-func SortNodeModelsBy(nodes []NodeModel, column string, ascending bool) {
-	var sortFunc func(i, j int) bool
-
+func nodeLess(a, b NodeModel, column string) bool {
 	switch column {
 	case "NAME":
-		sortFunc = func(i, j int) bool {
-			return nodes[i].Name < nodes[j].Name
-		}
+		return a.Name < b.Name
 
 	case "STATUS":
-		sortFunc = func(i, j int) bool {
-			// Ready before NotReady
-			if nodes[i].Status == nodes[j].Status {
-				return nodes[i].Name < nodes[j].Name
-			}
-			return nodes[i].Status > nodes[j].Status
+		// Ready before NotReady
+		if a.Status == b.Status {
+			return a.Name < b.Name
 		}
+		return a.Status > b.Status
 
 	case "IP":
-		sortFunc = func(i, j int) bool {
-			if nodes[i].InternalIP == nodes[j].InternalIP {
-				return nodes[i].Name < nodes[j].Name
-			}
-			return nodes[i].InternalIP < nodes[j].InternalIP
+		if a.InternalIP == b.InternalIP {
+			return a.Name < b.Name
 		}
+		return a.InternalIP < b.InternalIP
 
 	case "PODS":
-		sortFunc = func(i, j int) bool {
-			if nodes[i].PodsCount == nodes[j].PodsCount {
-				return nodes[i].Name < nodes[j].Name
-			}
-			return nodes[i].PodsCount < nodes[j].PodsCount
+		if a.PodsCount == b.PodsCount {
+			return a.Name < b.Name
 		}
+		return a.PodsCount < b.PodsCount
 
 	case "TAINTS":
-		sortFunc = func(i, j int) bool {
-			if nodes[i].TaintCount == nodes[j].TaintCount {
-				return nodes[i].Name < nodes[j].Name
-			}
-			return nodes[i].TaintCount < nodes[j].TaintCount
+		if a.TaintCount == b.TaintCount {
+			return a.Name < b.Name
 		}
+		return a.TaintCount < b.TaintCount
 
 	case "PRESSURE":
-		sortFunc = func(i, j int) bool {
-			// Nodes with pressure sort after nodes without
-			pressureI := len(nodes[i].Pressures)
-			pressureJ := len(nodes[j].Pressures)
-			if pressureI == pressureJ {
-				return nodes[i].Name < nodes[j].Name
-			}
-			return pressureI < pressureJ
+		// Nodes with pressure sort after nodes without
+		pressureA := len(a.Pressures)
+		pressureB := len(b.Pressures)
+		if pressureA == pressureB {
+			return a.Name < b.Name
 		}
+		return pressureA < pressureB
 
 	case "RST":
-		sortFunc = func(i, j int) bool {
-			if nodes[i].Restarts == nodes[j].Restarts {
-				return nodes[i].Name < nodes[j].Name
-			}
-			return nodes[i].Restarts < nodes[j].Restarts
+		if a.Restarts == b.Restarts {
+			return a.Name < b.Name
 		}
+		return a.Restarts < b.Restarts
 
 	case "VOLS":
-		sortFunc = func(i, j int) bool {
-			if nodes[i].VolumesInUse == nodes[j].VolumesInUse {
-				return nodes[i].Name < nodes[j].Name
-			}
-			return nodes[i].VolumesInUse < nodes[j].VolumesInUse
+		if a.VolumesInUse == b.VolumesInUse {
+			return a.Name < b.Name
 		}
+		return a.VolumesInUse < b.VolumesInUse
 
 	case "DISK":
-		sortFunc = func(i, j int) bool {
-			diskI := int64(0)
-			diskJ := int64(0)
+		diskA := int64(0)
+		diskB := int64(0)
 
-			if nodes[i].AllocatableStorageQty != nil {
-				diskI = nodes[i].AllocatableStorageQty.Value()
-			}
-			if nodes[j].AllocatableStorageQty != nil {
-				diskJ = nodes[j].AllocatableStorageQty.Value()
-			}
-
-			if diskI == diskJ {
-				return nodes[i].Name < nodes[j].Name
-			}
-			return diskI < diskJ
+		if a.AllocatableStorageQty != nil {
+			diskA = a.AllocatableStorageQty.Value()
 		}
+		if b.AllocatableStorageQty != nil {
+			diskB = b.AllocatableStorageQty.Value()
+		}
+
+		if diskA == diskB {
+			return a.Name < b.Name
+		}
+		return diskA < diskB
 
 	case "CPU":
-		sortFunc = func(i, j int) bool {
-			cpuI := int64(0)
-			cpuJ := int64(0)
+		cpuA := int64(0)
+		cpuB := int64(0)
 
-			// Prefer usage metrics, fall back to requested if unavailable
-			if nodes[i].UsageCpuQty != nil && nodes[i].UsageCpuQty.MilliValue() > 0 {
-				cpuI = nodes[i].UsageCpuQty.MilliValue()
-			} else if nodes[i].RequestedPodCpuQty != nil {
-				cpuI = nodes[i].RequestedPodCpuQty.MilliValue()
-			}
-
-			if nodes[j].UsageCpuQty != nil && nodes[j].UsageCpuQty.MilliValue() > 0 {
-				cpuJ = nodes[j].UsageCpuQty.MilliValue()
-			} else if nodes[j].RequestedPodCpuQty != nil {
-				cpuJ = nodes[j].RequestedPodCpuQty.MilliValue()
-			}
-
-			if cpuI == cpuJ {
-				return nodes[i].Name < nodes[j].Name
-			}
-			return cpuI < cpuJ
+		// Prefer usage metrics, fall back to requested if unavailable
+		if a.UsageCpuQty != nil && a.UsageCpuQty.MilliValue() > 0 {
+			cpuA = a.UsageCpuQty.MilliValue()
+		} else if a.RequestedPodCpuQty != nil {
+			cpuA = a.RequestedPodCpuQty.MilliValue()
 		}
+
+		if b.UsageCpuQty != nil && b.UsageCpuQty.MilliValue() > 0 {
+			cpuB = b.UsageCpuQty.MilliValue()
+		} else if b.RequestedPodCpuQty != nil {
+			cpuB = b.RequestedPodCpuQty.MilliValue()
+		}
+
+		if cpuA == cpuB {
+			return a.Name < b.Name
+		}
+		return cpuA < cpuB
 
 	case "MEM":
-		sortFunc = func(i, j int) bool {
-			memI := int64(0)
-			memJ := int64(0)
+		memA := int64(0)
+		memB := int64(0)
 
-			// Prefer usage metrics, fall back to requested if unavailable
-			if nodes[i].UsageMemQty != nil && nodes[i].UsageMemQty.Value() > 0 {
-				memI = nodes[i].UsageMemQty.Value()
-			} else if nodes[i].RequestedPodMemQty != nil {
-				memI = nodes[i].RequestedPodMemQty.Value()
-			}
-
-			if nodes[j].UsageMemQty != nil && nodes[j].UsageMemQty.Value() > 0 {
-				memJ = nodes[j].UsageMemQty.Value()
-			} else if nodes[j].RequestedPodMemQty != nil {
-				memJ = nodes[j].RequestedPodMemQty.Value()
-			}
-
-			if memI == memJ {
-				return nodes[i].Name < nodes[j].Name
-			}
-			return memI < memJ
+		// Prefer usage metrics, fall back to requested if unavailable
+		if a.UsageMemQty != nil && a.UsageMemQty.Value() > 0 {
+			memA = a.UsageMemQty.Value()
+		} else if a.RequestedPodMemQty != nil {
+			memA = a.RequestedPodMemQty.Value()
 		}
+
+		if b.UsageMemQty != nil && b.UsageMemQty.Value() > 0 {
+			memB = b.UsageMemQty.Value()
+		} else if b.RequestedPodMemQty != nil {
+			memB = b.RequestedPodMemQty.Value()
+		}
+
+		if memA == memB {
+			return a.Name < b.Name
+		}
+		return memA < memB
 
 	case "STALL":
 		// Sort by the dominant stall axis (max of CPU/MEM/IO waiting %).
-		sortFunc = func(i, j int) bool {
-			dom := func(n NodeModel) float64 {
-				m := n.PSI.CPUStallPct
-				if n.PSI.MemStallPct > m {
-					m = n.PSI.MemStallPct
-				}
-				if n.PSI.IOStallPct > m {
-					m = n.PSI.IOStallPct
-				}
-				return m
+		dom := func(n NodeModel) float64 {
+			m := n.PSI.CPUStallPct
+			if n.PSI.MemStallPct > m {
+				m = n.PSI.MemStallPct
 			}
-			si, sj := dom(nodes[i]), dom(nodes[j])
-			if si == sj {
-				return nodes[i].Name < nodes[j].Name
+			if n.PSI.IOStallPct > m {
+				m = n.PSI.IOStallPct
 			}
-			return si < sj
+			return m
 		}
+		sa, sb := dom(a), dom(b)
+		if sa == sb {
+			return a.Name < b.Name
+		}
+		return sa < sb
 
 	default:
 		// Default to NAME sorting
-		sortFunc = func(i, j int) bool {
-			return nodes[i].Name < nodes[j].Name
-		}
+		return a.Name < b.Name
 	}
+}
 
-	// Apply sort
-	if ascending {
-		sort.Slice(nodes, sortFunc)
-	} else {
-		// Reverse for descending
-		sort.Slice(nodes, func(i, j int) bool {
-			return !sortFunc(i, j)
-		})
+// SortNodeModelsBy sorts nodes by the specified column and direction
+func SortNodeModelsBy(nodes []NodeModel, column string, ascending bool) {
+	if len(nodes) <= 1 {
+		return
 	}
+	slices.SortFunc(nodes, func(a, b NodeModel) int {
+		if nodeLess(a, b, column) {
+			if ascending {
+				return -1
+			}
+			return 1
+		}
+		if nodeLess(b, a, column) {
+			if ascending {
+				return 1
+			}
+			return -1
+		}
+		return 0
+	})
 }

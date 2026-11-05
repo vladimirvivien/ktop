@@ -94,7 +94,7 @@ func (p *nodePanel) getSparkline(sparklines map[string]*ui.Sparkline, key string
 	return ui.GetSparkline(sparklines, key, width, colors)
 }
 
-func (p *nodePanel) Layout(_ interface{}) {
+func (p *nodePanel) Layout(_ any) {
 	if !p.laidout {
 		p.list = tview.NewTable()
 		p.list.SetFixed(1, 0)
@@ -158,7 +158,7 @@ func (p *nodePanel) formatColumnHeader(col string) string {
 	return p.tableCtrl.FormatColumnHeader(col)
 }
 
-func (p *nodePanel) DrawHeader(data interface{}) {
+func (p *nodePanel) DrawHeader(data any) {
 	cols, ok := data.([]string)
 	if !ok {
 		panic(fmt.Sprintf("nodePanel.DrawHeader got unexpected data type %T", data))
@@ -224,7 +224,7 @@ func (p *nodePanel) handleSortKey(key rune) bool {
 	return handled
 }
 
-func (p *nodePanel) DrawBody(data interface{}) {
+func (p *nodePanel) DrawBody(data any) {
 	nodes, ok := data.([]model.NodeModel)
 	if !ok {
 		panic(fmt.Sprintf("NodePanel.DrawBody: unexpected type %T", data))
@@ -528,7 +528,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 	}
 }
 
-func (p *nodePanel) DrawFooter(_ interface{}) {}
+func (p *nodePanel) DrawFooter(_ any) {}
 
 func (p *nodePanel) Clear() {
 	p.list.Clear()

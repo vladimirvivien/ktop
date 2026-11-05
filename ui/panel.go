@@ -8,11 +8,11 @@ import (
 )
 
 type Panel interface {
-	Layout(data interface{})
-	DrawHeader(data interface{})
+	Layout(data any)
+	DrawHeader(data any)
 	// TODO add context to DrawXXX methods
-	DrawBody(data interface{})
-	DrawFooter(param interface{})
+	DrawBody(data any)
+	DrawFooter(param any)
 	Clear()
 	GetTitle() string
 	GetRootView() tview.Primitive

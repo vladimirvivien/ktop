@@ -46,7 +46,7 @@ func (p *clusterSummaryPanel) GetTitle() string {
 	return p.title
 }
 
-func (p *clusterSummaryPanel) Layout(data interface{}) {
+func (p *clusterSummaryPanel) Layout(data any) {
 	// Detect metrics source type
 	metricsSource := p.app.GetMetricsSource()
 	if metricsSource != nil {
@@ -113,7 +113,7 @@ func (p *clusterSummaryPanel) Layout(data interface{}) {
 	p.root.SetTitleAlign(tview.AlignLeft)
 }
 
-func (p *clusterSummaryPanel) DrawHeader(data interface{}) {}
+func (p *clusterSummaryPanel) DrawHeader(data any) {}
 
 // checkAndRebuildLayout checks if terminal size changed across the threshold and rebuilds layout if needed
 func (p *clusterSummaryPanel) checkAndRebuildLayout() {
@@ -131,7 +131,7 @@ func (p *clusterSummaryPanel) checkAndRebuildLayout() {
 	p.Layout(nil)
 }
 
-func (p *clusterSummaryPanel) DrawBody(data interface{}) {
+func (p *clusterSummaryPanel) DrawBody(data any) {
 	// Check if terminal size category changed and rebuild layout if needed
 	p.checkAndRebuildLayout()
 
@@ -347,7 +347,7 @@ func formatSummaryStall(s model.ClusterSummary) string {
 	return renderStallCell(psi, true)
 }
 
-func (p *clusterSummaryPanel) DrawFooter(data interface{}) {}
+func (p *clusterSummaryPanel) DrawFooter(data any) {}
 
 func (p *clusterSummaryPanel) Clear() {}
 

@@ -56,7 +56,7 @@ func (p *appPanel) GetTitle() string {
 	return p.title
 }
 
-func (p *appPanel) Layout(data interface{}) {
+func (p *appPanel) Layout(data any) {
 	p.header = tview.NewTable()
 	p.header.SetBorder(false)
 	p.header.SetBorders(false)
@@ -102,7 +102,7 @@ func (p *appPanel) Layout(data interface{}) {
 	}
 }
 
-func (p *appPanel) DrawHeader(data interface{}) {
+func (p *appPanel) DrawHeader(data any) {
 	header, ok := data.(string)
 	if !ok {
 		panic(fmt.Sprintf("application.Drawheader got unexpected type %T", data))
@@ -126,9 +126,9 @@ func (p *appPanel) DrawHeader(data interface{}) {
 	)
 }
 
-func (p *appPanel) DrawBody(data interface{}) {}
+func (p *appPanel) DrawBody(data any) {}
 
-func (p *appPanel) DrawFooter(data interface{}) {
+func (p *appPanel) DrawFooter(data any) {
 	title, ok := data.(string)
 	if !ok {
 		panic(fmt.Sprintf("application.DrawBody got unexpected data type: %T", data))

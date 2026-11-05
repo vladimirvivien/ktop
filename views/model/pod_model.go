@@ -2,7 +2,7 @@ package model
 
 import (
 	"fmt"
-	"sort"
+	"slices"
 	"time"
 
 	ktopmetrics "github.com/vladimirvivien/ktop/metrics"
@@ -66,199 +66,181 @@ func SortPodModels(pods []PodModel) {
 	SortPodModelsBy(pods, "NAMESPACE", true)
 }
 
-// SortPodModelsBy sorts pods by the specified column and direction
-func SortPodModelsBy(pods []PodModel, column string, ascending bool) {
-	var sortFunc func(i, j int) bool
-
+func podLess(a, b PodModel, column string) bool {
 	switch column {
 	case "NAMESPACE":
-		sortFunc = func(i, j int) bool {
-			if pods[i].Namespace == pods[j].Namespace {
-				return pods[i].Name < pods[j].Name
-			}
-			return pods[i].Namespace < pods[j].Namespace
+		if a.Namespace == b.Namespace {
+			return a.Name < b.Name
 		}
+		return a.Namespace < b.Namespace
 
 	case "POD", "NAME":
-		sortFunc = func(i, j int) bool {
-			if pods[i].Name == pods[j].Name {
-				return pods[i].Namespace < pods[j].Namespace
-			}
-			return pods[i].Name < pods[j].Name
+		if a.Name == b.Name {
+			return a.Namespace < b.Namespace
 		}
+		return a.Name < b.Name
 
 	case "READY":
-		sortFunc = func(i, j int) bool {
-			readyI := float64(pods[i].ReadyContainers) / float64(pods[i].TotalContainers)
-			readyJ := float64(pods[j].ReadyContainers) / float64(pods[j].TotalContainers)
-			if readyI == readyJ {
-				return pods[i].Name < pods[j].Name
-			}
-			return readyI < readyJ
+		readyA := float64(a.ReadyContainers) / float64(a.TotalContainers)
+		readyB := float64(b.ReadyContainers) / float64(b.TotalContainers)
+		if readyA == readyB {
+			return a.Name < b.Name
 		}
+		return readyA < readyB
 
 	case "STATUS":
-		sortFunc = func(i, j int) bool {
-			// Running > Pending > Failed > Unknown
-			statusPriority := map[string]int{
-				"Running":           0,
-				"Pending":           1,
-				"ContainerCreating": 2,
-				"CrashLoopBackOff":  3,
-				"Error":             4,
-				"Failed":            5,
-				"Unknown":           6,
-			}
-
-			priI, okI := statusPriority[pods[i].Status]
-			priJ, okJ := statusPriority[pods[j].Status]
-
-			// Unknown statuses get highest priority (show first for investigation)
-			if !okI {
-				priI = 99
-			}
-			if !okJ {
-				priJ = 99
-			}
-
-			if priI == priJ {
-				return pods[i].Name < pods[j].Name
-			}
-			return priI < priJ
+		// Running > Pending > Failed > Unknown
+		statusPriority := map[string]int{
+			"Running":           0,
+			"Pending":           1,
+			"ContainerCreating": 2,
+			"CrashLoopBackOff":  3,
+			"Error":             4,
+			"Failed":            5,
+			"Unknown":           6,
 		}
+
+		priA, okA := statusPriority[a.Status]
+		priB, okB := statusPriority[b.Status]
+
+		// Unknown statuses get highest priority (show first for investigation)
+		if !okA {
+			priA = 99
+		}
+		if !okB {
+			priB = 99
+		}
+
+		if priA == priB {
+			return a.Name < b.Name
+		}
+		return priA < priB
 
 	case "RST", "RESTARTS":
-		sortFunc = func(i, j int) bool {
-			if pods[i].Restarts == pods[j].Restarts {
-				return pods[i].Name < pods[j].Name
-			}
-			return pods[i].Restarts < pods[j].Restarts
+		if a.Restarts == b.Restarts {
+			return a.Name < b.Name
 		}
+		return a.Restarts < b.Restarts
 
 	case "AGE":
-		sortFunc = func(i, j int) bool {
-			// Older pods first (earlier creation time)
-			if pods[i].CreationTime.Equal(&pods[j].CreationTime) {
-				return pods[i].Name < pods[j].Name
-			}
-			return pods[i].CreationTime.Before(&pods[j].CreationTime)
+		// Older pods first (earlier creation time)
+		if a.CreationTime.Equal(&b.CreationTime) {
+			return a.Name < b.Name
 		}
+		return a.CreationTime.Before(&b.CreationTime)
 
 	case "VOLS":
-		sortFunc = func(i, j int) bool {
-			if pods[i].Volumes == pods[j].Volumes {
-				if pods[i].VolMounts == pods[j].VolMounts {
-					return pods[i].Name < pods[j].Name
-				}
-				return pods[i].VolMounts < pods[j].VolMounts
+		if a.Volumes == b.Volumes {
+			if a.VolMounts == b.VolMounts {
+				return a.Name < b.Name
 			}
-			return pods[i].Volumes < pods[j].Volumes
+			return a.VolMounts < b.VolMounts
 		}
+		return a.Volumes < b.Volumes
 
 	case "IP":
-		sortFunc = func(i, j int) bool {
-			if pods[i].IP == pods[j].IP {
-				return pods[i].Name < pods[j].Name
-			}
-			return pods[i].IP < pods[j].IP
+		if a.IP == b.IP {
+			return a.Name < b.Name
 		}
+		return a.IP < b.IP
 
 	case "NODE":
-		sortFunc = func(i, j int) bool {
-			if pods[i].Node == pods[j].Node {
-				return pods[i].Name < pods[j].Name
-			}
-			return pods[i].Node < pods[j].Node
+		if a.Node == b.Node {
+			return a.Name < b.Name
 		}
+		return a.Node < b.Node
 
 	case "CPU":
-		sortFunc = func(i, j int) bool {
-			cpuI := int64(0)
-			cpuJ := int64(0)
+		cpuA := int64(0)
+		cpuB := int64(0)
 
-			// Prefer usage metrics, fall back to requested if unavailable
-			if pods[i].PodUsageCpuQty != nil && pods[i].PodUsageCpuQty.MilliValue() > 0 {
-				cpuI = pods[i].PodUsageCpuQty.MilliValue()
-			} else if pods[i].PodRequestedCpuQty != nil {
-				cpuI = pods[i].PodRequestedCpuQty.MilliValue()
-			}
-
-			if pods[j].PodUsageCpuQty != nil && pods[j].PodUsageCpuQty.MilliValue() > 0 {
-				cpuJ = pods[j].PodUsageCpuQty.MilliValue()
-			} else if pods[j].PodRequestedCpuQty != nil {
-				cpuJ = pods[j].PodRequestedCpuQty.MilliValue()
-			}
-
-			if cpuI == cpuJ {
-				return pods[i].Name < pods[j].Name
-			}
-			return cpuI < cpuJ
+		// Prefer usage metrics, fall back to requested if unavailable
+		if a.PodUsageCpuQty != nil && a.PodUsageCpuQty.MilliValue() > 0 {
+			cpuA = a.PodUsageCpuQty.MilliValue()
+		} else if a.PodRequestedCpuQty != nil {
+			cpuA = a.PodRequestedCpuQty.MilliValue()
 		}
+
+		if b.PodUsageCpuQty != nil && b.PodUsageCpuQty.MilliValue() > 0 {
+			cpuB = b.PodUsageCpuQty.MilliValue()
+		} else if b.PodRequestedCpuQty != nil {
+			cpuB = b.PodRequestedCpuQty.MilliValue()
+		}
+
+		if cpuA == cpuB {
+			return a.Name < b.Name
+		}
+		return cpuA < cpuB
 
 	case "MEMORY", "MEM":
-		sortFunc = func(i, j int) bool {
-			memI := int64(0)
-			memJ := int64(0)
+		memA := int64(0)
+		memB := int64(0)
 
-			// Prefer usage metrics, fall back to requested if unavailable
-			if pods[i].PodUsageMemQty != nil && pods[i].PodUsageMemQty.Value() > 0 {
-				memI = pods[i].PodUsageMemQty.Value()
-			} else if pods[i].PodRequestedMemQty != nil {
-				memI = pods[i].PodRequestedMemQty.Value()
-			}
-
-			if pods[j].PodUsageMemQty != nil && pods[j].PodUsageMemQty.Value() > 0 {
-				memJ = pods[j].PodUsageMemQty.Value()
-			} else if pods[j].PodRequestedMemQty != nil {
-				memJ = pods[j].PodRequestedMemQty.Value()
-			}
-
-			if memI == memJ {
-				return pods[i].Name < pods[j].Name
-			}
-			return memI < memJ
+		// Prefer usage metrics, fall back to requested if unavailable
+		if a.PodUsageMemQty != nil && a.PodUsageMemQty.Value() > 0 {
+			memA = a.PodUsageMemQty.Value()
+		} else if a.PodRequestedMemQty != nil {
+			memA = a.PodRequestedMemQty.Value()
 		}
+
+		if b.PodUsageMemQty != nil && b.PodUsageMemQty.Value() > 0 {
+			memB = b.PodUsageMemQty.Value()
+		} else if b.PodRequestedMemQty != nil {
+			memB = b.PodRequestedMemQty.Value()
+		}
+
+		if memA == memB {
+			return a.Name < b.Name
+		}
+		return memA < memB
 
 	case "STALL":
 		// Sort by the dominant stall axis (max of CPU/MEM/IO waiting %).
-		// Same axis selection the STALL column displays.
-		sortFunc = func(i, j int) bool {
-			dom := func(p PodModel) float64 {
-				m := p.PSI.CPUStallPct
-				if p.PSI.MemStallPct > m {
-					m = p.PSI.MemStallPct
-				}
-				if p.PSI.IOStallPct > m {
-					m = p.PSI.IOStallPct
-				}
-				return m
+		dom := func(p PodModel) float64 {
+			m := p.PSI.CPUStallPct
+			if p.PSI.MemStallPct > m {
+				m = p.PSI.MemStallPct
 			}
-			si, sj := dom(pods[i]), dom(pods[j])
-			if si == sj {
-				return pods[i].Name < pods[j].Name
+			if p.PSI.IOStallPct > m {
+				m = p.PSI.IOStallPct
 			}
-			return si < sj
+			return m
 		}
+		sa, sb := dom(a), dom(b)
+		if sa == sb {
+			return a.Name < b.Name
+		}
+		return sa < sb
 
 	default:
 		// Default to NAMESPACE then NAME sorting
-		sortFunc = func(i, j int) bool {
-			if pods[i].Namespace == pods[j].Namespace {
-				return pods[i].Name < pods[j].Name
-			}
-			return pods[i].Namespace < pods[j].Namespace
+		if a.Namespace == b.Namespace {
+			return a.Name < b.Name
 		}
+		return a.Namespace < b.Namespace
 	}
+}
 
-	// Apply sort
-	if ascending {
-		sort.Slice(pods, sortFunc)
-	} else {
-		// Reverse for descending
-		sort.Slice(pods, func(i, j int) bool {
-			return !sortFunc(i, j)
-		})
+// SortPodModelsBy sorts pods by the specified column and direction
+func SortPodModelsBy(pods []PodModel, column string, ascending bool) {
+	if len(pods) <= 1 {
+		return
 	}
+	slices.SortFunc(pods, func(a, b PodModel) int {
+		if podLess(a, b, column) {
+			if ascending {
+				return -1
+			}
+			return 1
+		}
+		if podLess(b, a, column) {
+			if ascending {
+				return 1
+			}
+			return -1
+		}
+		return 0
+	})
 }
 
 // SortPodModelPointersBy sorts a slice of *PodModel by the specified column and direction
@@ -266,28 +248,30 @@ func SortPodModelPointersBy(pods []*PodModel, column string, ascending bool) {
 	if len(pods) <= 1 {
 		return
 	}
-	values := make([]PodModel, len(pods))
-	for i, p := range pods {
-		if p != nil {
-			values[i] = *p
+	slices.SortFunc(pods, func(a, b *PodModel) int {
+		if a == nil && b == nil {
+			return 0
 		}
-	}
-	SortPodModelsBy(values, column, ascending)
-	byKey := make(map[string][]*PodModel)
-	for _, p := range pods {
-		if p != nil {
-			k := p.Namespace + "/" + p.Name
-			byKey[k] = append(byKey[k], p)
+		if a == nil {
+			return 1
 		}
-	}
-	for i, v := range values {
-		k := v.Namespace + "/" + v.Name
-		list := byKey[k]
-		if len(list) > 0 {
-			pods[i] = list[0]
-			byKey[k] = list[1:]
+		if b == nil {
+			return -1
 		}
-	}
+		if podLess(*a, *b, column) {
+			if ascending {
+				return -1
+			}
+			return 1
+		}
+		if podLess(*b, *a, column) {
+			if ascending {
+				return 1
+			}
+			return -1
+		}
+		return 0
+	})
 }
 
 func NewPodModel(pod *v1.Pod, podMetrics *metricsV1beta1.PodMetrics, nodeMetrics *metricsV1beta1.NodeMetrics) *PodModel {

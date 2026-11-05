@@ -152,7 +152,7 @@ func selectMetricsSource(
 		}
 		if !enableFallback {
 			slog.Error("prometheus required but unreachable", "error", err)
-			return nil, nil, fmt.Errorf("prometheus not available: %v", err)
+			return nil, nil, fmt.Errorf("prometheus not available: %w", err)
 		}
 		slog.Warn("prometheus unavailable, falling back to metrics-server", "error", err)
 		source := k8sMetrics.NewMetricsServerSource(k8sC.Controller())
@@ -248,7 +248,7 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	k8sC, err := k8s.New(o.kubeFlags)
 	if err != nil {
 		slog.Error("kubernetes client creation failed", "error", err)
-		return fmt.Errorf("ktop: failed to create Kubernetes client: %s", err)
+		return fmt.Errorf("ktop: failed to create Kubernetes client: %w", err)
 	}
 	slog.Info("cluster connected", "host", k8sC.RESTConfig().Host)
 
@@ -297,7 +297,7 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 
 	if err := k8sC.AssertCoreAuthz(ctx); err != nil {
 		slog.Error("kubernetes authorization check failed", "error", err)
-		return fmt.Errorf("ktop: %s", err)
+		return fmt.Errorf("ktop: %w", err)
 	}
 	slog.Info("kubernetes authorization checks passed")
 
