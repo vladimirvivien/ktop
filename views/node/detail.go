@@ -169,7 +169,7 @@ func (p *DetailPanel) Layout(_ interface{}) {
 
 		podColumnToKey := map[string]rune{
 			"NAMESPACE": 'n',
-			"NAME":      'p',
+			"POD":       'p',
 			"STATUS":    's',
 			"READY":     'd',
 			"RESTARTS":  'r',
@@ -179,7 +179,7 @@ func (p *DetailPanel) Layout(_ interface{}) {
 		}
 
 		p.podsTableCtrl = ui.NewTableController(p.podsTable, ui.TableControllerConfig{
-			DefaultSortColumn: "NAME",
+			DefaultSortColumn: "POD",
 			DefaultSortAsc:    true,
 			ColumnToKey:       podColumnToKey,
 			OnRedraw:          p.drawPodsTable,
@@ -683,7 +683,7 @@ func (p *DetailPanel) drawPodsTable() {
 	p.podsTable.Clear()
 
 	// Draw header
-	headers := []string{"NAMESPACE", "NAME", "STATUS", "READY", "RESTARTS", "CPU", "MEM", "AGE"}
+	headers := []string{"NAMESPACE", "POD", "STATUS", "READY", "RESTARTS", "CPU", "MEM", "AGE"}
 	if p.podsTableCtrl != nil {
 		p.podsTableCtrl.SetVisibleColumns(headers)
 	}

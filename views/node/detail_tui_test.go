@@ -173,15 +173,29 @@ func TestNodeDetailPanel_PodsTableSortAndFilter(t *testing.T) {
 		}
 	}
 
-	// Default sort is NAME ascending: api-gateway < backend-worker < coredns
+	// Default sort is POD ascending: api-gateway < backend-worker < coredns
+	if !strings.Contains(initial, "POD ▲") {
+		t.Fatalf("expected 'POD ▲' in initial render header, got:\n%s", initial)
+	}
 	posAPI := strings.Index(initial, "api-gateway")
 	posBackend := strings.Index(initial, "backend-worker")
 	posCore := strings.Index(initial, "coredns")
 	if !(posAPI < posBackend && posBackend < posCore) {
-		t.Fatalf("expected NAME ascending (api-gateway < backend-worker < coredns), got positions %d, %d, %d in:\n%s", posAPI, posBackend, posCore, initial)
+		t.Fatalf("expected POD ascending (api-gateway < backend-worker < coredns), got positions %d, %d, %d in:\n%s", posAPI, posBackend, posCore, initial)
 	}
 
-	// 1. Sort by CPU ascending ('c') then descending ('c')
+	// 1. Sort by POD descending ('p') then ascending ('p')
+	ts.SendRune(panel.podsTable, 'p')
+	podDesc := ts.Text()
+	posCore = strings.Index(podDesc, "coredns")
+	posBackend = strings.Index(podDesc, "backend-worker")
+	posAPI = strings.Index(podDesc, "api-gateway")
+	if !(posCore < posBackend && posBackend < posAPI) {
+		t.Fatalf("expected POD descending (coredns < backend-worker < api-gateway), got:\n%s", podDesc)
+	}
+	ts.SendRune(panel.podsTable, 'p')
+
+	// 2. Sort by CPU ascending ('c') then descending ('c')
 	ts.SendRune(panel.podsTable, 'c')
 	ts.SendRune(panel.podsTable, 'c')
 	cpuDesc := ts.Text()
