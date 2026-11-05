@@ -25,8 +25,6 @@ type Controller struct {
 	client        *Client
 	metricsSource metrics.MetricsSource // NEW: for cluster summary metrics
 
-	nodeMetricsInformer *NodeMetricsInformer // DEPRECATED: no longer initialized
-	podMetricsInformer  *PodMetricsInformer  // DEPRECATED: no longer initialized
 	namespaceInformer   coreV1Informers.NamespaceInformer
 	nodeInformer        coreV1Informers.NodeInformer
 	podInformer         coreV1Informers.PodInformer
