@@ -28,6 +28,7 @@ type podPanel struct {
 	currentData []model.PodModel // Store current data for re-sorting
 	filter      *ui.FilterState  // Filter state for row filtering
 	namespaceFilter string       // Global namespace filter from header
+	tableCtrl   *ui.TableController
 
 	// Stateful sparklines for smooth sliding animation
 	cpuSparklines map[string]*ui.Sparkline // key: "namespace/podname"
@@ -80,7 +81,8 @@ func (p *podPanel) getPodInfoFromRow(row int) (namespace, podName string) {
 	}
 
 	// Sort the filtered pods the same way as DrawBody
-	model.SortPodModelsBy(filteredPods, p.sortColumn, p.sortAsc)
+	sortCol, sortAsc := p.GetSortParams()
+	model.SortPodModelsBy(filteredPods, sortCol, sortAsc)
 
 	if dataIndex >= 0 && dataIndex < len(filteredPods) {
 		return filteredPods[dataIndex].Namespace, filteredPods[dataIndex].Name
@@ -90,13 +92,7 @@ func (p *podPanel) getPodInfoFromRow(row int) (namespace, podName string) {
 
 // getSparkline returns an existing sparkline or creates a new one
 func (p *podPanel) getSparkline(sparklines map[string]*ui.Sparkline, key string, width int, colors ui.ColorKeys) *ui.Sparkline {
-	if spark, ok := sparklines[key]; ok {
-		spark.Resize(width)
-		return spark
-	}
-	spark := ui.NewSparkline().SetDimensions(width, 1).SetColorKeys(colors)
-	sparklines[key] = spark
-	return spark
+	return ui.GetSparkline(sparklines, key, width, colors)
 }
 
 func (p *podPanel) Layout(_ interface{}) {
@@ -114,67 +110,39 @@ func (p *podPanel) Layout(_ interface{}) {
 			p.list.SetSelectable(false, false)
 		})
 
-		// Capture keyboard events for filtering and sorting
-		// ESC handling: panels consume ESC when they have state (filter),
-		// otherwise pass through to let global handler quit the app
+		podColumnToKey := map[string]rune{
+			"NAMESPACE": 'n',
+			"POD":       'p',
+			"READY":     'r',
+			"STATUS":    's',
+			"RST":       't',
+			"AGE":       'a',
+			"VOLS":      'v',
+			"IP":        'i',
+			"NODE":      'o',
+			"CPU":       'c',
+			"MEMORY":    'm',
+			"STALL":     'l',
+		}
+
+		p.tableCtrl = ui.NewTableController(p.list, ui.TableControllerConfig{
+			DefaultSortColumn: "NAMESPACE",
+			DefaultSortAsc:    true,
+			ColumnToKey:       podColumnToKey,
+			OnRedraw:          p.redrawWithFilter,
+			OnSelect: func(row int) bool {
+				namespace, podName := p.getPodInfoFromRow(row)
+				if namespace != "" && podName != "" && p.onPodSelected != nil {
+					p.onPodSelected(namespace, podName)
+					return true
+				}
+				return false
+			},
+		})
+		p.filter = p.tableCtrl.Filter()
+
 		p.list.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-			// Handle filter edit mode input
-			if p.filter.Editing {
-				switch event.Key() {
-				case tcell.KeyEscape:
-					p.filter.Cancel()
-					p.redrawWithFilter()
-					return nil // Consume - don't bubble to global handler
-				case tcell.KeyEnter:
-					p.filter.Confirm()
-					p.redrawWithFilter()
-					return nil
-				case tcell.KeyBackspace, tcell.KeyBackspace2:
-					if p.filter.HandleBackspace() {
-						p.redrawWithFilter()
-					}
-					return nil
-				case tcell.KeyRune:
-					p.filter.AppendChar(event.Rune())
-					p.redrawWithFilter()
-					return nil
-				}
-				return nil // Consume all keys in edit mode
-			}
-
-			// Normal mode - ESC clears active filter
-			if event.Key() == tcell.KeyEscape && p.filter.Active {
-				p.filter.Clear()
-				p.redrawWithFilter()
-				return nil // Consume - don't quit app
-			}
-
-			// Filter trigger
-			if event.Key() == tcell.KeyRune && event.Rune() == '/' {
-				p.filter.StartEditing()
-				p.redrawWithFilter()
-				return nil
-			}
-
-			// Handle Enter key for pod selection
-			if event.Key() == tcell.KeyEnter {
-				row, _ := p.list.GetSelection()
-				if row > 0 { // Skip header row
-					namespace, podName := p.getPodInfoFromRow(row)
-					if namespace != "" && podName != "" && p.onPodSelected != nil {
-						p.onPodSelected(namespace, podName)
-						return nil
-					}
-				}
-			}
-
-			// Handle sorting shortcuts
-			if event.Key() == tcell.KeyRune {
-				if p.handleSortKey(event.Rune()) {
-					return nil // Event consumed
-				}
-			}
-			return event // Pass through - let it bubble to global handler
+			return p.tableCtrl.HandleInput(event)
 		})
 
 		p.root = tview.NewFlex().SetDirection(tview.FlexRow).
@@ -188,73 +156,7 @@ func (p *podPanel) Layout(_ interface{}) {
 
 // formatColumnHeader formats a column header with keyboard shortcut hint and sort indicator
 func (p *podPanel) formatColumnHeader(col string) string {
-	if len(col) == 0 {
-		return col
-	}
-
-	// Map column name to keyboard shortcut key
-	columnToKey := map[string]rune{
-		"NAMESPACE": 'n',
-		"POD":       'p',
-		"READY":     'r',
-		"STATUS":    's',
-		"RST":       't', // Uses 't' at position 3
-		"AGE":       'a',
-		"VOLS":      'v',
-		"IP":        'i',
-		"NODE":      'o', // Uses 'o' at position 1
-		"CPU":       'c',
-		"MEMORY":    'm',
-		"STALL":     'l', // 'L' at position 3 to avoid 's' (STATUS) collision
-	}
-
-	// Find the shortcut key for this column
-	key, exists := columnToKey[col]
-	var formatted string
-
-	if exists {
-		// Find position of key character (case-insensitive)
-		keyPos := -1
-		colUpper := strings.ToUpper(col)
-		keyUpper := strings.ToUpper(string(key))
-		for i, ch := range colUpper {
-			if string(ch) == keyUpper {
-				keyPos = i
-				break
-			}
-		}
-
-		if keyPos >= 0 && keyPos < len(col) {
-			// Build formatted string with highlighted character at correct position
-			before := col[:keyPos]
-			highlighted := string(col[keyPos])
-			after := ""
-			if keyPos+1 < len(col) {
-				after = col[keyPos+1:]
-			}
-			formatted = fmt.Sprintf("%s[%s::b]%s[%s::-]%s",
-				before, ui.Theme.HeaderShortcutKey, highlighted, ui.Theme.HeaderForeground, after)
-		} else {
-			// Fallback: highlight first character if position not found
-			formatted = fmt.Sprintf("[%s::b]%c[%s::-]%s",
-				ui.Theme.HeaderShortcutKey, col[0], ui.Theme.HeaderForeground, col[1:])
-		}
-	} else {
-		// No mapping found, highlight first character
-		formatted = fmt.Sprintf("[%s::b]%c[%s::-]%s",
-			ui.Theme.HeaderShortcutKey, col[0], ui.Theme.HeaderForeground, col[1:])
-	}
-
-	// Add sort indicator if this is the active sort column
-	if col == p.sortColumn {
-		if p.sortAsc {
-			formatted += " ▲" // Ascending
-		} else {
-			formatted += " ▼" // Descending
-		}
-	}
-
-	return formatted
+	return p.tableCtrl.FormatColumnHeader(col)
 }
 
 func (p *podPanel) DrawHeader(data interface{}) {
@@ -263,6 +165,7 @@ func (p *podPanel) DrawHeader(data interface{}) {
 		panic(fmt.Sprintf("podPanel.DrawBody got unexpected data type %T", data))
 	}
 
+	p.tableCtrl.SetVisibleColumns(cols)
 	// Initialize the column map
 	p.colMap = make(map[string]int)
 	p.listCols = cols
@@ -294,76 +197,23 @@ func (p *podPanel) SetNamespaceFilter(ns string) {
 
 // GetSortParams returns the current sort column and direction
 func (p *podPanel) GetSortParams() (string, bool) {
-	return p.sortColumn, p.sortAsc
+	return p.tableCtrl.GetSortParams()
 }
 
 // toggleSort toggles the sort column and direction
 func (p *podPanel) toggleSort(columnName string) {
-	if columnName == p.sortColumn {
-		// Same column - toggle direction
-		p.sortAsc = !p.sortAsc
-	} else {
-		// New column - start with ascending
-		p.sortColumn = columnName
-		p.sortAsc = true
-	}
-
-	// Re-sort and redraw with current data
-	if len(p.currentData) > 0 {
-		// Clear and redraw header with updated sort indicators
-		p.list.Clear()
-		p.DrawHeader(p.listCols)
-
-		// Redraw body with re-sorted data
-		p.DrawBody(p.currentData)
-
-		// Trigger screen refresh
-		if p.app != nil {
-			p.app.Refresh()
-		}
-	}
+	p.tableCtrl.ToggleSort(columnName)
+	p.sortColumn, p.sortAsc = p.tableCtrl.GetSortParams()
 }
 
 // handleSortKey processes keyboard shortcuts for sorting
 // Returns true if the key was handled, false otherwise
 func (p *podPanel) handleSortKey(key rune) bool {
-	// Map keyboard shortcuts to column names
-	keyToColumn := map[rune]string{
-		'n': "NAMESPACE",
-		'p': "POD",
-		'r': "READY",
-		's': "STATUS",
-		't': "RST",
-		'a': "AGE",
-		'v': "VOLS",
-		'i': "IP",
-		'o': "NODE",
-		'c': "CPU",
-		'm': "MEMORY",
-		'l': "STALL",
+	handled := p.tableCtrl.HandleSortKey(key)
+	if handled {
+		p.sortColumn, p.sortAsc = p.tableCtrl.GetSortParams()
 	}
-
-	columnName, exists := keyToColumn[key]
-	if !exists {
-		return false
-	}
-
-	// Check if this column is visible (when using column filtering)
-	columnVisible := false
-	for _, col := range p.listCols {
-		if col == columnName {
-			columnVisible = true
-			break
-		}
-	}
-
-	if !columnVisible {
-		return false
-	}
-
-	// Toggle sort for this column
-	p.toggleSort(columnName)
-	return true
+	return handled
 }
 
 func (p *podPanel) DrawBody(data interface{}) {
@@ -373,26 +223,19 @@ func (p *podPanel) DrawBody(data interface{}) {
 	}
 
 	// Prune sparkline entries for pods that are no longer present
-	activePods := make(map[string]struct{}, len(pods))
+	activePods := make(map[string]bool, len(pods))
 	for _, pod := range pods {
-		activePods[pod.Namespace+"/"+pod.Name] = struct{}{}
+		activePods[pod.Namespace+"/"+pod.Name] = true
 	}
-	for k := range p.cpuSparklines {
-		if _, exists := activePods[k]; !exists {
-			delete(p.cpuSparklines, k)
-		}
-	}
-	for k := range p.memSparklines {
-		if _, exists := activePods[k]; !exists {
-			delete(p.memSparklines, k)
-		}
-	}
+	ui.PruneSparklines(p.cpuSparklines, activePods)
+	ui.PruneSparklines(p.memSparklines, activePods)
 
 	// Store the data for re-sorting
 	p.currentData = pods
 
 	// Sort pods according to current sort state
-	model.SortPodModelsBy(pods, p.sortColumn, p.sortAsc)
+	sortCol, sortAsc := p.GetSortParams()
+	model.SortPodModelsBy(pods, sortCol, sortAsc)
 
 	colorKeys := ui.ColorKeys{0: "olivedrab", 50: "yellow", 90: "red"}
 	var cpuRatio, memRatio ui.Ratio
@@ -726,60 +569,19 @@ func (p *podPanel) redrawWithFilter() {
 
 // HasEscapableState implements ui.EscapablePanel
 func (p *podPanel) HasEscapableState() bool {
-	return p.filter.HasEscapableState()
+	return p.tableCtrl.HasEscapableState()
 }
 
 // HandleEscape implements ui.EscapablePanel - handles ESC key press
 func (p *podPanel) HandleEscape() bool {
-	if p.filter.Editing {
-		p.filter.Cancel()
-		p.redrawWithFilter()
-		return true
-	}
-	if p.filter.Active {
-		p.filter.Clear()
-		p.redrawWithFilter()
-		return true
-	}
-	return false
+	return p.tableCtrl.HandleEscape()
 }
 
 // updateTitle updates the panel title with scroll position indicator and filter state
 func (p *podPanel) updateTitle(totalRows int) {
-	// Get visible area dimensions
-	_, _, _, height := p.list.GetInnerRect()
-	visibleRows := height - 1 // Subtract header row
-
-	offset, _ := p.list.GetOffset()
-
-	// Handle disconnected state
 	var disconnectedSuffix string
-	if p.app.IsAPIDisconnected() {
+	if p.app != nil && p.app.IsAPIDisconnected() {
 		disconnectedSuffix = " [red][DISCONNECTED - Press R to reconnect][-]"
 	}
-
-	// Calculate visible range (1-indexed for display)
-	firstVisible := offset + 1 // Convert 0-indexed to 1-indexed
-	lastVisible := min(offset+visibleRows, totalRows)
-	if totalRows == 0 {
-		firstVisible = 0
-		lastVisible = 0
-	}
-
-	// Determine scroll indicators
-	var scrollIndicator string
-	hasAbove := offset > 0
-	hasBelow := (offset + visibleRows) < totalRows
-
-	if hasAbove && hasBelow {
-		scrollIndicator = " ↑↓"
-	} else if hasAbove {
-		scrollIndicator = " ↑"
-	} else if hasBelow {
-		scrollIndicator = " ↓"
-	}
-
-	// Use filter-aware title formatting
-	title := p.filter.FormatTitleWithScroll("Pods", ui.Icons.Package, firstVisible, lastVisible, totalRows, scrollIndicator, disconnectedSuffix)
-	p.root.SetTitle(title)
+	p.root.SetTitle(p.tableCtrl.FormatTitleWithScroll("Pods", ui.Icons.Package, totalRows, disconnectedSuffix))
 }

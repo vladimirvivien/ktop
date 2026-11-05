@@ -2,8 +2,8 @@ package pod
 
 import (
 	"fmt"
+	"slices"
 	"strings"
-	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -474,13 +474,7 @@ func (p *DetailPanel) drawSparklines() {
 		combinedDiskRate := p.data.DiskReadRate + p.data.DiskWriteRate
 
 		// Adaptive scaling: track peak, use minimum 512 KB/s baseline
-		if combinedDiskRate > p.peakDiskRate {
-			p.peakDiskRate = combinedDiskRate
-		}
-		effectiveDiskMax := p.peakDiskRate
-		if effectiveDiskMax < 512*1024 { // Min 512 KB/s baseline
-			effectiveDiskMax = 512 * 1024
-		}
+		effectiveDiskMax := ui.AdaptiveRateMax(combinedDiskRate, &p.peakDiskRate, 512*1024)
 		diskNormalized := combinedDiskRate / effectiveDiskMax
 		if diskNormalized > 1 {
 			diskNormalized = 1
@@ -512,27 +506,27 @@ func (p *DetailPanel) drawPodDetailSection() {
 		status := p.data.Pod.Status
 
 		// ServiceAcct
-		p.addDetailRow(p.leftDetailTable, row, "ServiceAcct", spec.ServiceAccountName)
+		ui.AddDetailRow(p.leftDetailTable, row, "ServiceAcct", spec.ServiceAccountName)
 		row++
 
 		// Priority
 		if spec.Priority != nil {
-			p.addDetailRow(p.leftDetailTable, row, "Priority", fmt.Sprintf("%d", *spec.Priority))
+			ui.AddDetailRow(p.leftDetailTable, row, "Priority", fmt.Sprintf("%d", *spec.Priority))
 		} else {
-			p.addDetailRow(p.leftDetailTable, row, "Priority", "default")
+			ui.AddDetailRow(p.leftDetailTable, row, "Priority", "default")
 		}
 		row++
 
 		// QoS Class
-		p.addDetailRow(p.leftDetailTable, row, "QoS", string(status.QOSClass))
+		ui.AddDetailRow(p.leftDetailTable, row, "QoS", string(status.QOSClass))
 		row++
 
 		// DNS Policy
-		p.addDetailRow(p.leftDetailTable, row, "DNSPolicy", string(spec.DNSPolicy))
+		ui.AddDetailRow(p.leftDetailTable, row, "DNSPolicy", string(spec.DNSPolicy))
 		row++
 
 		// Restart Policy
-		p.addDetailRow(p.leftDetailTable, row, "RestartPol", string(spec.RestartPolicy))
+		ui.AddDetailRow(p.leftDetailTable, row, "RestartPol", string(spec.RestartPolicy))
 		row++
 
 		// Termination Grace Period
@@ -540,7 +534,7 @@ func (p *DetailPanel) drawPodDetailSection() {
 		if spec.TerminationGracePeriodSeconds != nil {
 			termGrace = fmt.Sprintf("%ds", *spec.TerminationGracePeriodSeconds)
 		}
-		p.addDetailRow(p.leftDetailTable, row, "TermGrace", termGrace)
+		ui.AddDetailRow(p.leftDetailTable, row, "TermGrace", termGrace)
 		row++
 
 		// Image Pull Policy (from first container)
@@ -548,7 +542,7 @@ func (p *DetailPanel) drawPodDetailSection() {
 		if len(spec.Containers) > 0 {
 			imgPull = string(spec.Containers[0].ImagePullPolicy)
 		}
-		p.addDetailRow(p.leftDetailTable, row, "ImgPull", imgPull)
+		ui.AddDetailRow(p.leftDetailTable, row, "ImgPull", imgPull)
 		row++
 
 		// Scheduler
@@ -556,27 +550,27 @@ func (p *DetailPanel) drawPodDetailSection() {
 		if scheduler == "" {
 			scheduler = "default"
 		}
-		p.addDetailRow(p.leftDetailTable, row, "Scheduler", scheduler)
+		ui.AddDetailRow(p.leftDetailTable, row, "Scheduler", scheduler)
 		row++
 
 		// Node
-		p.addDetailRow(p.leftDetailTable, row, "Node", fmt.Sprintf("%s [yellow][n][-]", pod.Node))
+		ui.AddDetailRow(p.leftDetailTable, row, "Node", fmt.Sprintf("%s [yellow][n][-]", pod.Node))
 		row++
 
 		// Host IP
-		p.addDetailRow(p.leftDetailTable, row, "HostIP", status.HostIP)
+		ui.AddDetailRow(p.leftDetailTable, row, "HostIP", status.HostIP)
 		row++
 
 		// Pod IP
-		p.addDetailRow(p.leftDetailTable, row, "PodIP", pod.IP)
+		ui.AddDetailRow(p.leftDetailTable, row, "PodIP", pod.IP)
 		row++
 
 		// Volumes count
-		p.addDetailRow(p.leftDetailTable, row, "Volumes", fmt.Sprintf("%d", len(spec.Volumes)))
+		ui.AddDetailRow(p.leftDetailTable, row, "Volumes", fmt.Sprintf("%d", len(spec.Volumes)))
 		row++
 
 		// Tolerations count
-		p.addDetailRow(p.leftDetailTable, row, "Tolerations", fmt.Sprintf("%d", len(spec.Tolerations)))
+		ui.AddDetailRow(p.leftDetailTable, row, "Tolerations", fmt.Sprintf("%d", len(spec.Tolerations)))
 		row++
 
 		// NodeSelector
@@ -584,7 +578,7 @@ func (p *DetailPanel) drawPodDetailSection() {
 		if len(spec.NodeSelector) > 0 {
 			nodeSel = fmt.Sprintf("%d keys", len(spec.NodeSelector))
 		}
-		p.addDetailRow(p.leftDetailTable, row, "NodeSel", nodeSel)
+		ui.AddDetailRow(p.leftDetailTable, row, "NodeSel", nodeSel)
 		row++
 
 		// Owner Reference
@@ -608,7 +602,7 @@ func (p *DetailPanel) drawPodDetailSection() {
 				owner = owner[:22] + "..."
 			}
 		}
-		p.addDetailRow(p.leftDetailTable, row, "Owner", owner)
+		ui.AddDetailRow(p.leftDetailTable, row, "Owner", owner)
 		row++
 
 		// Host Namespaces (compact: Net/PID/IPC)
@@ -619,7 +613,7 @@ func (p *DetailPanel) drawPodDetailSection() {
 			return "N"
 		}
 		hostNS := fmt.Sprintf("%s/%s/%s", boolToYN(spec.HostNetwork), boolToYN(spec.HostPID), boolToYN(spec.HostIPC))
-		p.addDetailRow(p.leftDetailTable, row, "HostNS", hostNS)
+		ui.AddDetailRow(p.leftDetailTable, row, "HostNS", hostNS)
 		row++
 
 		// Security Context
@@ -642,12 +636,12 @@ func (p *DetailPanel) drawPodDetailSection() {
 			}
 		}
 		security := fmt.Sprintf("%s:%s Priv:%s", runAsUser, runAsGroup, privileged)
-		p.addDetailRow(p.leftDetailTable, row, "Security", security)
+		ui.AddDetailRow(p.leftDetailTable, row, "Security", security)
 	} else {
 		// Fallback if Pod spec not available
-		p.addDetailRow(p.leftDetailTable, row, "Node", fmt.Sprintf("%s [yellow][n][-]", pod.Node))
+		ui.AddDetailRow(p.leftDetailTable, row, "Node", fmt.Sprintf("%s [yellow][n][-]", pod.Node))
 		row++
-		p.addDetailRow(p.leftDetailTable, row, "PodIP", pod.IP)
+		ui.AddDetailRow(p.leftDetailTable, row, "PodIP", pod.IP)
 	}
 
 	// === CENTER COLUMN TOP: Conditions ===
@@ -686,9 +680,9 @@ func (p *DetailPanel) drawPodDetailSection() {
 			}
 		}
 
-		p.addDetailRow(p.middleDetailTable, row, "Total", fmt.Sprintf("%d", len(p.data.Events)))
+		ui.AddDetailRow(p.middleDetailTable, row, "Total", fmt.Sprintf("%d", len(p.data.Events)))
 		row++
-		p.addDetailRow(p.middleDetailTable, row, "Normal", fmt.Sprintf("%d", normalCount))
+		ui.AddDetailRow(p.middleDetailTable, row, "Normal", fmt.Sprintf("%d", normalCount))
 		row++
 
 		// Warning with color
@@ -696,7 +690,7 @@ func (p *DetailPanel) drawPodDetailSection() {
 		if warningCount > 0 {
 			warningColor = tcell.ColorYellow
 		}
-		p.addDetailRowColor(p.middleDetailTable, row, "Warning", fmt.Sprintf("%d", warningCount), warningColor)
+		ui.AddDetailRowColor(p.middleDetailTable, row, "Warning", fmt.Sprintf("%d", warningCount), warningColor)
 		row++
 
 		if recentWarning != nil {
@@ -704,10 +698,10 @@ func (p *DetailPanel) drawPodDetailSection() {
 			if len(reason) > 18 {
 				reason = reason[:15] + "..."
 			}
-			p.addDetailRow(p.middleDetailTable, row, "Recent", fmt.Sprintf("%s (%s)", reason, formatEventAge(*recentWarning)))
+			ui.AddDetailRow(p.middleDetailTable, row, "Recent", fmt.Sprintf("%s (%s)", reason, ui.FormatEventAge(*recentWarning)))
 		}
 	} else {
-		p.addDetailRow(p.middleDetailTable, row, "Total", "0")
+		ui.AddDetailRow(p.middleDetailTable, row, "Total", "0")
 	}
 
 	// === CENTER COLUMN BOTTOM: Resources ===
@@ -769,14 +763,14 @@ func (p *DetailPanel) drawPodDetailSection() {
 		for k := range labels {
 			labelKeys = append(labelKeys, k)
 		}
-		sortStrings(labelKeys)
+		slices.Sort(labelKeys)
 
 		for _, k := range labelKeys {
 			v := labels[k]
 			if len(v) > 25 {
 				v = v[:22] + "..."
 			}
-			labelsBuilder.WriteString(fmt.Sprintf("[gray]%s:[-] %s\n", truncateKey(k), v))
+			labelsBuilder.WriteString(fmt.Sprintf("[gray]%s:[-] %s\n", ui.TruncateKey(k), v))
 		}
 	}
 	p.labelsTextView.SetText(labelsBuilder.String())
@@ -793,55 +787,17 @@ func (p *DetailPanel) drawPodDetailSection() {
 		for k := range annotations {
 			annotationKeys = append(annotationKeys, k)
 		}
-		sortStrings(annotationKeys)
+		slices.Sort(annotationKeys)
 
 		for _, k := range annotationKeys {
 			v := annotations[k]
 			if len(v) > 25 {
 				v = v[:22] + "..."
 			}
-			annotationsBuilder.WriteString(fmt.Sprintf("[gray]%s:[-] %s\n", truncateKey(k), v))
+			annotationsBuilder.WriteString(fmt.Sprintf("[gray]%s:[-] %s\n", ui.TruncateKey(k), v))
 		}
 	}
 	p.annotationsTextView.SetText(annotationsBuilder.String())
-}
-
-// sortStrings sorts a slice of strings in place
-func sortStrings(s []string) {
-	for i := 0; i < len(s)-1; i++ {
-		for j := i + 1; j < len(s); j++ {
-			if s[i] > s[j] {
-				s[i], s[j] = s[j], s[i]
-			}
-		}
-	}
-}
-
-// truncateKey shortens a label/annotation key for display
-func truncateKey(key string) string {
-	// Remove common prefixes to save space
-	key = strings.TrimPrefix(key, "kubernetes.io/")
-	key = strings.TrimPrefix(key, "app.kubernetes.io/")
-	key = strings.TrimPrefix(key, "pod.kubernetes.io/")
-	if len(key) > 25 {
-		key = key[:22] + "..."
-	}
-	return key
-}
-
-// addDetailRow adds a key-value row to a detail table
-func (p *DetailPanel) addDetailRow(table *tview.Table, row int, key, value string) {
-	// Pad key to minimum width for visual separation
-	paddedKey := fmt.Sprintf("%-10s", key)
-	table.SetCell(row, 0, tview.NewTableCell(paddedKey).SetTextColor(tcell.ColorGray).SetSelectable(false))
-	table.SetCell(row, 1, tview.NewTableCell(value).SetTextColor(tcell.ColorWhite).SetSelectable(false))
-}
-
-// addDetailRowColor adds a key-value row with a specific value color
-func (p *DetailPanel) addDetailRowColor(table *tview.Table, row int, key, value string, color tcell.Color) {
-	paddedKey := fmt.Sprintf("%-10s", key)
-	table.SetCell(row, 0, tview.NewTableCell(paddedKey).SetTextColor(tcell.ColorGray).SetSelectable(false))
-	table.SetCell(row, 1, tview.NewTableCell(value).SetTextColor(color).SetSelectable(false))
 }
 
 // drawContainersTable draws the scrollable containers table
@@ -955,31 +911,6 @@ func (p *DetailPanel) drawContainersTable() {
 	p.containersTable.Select(selectedRow, selectedCol)
 }
 
-// Helper functions
-
-func formatEventAge(event corev1.Event) string {
-	var eventTime time.Time
-	if !event.LastTimestamp.IsZero() {
-		eventTime = event.LastTimestamp.Time
-	} else if !event.EventTime.IsZero() {
-		eventTime = event.EventTime.Time
-	} else if !event.FirstTimestamp.IsZero() {
-		eventTime = event.FirstTimestamp.Time
-	} else {
-		return "?"
-	}
-
-	duration := time.Since(eventTime)
-	if duration < time.Minute {
-		return fmt.Sprintf("%ds", int(duration.Seconds()))
-	} else if duration < time.Hour {
-		return fmt.Sprintf("%dm", int(duration.Minutes()))
-	} else if duration < 24*time.Hour {
-		return fmt.Sprintf("%dh", int(duration.Hours()))
-	}
-	return fmt.Sprintf("%dd", int(duration.Hours()/24))
-}
-
 // DrawFooter draws the footer
 func (p *DetailPanel) DrawFooter(_ interface{}) {}
 
@@ -1016,7 +947,7 @@ func (p *DetailPanel) cycleFocus() {
 	if len(p.focusableItems) == 0 {
 		return
 	}
-	p.focusedChildIdx = (p.focusedChildIdx + 1) % len(p.focusableItems)
+	p.focusedChildIdx = ui.CycleFocus(p.focusedChildIdx, len(p.focusableItems), false)
 	p.updateFocusVisuals()
 	p.notifyFooterContextChange()
 }
@@ -1026,10 +957,7 @@ func (p *DetailPanel) cycleFocusReverse() {
 	if len(p.focusableItems) == 0 {
 		return
 	}
-	p.focusedChildIdx--
-	if p.focusedChildIdx < 0 {
-		p.focusedChildIdx = len(p.focusableItems) - 1
-	}
+	p.focusedChildIdx = ui.CycleFocus(p.focusedChildIdx, len(p.focusableItems), true)
 	p.updateFocusVisuals()
 	p.notifyFooterContextChange()
 }

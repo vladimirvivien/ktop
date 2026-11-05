@@ -402,9 +402,9 @@ func (p *DetailPanel) drawInfoHeader() {
 	// Calculate age from container start time or pod creation
 	age := "n/a"
 	if p.containerStatus != nil && p.containerStatus.State.Running != nil && !p.containerStatus.State.Running.StartedAt.IsZero() {
-		age = formatDuration(time.Since(p.containerStatus.State.Running.StartedAt.Time))
+		age = ui.FormatDuration(time.Since(p.containerStatus.State.Running.StartedAt.Time))
 	} else if p.pod != nil && !p.pod.CreationTimestamp.IsZero() {
-		age = formatDuration(time.Since(p.pod.CreationTimestamp.Time))
+		age = ui.FormatDuration(time.Since(p.pod.CreationTimestamp.Time))
 	}
 
 	// Get restart count
@@ -431,18 +431,6 @@ func (p *DetailPanel) drawInfoHeader() {
 	p.infoHeaderPanel.AddItem(infoText, 0, 1, false)
 }
 
-// formatDuration formats a duration into a human-readable string
-func formatDuration(d time.Duration) string {
-	if d < time.Minute {
-		return fmt.Sprintf("%ds", int(d.Seconds()))
-	} else if d < time.Hour {
-		return fmt.Sprintf("%dm", int(d.Minutes()))
-	} else if d < 24*time.Hour {
-		return fmt.Sprintf("%dh", int(d.Hours()))
-	}
-	return fmt.Sprintf("%dd", int(d.Hours()/24))
-}
-
 func (p *DetailPanel) drawContainerDetail() {
 	p.leftDetailTable.Clear()
 	p.centerDetailTable.Clear()
@@ -459,11 +447,11 @@ func (p *DetailPanel) drawContainerDetail() {
 		if len(image) > 35 {
 			image = image[:32] + "..."
 		}
-		p.addDetailRow(p.leftDetailTable, row, "Image", image)
+		ui.AddDetailRow(p.leftDetailTable, row, "Image", image)
 		row++
 
 		// Image Pull Policy
-		p.addDetailRow(p.leftDetailTable, row, "ImgPull", string(p.containerSpec.ImagePullPolicy))
+		ui.AddDetailRow(p.leftDetailTable, row, "ImgPull", string(p.containerSpec.ImagePullPolicy))
 		row++
 
 		// Working Directory
@@ -471,7 +459,7 @@ func (p *DetailPanel) drawContainerDetail() {
 		if workDir == "" {
 			workDir = "(default)"
 		}
-		p.addDetailRow(p.leftDetailTable, row, "WorkDir", workDir)
+		ui.AddDetailRow(p.leftDetailTable, row, "WorkDir", workDir)
 		row++
 
 		// Command
@@ -482,7 +470,7 @@ func (p *DetailPanel) drawContainerDetail() {
 				cmd = cmd[:27] + "..."
 			}
 		}
-		p.addDetailRow(p.leftDetailTable, row, "Command", cmd)
+		ui.AddDetailRow(p.leftDetailTable, row, "Command", cmd)
 		row++
 
 		// Args
@@ -493,7 +481,7 @@ func (p *DetailPanel) drawContainerDetail() {
 				args = args[:27] + "..."
 			}
 		}
-		p.addDetailRow(p.leftDetailTable, row, "Args", args)
+		ui.AddDetailRow(p.leftDetailTable, row, "Args", args)
 		row++
 
 		// Ports
@@ -510,18 +498,18 @@ func (p *DetailPanel) drawContainerDetail() {
 			if len(portsStr) > 30 {
 				portsStr = portsStr[:27] + "..."
 			}
-			p.addDetailRow(p.leftDetailTable, row, "Ports", portsStr)
+			ui.AddDetailRow(p.leftDetailTable, row, "Ports", portsStr)
 		} else {
-			p.addDetailRow(p.leftDetailTable, row, "Ports", "(none)")
+			ui.AddDetailRow(p.leftDetailTable, row, "Ports", "(none)")
 		}
 		row++
 
 		// EnvVars (count only per user request)
-		p.addDetailRow(p.leftDetailTable, row, "EnvVars", fmt.Sprintf("%d", len(p.containerSpec.Env)))
+		ui.AddDetailRow(p.leftDetailTable, row, "EnvVars", fmt.Sprintf("%d", len(p.containerSpec.Env)))
 		row++
 
 		// VolMounts (count only)
-		p.addDetailRow(p.leftDetailTable, row, "VolMounts", fmt.Sprintf("%d", len(p.containerSpec.VolumeMounts)))
+		ui.AddDetailRow(p.leftDetailTable, row, "VolMounts", fmt.Sprintf("%d", len(p.containerSpec.VolumeMounts)))
 	}
 
 	// === CENTER COLUMN: State Details ===
@@ -543,7 +531,7 @@ func (p *DetailPanel) drawContainerDetail() {
 			state = "Terminated"
 			stateColor = tcell.ColorRed
 		}
-		p.addDetailRowColor(p.centerDetailTable, row, "State", state, stateColor)
+		ui.AddDetailRowColor(p.centerDetailTable, row, "State", state, stateColor)
 		row++
 
 		// Started At
@@ -551,7 +539,7 @@ func (p *DetailPanel) drawContainerDetail() {
 		if p.containerStatus.State.Running != nil && !p.containerStatus.State.Running.StartedAt.IsZero() {
 			startedAt = p.containerStatus.State.Running.StartedAt.Format("2006-01-02 15:04")
 		}
-		p.addDetailRow(p.centerDetailTable, row, "Started", startedAt)
+		ui.AddDetailRow(p.centerDetailTable, row, "Started", startedAt)
 		row++
 
 		// Ready
@@ -561,7 +549,7 @@ func (p *DetailPanel) drawContainerDetail() {
 			readyStr = "Yes"
 			readyColor = tcell.ColorGreen
 		}
-		p.addDetailRowColor(p.centerDetailTable, row, "Ready", readyStr, readyColor)
+		ui.AddDetailRowColor(p.centerDetailTable, row, "Ready", readyStr, readyColor)
 		row++
 
 		// Restarts
@@ -572,7 +560,7 @@ func (p *DetailPanel) drawContainerDetail() {
 		if p.containerStatus.RestartCount > 5 {
 			restartColor = tcell.ColorRed
 		}
-		p.addDetailRowColor(p.centerDetailTable, row, "Restarts", fmt.Sprintf("%d", p.containerStatus.RestartCount), restartColor)
+		ui.AddDetailRowColor(p.centerDetailTable, row, "Restarts", fmt.Sprintf("%d", p.containerStatus.RestartCount), restartColor)
 		row++
 
 		// ExitCode (if terminated)
@@ -582,7 +570,7 @@ func (p *DetailPanel) drawContainerDetail() {
 		} else if p.containerStatus.LastTerminationState.Terminated != nil {
 			exitCode = fmt.Sprintf("%d (last)", p.containerStatus.LastTerminationState.Terminated.ExitCode)
 		}
-		p.addDetailRow(p.centerDetailTable, row, "ExitCode", exitCode)
+		ui.AddDetailRow(p.centerDetailTable, row, "ExitCode", exitCode)
 		row++
 
 		// Reason
@@ -595,7 +583,7 @@ func (p *DetailPanel) drawContainerDetail() {
 		if len(reason) > 25 {
 			reason = reason[:22] + "..."
 		}
-		p.addDetailRow(p.centerDetailTable, row, "Reason", reason)
+		ui.AddDetailRow(p.centerDetailTable, row, "Reason", reason)
 		row++
 
 		// Message
@@ -608,7 +596,7 @@ func (p *DetailPanel) drawContainerDetail() {
 		if len(message) > 25 {
 			message = message[:22] + "..."
 		}
-		p.addDetailRow(p.centerDetailTable, row, "Message", message)
+		ui.AddDetailRow(p.centerDetailTable, row, "Message", message)
 	}
 
 	// === RIGHT COLUMN: Probes & Resources ===
@@ -618,15 +606,15 @@ func (p *DetailPanel) drawContainerDetail() {
 
 	if p.containerSpec != nil {
 		// Liveness Probe
-		p.addDetailRow(p.rightDetailTable, row, "Liveness", p.formatProbe(p.containerSpec.LivenessProbe))
+		ui.AddDetailRow(p.rightDetailTable, row, "Liveness", p.formatProbe(p.containerSpec.LivenessProbe))
 		row++
 
 		// Readiness Probe
-		p.addDetailRow(p.rightDetailTable, row, "Readiness", p.formatProbe(p.containerSpec.ReadinessProbe))
+		ui.AddDetailRow(p.rightDetailTable, row, "Readiness", p.formatProbe(p.containerSpec.ReadinessProbe))
 		row++
 
 		// Startup Probe
-		p.addDetailRow(p.rightDetailTable, row, "Startup", p.formatProbe(p.containerSpec.StartupProbe))
+		ui.AddDetailRow(p.rightDetailTable, row, "Startup", p.formatProbe(p.containerSpec.StartupProbe))
 		row++
 
 		// Blank row
@@ -643,7 +631,7 @@ func (p *DetailPanel) drawContainerDetail() {
 			cpuUse = "n/a"
 			cpuUseColor = tcell.ColorGray
 		}
-		p.addDetailRowColor(p.rightDetailTable, row, "CPU Use", cpuUse, cpuUseColor)
+		ui.AddDetailRowColor(p.rightDetailTable, row, "CPU Use", cpuUse, cpuUseColor)
 		row++
 
 		// Mem Usage (actual)
@@ -653,7 +641,7 @@ func (p *DetailPanel) drawContainerDetail() {
 			memUse = "n/a"
 			memUseColor = tcell.ColorGray
 		}
-		p.addDetailRowColor(p.rightDetailTable, row, "Mem Use", memUse, memUseColor)
+		ui.AddDetailRowColor(p.rightDetailTable, row, "Mem Use", memUse, memUseColor)
 		row++
 
 		// CPU Request
@@ -661,7 +649,7 @@ func (p *DetailPanel) drawContainerDetail() {
 		if p.containerSpec.Resources.Requests.Cpu() != nil && !p.containerSpec.Resources.Requests.Cpu().IsZero() {
 			cpuReq = fmt.Sprintf("%dm", p.containerSpec.Resources.Requests.Cpu().MilliValue())
 		}
-		p.addDetailRow(p.rightDetailTable, row, "CPU Req", cpuReq)
+		ui.AddDetailRow(p.rightDetailTable, row, "CPU Req", cpuReq)
 		row++
 
 		// CPU Limit
@@ -669,7 +657,7 @@ func (p *DetailPanel) drawContainerDetail() {
 		if p.containerSpec.Resources.Limits.Cpu() != nil && !p.containerSpec.Resources.Limits.Cpu().IsZero() {
 			cpuLim = fmt.Sprintf("%dm", p.containerSpec.Resources.Limits.Cpu().MilliValue())
 		}
-		p.addDetailRow(p.rightDetailTable, row, "CPU Lim", cpuLim)
+		ui.AddDetailRow(p.rightDetailTable, row, "CPU Lim", cpuLim)
 		row++
 
 		// Memory Request
@@ -677,7 +665,7 @@ func (p *DetailPanel) drawContainerDetail() {
 		if p.containerSpec.Resources.Requests.Memory() != nil && !p.containerSpec.Resources.Requests.Memory().IsZero() {
 			memReq = ui.FormatBytes(p.containerSpec.Resources.Requests.Memory().Value())
 		}
-		p.addDetailRow(p.rightDetailTable, row, "Mem Req", memReq)
+		ui.AddDetailRow(p.rightDetailTable, row, "Mem Req", memReq)
 		row++
 
 		// Memory Limit
@@ -685,7 +673,7 @@ func (p *DetailPanel) drawContainerDetail() {
 		if p.containerSpec.Resources.Limits.Memory() != nil && !p.containerSpec.Resources.Limits.Memory().IsZero() {
 			memLim = ui.FormatBytes(p.containerSpec.Resources.Limits.Memory().Value())
 		}
-		p.addDetailRow(p.rightDetailTable, row, "Mem Lim", memLim)
+		ui.AddDetailRow(p.rightDetailTable, row, "Mem Lim", memLim)
 	}
 }
 
@@ -717,18 +705,6 @@ func (p *DetailPanel) formatProbe(probe *corev1.Probe) string {
 
 func (p *DetailPanel) addDetailHeader(table *tview.Table, row int, title string) {
 	table.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("[::b]%s[::-]", title)).SetTextColor(tcell.ColorAqua).SetSelectable(false))
-}
-
-func (p *DetailPanel) addDetailRow(table *tview.Table, row int, key, value string) {
-	paddedKey := fmt.Sprintf("%-10s", key)
-	table.SetCell(row, 0, tview.NewTableCell(paddedKey).SetTextColor(tcell.ColorGray).SetSelectable(false))
-	table.SetCell(row, 1, tview.NewTableCell(value).SetTextColor(tcell.ColorWhite).SetSelectable(false))
-}
-
-func (p *DetailPanel) addDetailRowColor(table *tview.Table, row int, key, value string, color tcell.Color) {
-	paddedKey := fmt.Sprintf("%-10s", key)
-	table.SetCell(row, 0, tview.NewTableCell(paddedKey).SetTextColor(tcell.ColorGray).SetSelectable(false))
-	table.SetCell(row, 1, tview.NewTableCell(value).SetTextColor(color).SetSelectable(false))
 }
 
 // updateLogsTitle updates the logs panel title with line count and streaming status
@@ -1242,7 +1218,7 @@ func (p *DetailPanel) cycleFocus() {
 		return
 	}
 
-	p.focusedChildIdx = (p.focusedChildIdx + 1) % len(p.focusableItems)
+	p.focusedChildIdx = ui.CycleFocus(p.focusedChildIdx, len(p.focusableItems), false)
 	p.updateFocusVisuals()
 
 	// Set application focus to the new item

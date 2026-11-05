@@ -2,7 +2,12 @@ package ui
 
 import (
 	"fmt"
+	"strings"
+	"time"
 
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
 
@@ -31,6 +36,98 @@ func FormatMemory(qty *resource.Quantity) string {
 
 	// Display in Mi for everything else
 	return fmt.Sprintf("%4dMi", mi) // Fixed width: 4 digits + "Mi"
+}
+
+// FormatCPU formats a CPU quantity in millicores (e.g., "250m" or "n/a")
+func FormatCPU(q *resource.Quantity) string {
+	if q == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%dm", q.MilliValue())
+}
+
+// FormatDuration formats a duration into a concise human-readable string (e.g. "45s", "12m", "3h", "5d")
+func FormatDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	} else if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	} else if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+// FormatEventAge returns human-readable age of an event (e.g. "5m", "2h", "3d" or "?")
+func FormatEventAge(event corev1.Event) string {
+	var eventTime time.Time
+	if !event.LastTimestamp.IsZero() {
+		eventTime = event.LastTimestamp.Time
+	} else if !event.EventTime.IsZero() {
+		eventTime = event.EventTime.Time
+	} else if !event.FirstTimestamp.IsZero() {
+		eventTime = event.FirstTimestamp.Time
+	} else {
+		return "?"
+	}
+	return FormatDuration(time.Since(eventTime))
+}
+
+// TruncateKey shortens a Kubernetes label or annotation key for compact display
+func TruncateKey(key string) string {
+	key = strings.TrimPrefix(key, "kubernetes.io/")
+	key = strings.TrimPrefix(key, "node.kubernetes.io/")
+	key = strings.TrimPrefix(key, "topology.kubernetes.io/")
+	if len(key) > 25 {
+		key = key[:22] + "..."
+	}
+	return key
+}
+
+// AddDetailRow adds a key-value row with default white text to a detail table
+func AddDetailRow(table *tview.Table, row int, key, value string) {
+	AddDetailRowColor(table, row, key, value, tcell.ColorWhite)
+}
+
+// AddDetailRowColor adds a key-value row with custom value color to a detail table
+func AddDetailRowColor(table *tview.Table, row int, key, value string, color tcell.Color) {
+	paddedKey := fmt.Sprintf("%-10s", key)
+	table.SetCell(row, 0, tview.NewTableCell(paddedKey).SetTextColor(tcell.ColorGray).SetSelectable(false))
+	table.SetCell(row, 1, tview.NewTableCell(value).SetTextColor(color).SetSelectable(false))
+}
+
+// AdaptiveRateMax updates a running peak rate and returns an effective maximum
+// rate scaled with a minimum baseline (default 512 KB/s).
+func AdaptiveRateMax(currentRate float64, peakRate *float64, minBaseline float64) float64 {
+	if minBaseline <= 0 {
+		minBaseline = 512 * 1024
+	}
+	if currentRate > *peakRate {
+		*peakRate = currentRate
+	}
+	effectiveMax := *peakRate
+	if effectiveMax < minBaseline {
+		effectiveMax = minBaseline
+	}
+	return effectiveMax
+}
+
+// CycleFocus moves focus index forward or backward within a slice of items
+func CycleFocus(currentIdx int, count int, reverse bool) int {
+	if count <= 0 {
+		return 0
+	}
+	if reverse {
+		next := currentIdx - 1
+		if next < 0 {
+			next = count - 1
+		}
+		return next
+	}
+	return (currentIdx + 1) % count
 }
 
 // FormatBytesRate formats bytes/sec as human-readable (e.g., "1.2M/s")

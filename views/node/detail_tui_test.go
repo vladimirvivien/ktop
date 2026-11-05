@@ -1,8 +1,10 @@
 package node
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/model"
 	corev1 "k8s.io/api/core/v1"
@@ -106,6 +108,122 @@ func TestNodeDetailPanel_RenderTUI(t *testing.T) {
 	} {
 		if !ts.ContainsText(expected) {
 			t.Fatalf("expected %q in rendered NodeDetailPanel, got:\n%s", expected, ts.Text())
+		}
+	}
+}
+
+func TestNodeDetailPanel_PodsTableSortAndFilter(t *testing.T) {
+	ts, err := ui.NewTestScreen(140, 42)
+	if err != nil {
+		t.Fatalf("NewTestScreen failed: %v", err)
+	}
+	t.Cleanup(ts.Close)
+
+	panel := NewDetailPanel()
+	detailData := &model.NodeDetailData{
+		NodeModel: &model.NodeModel{
+			Name: "worker-node-1",
+		},
+		PodsOnNode: []*model.PodModel{
+			{
+				Namespace:          "default",
+				Name:               "api-gateway",
+				Status:             "Running",
+				ReadyContainers:    2,
+				TotalContainers:    2,
+				Restarts:           1,
+				TimeSince:          "3h",
+				PodUsageCpuQty:     resource.NewMilliQuantity(350, resource.DecimalSI),
+				PodUsageMemQty:     resource.NewQuantity(400*1024*1024, resource.BinarySI),
+			},
+			{
+				Namespace:          "kube-system",
+				Name:               "coredns",
+				Status:             "Running",
+				ReadyContainers:    1,
+				TotalContainers:    1,
+				Restarts:           2,
+				TimeSince:          "5d",
+				PodUsageCpuQty:     resource.NewMilliQuantity(900, resource.DecimalSI),
+				PodUsageMemQty:     resource.NewQuantity(120*1024*1024, resource.BinarySI),
+			},
+			{
+				Namespace:          "prod",
+				Name:               "backend-worker",
+				Status:             "Running",
+				ReadyContainers:    1,
+				TotalContainers:    1,
+				Restarts:           0,
+				TimeSince:          "1d",
+				PodUsageCpuQty:     resource.NewMilliQuantity(150, resource.DecimalSI),
+				PodUsageMemQty:     resource.NewQuantity(800*1024*1024, resource.BinarySI),
+			},
+		},
+	}
+
+	panel.DrawBody(detailData)
+	root := panel.GetRootView()
+	ts.Draw(root)
+	ts.Draw(root)
+
+	initial := ts.Text()
+	for _, name := range []string{"api-gateway", "coredns", "backend-worker"} {
+		if !strings.Contains(initial, name) {
+			t.Fatalf("expected pod %q in initial render, got:\n%s", name, initial)
+		}
+	}
+
+	// Default sort is NAME ascending: api-gateway < backend-worker < coredns
+	posAPI := strings.Index(initial, "api-gateway")
+	posBackend := strings.Index(initial, "backend-worker")
+	posCore := strings.Index(initial, "coredns")
+	if !(posAPI < posBackend && posBackend < posCore) {
+		t.Fatalf("expected NAME ascending (api-gateway < backend-worker < coredns), got positions %d, %d, %d in:\n%s", posAPI, posBackend, posCore, initial)
+	}
+
+	// 1. Sort by CPU ascending ('c') then descending ('c')
+	ts.SendRune(panel.podsTable, 'c')
+	ts.SendRune(panel.podsTable, 'c')
+	cpuDesc := ts.Text()
+	posCore = strings.Index(cpuDesc, "coredns")
+	posAPI = strings.Index(cpuDesc, "api-gateway")
+	posBackend = strings.Index(cpuDesc, "backend-worker")
+	if !(posCore < posAPI && posAPI < posBackend) {
+		t.Fatalf("expected CPU descending (coredns 900m < api-gateway 350m < backend-worker 150m), got:\n%s", cpuDesc)
+	}
+
+	// 2. Sort by MEMORY ('m') ascending then descending ('m')
+	ts.SendRune(panel.podsTable, 'm')
+	ts.SendRune(panel.podsTable, 'm')
+	memDesc := ts.Text()
+	posBackend = strings.Index(memDesc, "backend-worker")
+	posAPI = strings.Index(memDesc, "api-gateway")
+	posCore = strings.Index(memDesc, "coredns")
+	if !(posBackend < posAPI && posAPI < posCore) {
+		t.Fatalf("expected MEM descending (backend-worker 800Mi < api-gateway 400Mi < coredns 120Mi), got:\n%s", memDesc)
+	}
+
+	// 3. Test filtering with '/'
+	ts.SendRune(panel.podsTable, '/')
+	for _, ch := range "kube" {
+		ts.SendRune(panel.podsTable, ch)
+	}
+	ts.SendKey(panel.podsTable, tcell.KeyEnter, 0, 0)
+
+	filtered := ts.Text()
+	if !strings.Contains(filtered, "coredns") {
+		t.Fatalf("expected filtered view to contain coredns, got:\n%s", filtered)
+	}
+	if strings.Contains(filtered, "api-gateway") || strings.Contains(filtered, "backend-worker") {
+		t.Fatalf("expected filtered view NOT to contain api-gateway or backend-worker, got:\n%s", filtered)
+	}
+
+	// 4. Test ESC clearing filter
+	ts.SendKey(panel.podsTable, tcell.KeyEscape, 0, 0)
+	cleared := ts.Text()
+	for _, name := range []string{"api-gateway", "coredns", "backend-worker"} {
+		if !strings.Contains(cleared, name) {
+			t.Fatalf("expected pod %q restored after Esc clears filter, got:\n%s", name, cleared)
 		}
 	}
 }
