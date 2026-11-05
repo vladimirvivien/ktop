@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -88,7 +89,7 @@ func NewKtopCmd() *cobra.Command {
 	cmd.Flags().BoolVarP(&o.allNamespaces, "all-namespaces", "A", false, "If true, display metrics for all accessible namespaces")
 	cmd.Flags().StringVar(&o.nodeColumns, "node-columns", "", "Comma-separated list of node columns to display (e.g. 'NAME,CPU,MEM')")
 	cmd.Flags().StringVar(&o.podColumns, "pod-columns", "", "Comma-separated list of pod columns to display (e.g. 'NAMESPACE,POD,STATUS')")
-	cmd.Flags().BoolVar(&o.showAllColumns, "show-all-columns", true, "If true, show all columns (default)")
+	cmd.Flags().BoolVar(&o.showAllColumns, "show-all-columns", false, "If true, show all columns")
 
 	// Metrics source flags
 	cmd.Flags().StringVar(&o.metricsSource, "metrics-source", "prometheus",
@@ -178,6 +179,25 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Load configuration from ~/.ktop/config.yaml if present; create with defaults if absent
+	appConfig, appConfigErr := config.LoadAppConfig()
+	if appConfig == nil && appConfigErr == nil {
+		appConfig = config.DefaultAppConfig()
+		if err := config.SaveAppConfig(appConfig); err != nil {
+			slog.Warn("failed to initialize default config file", "error", err)
+		}
+	}
+
+	// Apply logging settings from config if not overridden by CLI flags
+	if appConfig != nil {
+		if !c.Flags().Changed("log-level") && appConfig.Logging.Level != "" {
+			o.logLevel = appConfig.Logging.Level
+		}
+		if !c.Flags().Changed("log-format") && appConfig.Logging.Format != "" {
+			o.logFormat = appConfig.Logging.Format
+		}
+	}
+
 	// Initialize structured logging before any other work so subsequent
 	// diagnostics land in ~/.ktop/ktop.log. A failure here is non-fatal:
 	// ktop continues with logging silenced rather than letting slog
@@ -192,6 +212,10 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	}
 	defer func() { _ = logCloser.Close() }()
 
+	if appConfigErr != nil {
+		slog.Warn("failed to load ktop config file", "error", appConfigErr)
+	}
+
 	slog.Info("ktop starting",
 		"version", buildinfo.Version,
 		"log_level", o.logLevel,
@@ -200,6 +224,25 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 
 	if o.allNamespaces {
 		o.namespace = k8s.AllNamespaces
+	}
+
+	// Apply metrics settings from config if not overridden by CLI flags
+	if appConfig != nil {
+		if !c.Flags().Changed("metrics-source") && appConfig.Metrics.Source != "" {
+			o.metricsSource = appConfig.Metrics.Source
+		}
+		if !c.Flags().Changed("prometheus-scrape-interval") && appConfig.Metrics.ScrapeInterval != "" {
+			o.prometheusScrapeInterval = appConfig.Metrics.ScrapeInterval
+		}
+		if !c.Flags().Changed("prometheus-retention") && appConfig.Metrics.Retention != "" {
+			o.prometheusRetention = appConfig.Metrics.Retention
+		}
+		if !c.Flags().Changed("prometheus-max-samples") && appConfig.Metrics.MaxSamples > 0 {
+			o.prometheusMaxSamples = appConfig.Metrics.MaxSamples
+		}
+		if !c.Flags().Changed("prometheus-components") && len(appConfig.Metrics.Components) > 0 {
+			o.prometheusComponents = appConfig.Metrics.Components
+		}
 	}
 
 	// Load configuration with defaults
@@ -280,16 +323,37 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	app.WelcomeBanner()
 
 	// Process column options
-	nodeColumns := []string{}
-	if o.nodeColumns != "" {
-		nodeColumns = strings.Split(o.nodeColumns, ",")
-		o.showAllColumns = false
+	var nodeColumns []string
+	var podColumns []string
+
+	if o.showAllColumns {
+		nodeColumns = slices.Clone(config.AllNodeColumns)
+		podColumns = slices.Clone(config.AllPodColumns)
+	} else {
+		// Node columns: CLI flag > config.yaml > DefaultNodeColumns fallback
+		if o.nodeColumns != "" {
+			nodeColumns = config.NormalizeColumns(strings.Split(o.nodeColumns, ","))
+		} else if appConfig != nil && len(appConfig.UI.Overview.NodeCols) > 0 {
+			nodeColumns = config.NormalizeColumns(appConfig.UI.Overview.NodeCols)
+		} else {
+			nodeColumns = slices.Clone(config.DefaultNodeColumns)
+		}
+
+		// Pod columns: CLI flag > config.yaml > DefaultPodColumns fallback
+		if o.podColumns != "" {
+			podColumns = config.NormalizeColumns(strings.Split(o.podColumns, ","))
+		} else if appConfig != nil && len(appConfig.UI.Overview.PodCols) > 0 {
+			podColumns = config.NormalizeColumns(appConfig.UI.Overview.PodCols)
+		} else {
+			podColumns = slices.Clone(config.DefaultPodColumns)
+		}
 	}
 
-	podColumns := []string{}
-	if o.podColumns != "" {
-		podColumns = strings.Split(o.podColumns, ",")
-		o.showAllColumns = false
+	// Persist CLI flag overrides to ~/.ktop/config.yaml
+	if c.Flags().Changed("node-columns") || c.Flags().Changed("pod-columns") {
+		if err := config.SaveOverviewColumns(nodeColumns, podColumns); err != nil {
+			slog.Warn("failed to persist column configuration from flags", "error", err)
+		}
 	}
 
 	// Create a new overview page with column options

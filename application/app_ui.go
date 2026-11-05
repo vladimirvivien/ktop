@@ -34,6 +34,10 @@ type appPanel struct {
 	toastMutex          sync.Mutex
 	toastButtonCallback ui.ToastCallback // Callback for toast button presses
 
+	// Modal page tracking
+	currentModalID string
+	modalMutex     sync.Mutex
+
 	// Namespace filter
 	namespaceFilter         *ui.FilterState
 	namespaceFilterCallback func(namespace string) // Callback when namespace filter changes
@@ -182,6 +186,40 @@ func (p *appPanel) getPagesWidget() *tview.Pages {
 
 func (p *appPanel) showModalView(t tview.Primitive) {
 	p.tviewApp.SetRoot(t, false)
+}
+
+// showModalPage displays a modal view overlaying the main page
+func (p *appPanel) showModalPage(name string, view tview.Primitive) {
+	p.modalMutex.Lock()
+	p.currentModalID = name
+	p.modalMutex.Unlock()
+
+	p.root.AddPage(name, view, true, true)
+	p.tviewApp.SetFocus(view)
+}
+
+// dismissModalPage removes a modal overlay and restores focus
+func (p *appPanel) dismissModalPage(name string) {
+	p.modalMutex.Lock()
+	if p.currentModalID == name {
+		p.currentModalID = ""
+	}
+	p.modalMutex.Unlock()
+
+	p.root.RemovePage(name)
+	p.root.SwitchToPage("main")
+	if p.focusRestorationCallback != nil {
+		p.focusRestorationCallback()
+	} else {
+		p.tviewApp.SetFocus(p.root)
+	}
+}
+
+// hasActiveModalPage returns whether a modal page overlay is active
+func (p *appPanel) hasActiveModalPage() bool {
+	p.modalMutex.Lock()
+	defer p.modalMutex.Unlock()
+	return p.currentModalID != ""
 }
 
 // setToastButtonCallback sets the callback for toast button presses

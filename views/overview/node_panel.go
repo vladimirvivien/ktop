@@ -61,6 +61,33 @@ func (p *nodePanel) SetOnNodeSelected(callback NodeSelectedCallback) {
 	p.onNodeSelected = callback
 }
 
+// SetOnConfigureColumns sets the callback when 'C' is pressed
+func (p *nodePanel) SetOnConfigureColumns(callback func()) {
+	if p.tableCtrl != nil {
+		p.tableCtrl.SetOnConfigureColumns(callback)
+	}
+}
+
+// GetVisibleColumns returns currently visible column names
+func (p *nodePanel) GetVisibleColumns() []string {
+	return p.listCols
+}
+
+// SetVisibleColumns updates the visible columns and immediately redraws the table
+func (p *nodePanel) SetVisibleColumns(cols []string) {
+	p.listCols = cols
+	if p.list != nil {
+		p.list.Clear()
+		p.DrawHeader(cols)
+		if len(p.currentData) > 0 {
+			p.DrawBody(p.currentData)
+		}
+	}
+	if p.app != nil {
+		p.app.Refresh()
+	}
+}
+
 // getNodeNameFromRow returns the node name from the given row index
 func (p *nodePanel) getNodeNameFromRow(row int) string {
 	// Row 0 is header, data starts at row 1

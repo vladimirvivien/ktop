@@ -1,9 +1,13 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/vladimirvivien/ktop/internal/userdir"
 	"github.com/vladimirvivien/ktop/prom"
 )
 
@@ -454,5 +458,180 @@ func TestParseComponents_RoundTrip(t *testing.T) {
 		if output[i] != expected {
 			t.Errorf("Round trip failed: expected '%s' at index %d, got '%s'", expected, i, output[i])
 		}
+	}
+}
+
+func TestDefaultAppConfig(t *testing.T) {
+	cfg := DefaultAppConfig()
+	if cfg == nil {
+		t.Fatal("expected non-nil AppConfig")
+	}
+
+	if cfg.Metrics.Source != "prometheus" {
+		t.Errorf("expected source prometheus, got %s", cfg.Metrics.Source)
+	}
+	if cfg.Metrics.ScrapeInterval != "5s" {
+		t.Errorf("expected scrape_interval 5s, got %s", cfg.Metrics.ScrapeInterval)
+	}
+	if cfg.Metrics.Retention != "1h" {
+		t.Errorf("expected retention 1h, got %s", cfg.Metrics.Retention)
+	}
+	if cfg.Metrics.MaxSamples != 10000 {
+		t.Errorf("expected max_samples 10000, got %d", cfg.Metrics.MaxSamples)
+	}
+	if !slices.Equal(cfg.Metrics.Components, []string{"kubelet", "cadvisor"}) {
+		t.Errorf("unexpected components: %v", cfg.Metrics.Components)
+	}
+	if cfg.Logging.Level != "info" || cfg.Logging.Format != "text" {
+		t.Errorf("unexpected logging config: %+v", cfg.Logging)
+	}
+	if !slices.Equal(cfg.UI.Overview.NodeCols, DefaultNodeColumns) {
+		t.Errorf("unexpected default node columns: %v", cfg.UI.Overview.NodeCols)
+	}
+	if !slices.Equal(cfg.UI.Overview.PodCols, DefaultPodColumns) {
+		t.Errorf("unexpected default pod columns: %v", cfg.UI.Overview.PodCols)
+	}
+}
+
+func TestNormalizeColumns(t *testing.T) {
+	input := []string{" name ", "cpu", "  MEM  ", ""}
+	expected := []string{"NAME", "CPU", "MEM"}
+	got := NormalizeColumns(input)
+	if !slices.Equal(got, expected) {
+		t.Errorf("expected %v, got %v", expected, got)
+	}
+}
+
+func TestAppConfig_LoadNonExistent(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(userdir.EnvVar, tmpDir)
+
+	cfg, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("unexpected error on non-existent config: %v", err)
+	}
+	if cfg != nil {
+		t.Fatalf("expected nil config when file does not exist, got %+v", cfg)
+	}
+}
+
+func TestAppConfig_SaveAndLoadRoundTrip(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(userdir.EnvVar, tmpDir)
+
+	customCfg := &AppConfig{
+		UI: UIConfig{
+			Overview: OverviewUIConfig{
+				NodeCols: []string{"NAME", "CPU", "MEM"},
+				PodCols:  []string{"POD", "STATUS", "CPU"},
+			},
+		},
+		Metrics: MetricsConfig{
+			Source:         "metrics-server",
+			ScrapeInterval: "10s",
+			Retention:      "30m",
+			MaxSamples:     5000,
+			Components:     []string{"kubelet"},
+		},
+		Logging: LoggingConfig{
+			Level:  "debug",
+			Format: "json",
+		},
+	}
+
+	if err := SaveAppConfig(customCfg); err != nil {
+		t.Fatalf("SaveAppConfig failed: %v", err)
+	}
+
+	loaded, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig failed: %v", err)
+	}
+	if loaded == nil {
+		t.Fatal("expected non-nil loaded config")
+	}
+
+	if !slices.Equal(loaded.UI.Overview.NodeCols, []string{"NAME", "CPU", "MEM"}) {
+		t.Errorf("node cols mismatch: %v", loaded.UI.Overview.NodeCols)
+	}
+	if !slices.Equal(loaded.UI.Overview.PodCols, []string{"POD", "STATUS", "CPU"}) {
+		t.Errorf("pod cols mismatch: %v", loaded.UI.Overview.PodCols)
+	}
+	if loaded.Metrics.Source != "metrics-server" {
+		t.Errorf("metrics source mismatch: %s", loaded.Metrics.Source)
+	}
+	if loaded.Logging.Level != "debug" || loaded.Logging.Format != "json" {
+		t.Errorf("logging mismatch: %+v", loaded.Logging)
+	}
+}
+
+func TestSaveOverviewColumns(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(userdir.EnvVar, tmpDir)
+
+	// Case 1: file does not exist initially -> creates with defaults + overridden columns
+	if err := SaveOverviewColumns([]string{"NAME", "STATUS"}, nil); err != nil {
+		t.Fatalf("SaveOverviewColumns failed: %v", err)
+	}
+
+	cfg, err := LoadAppConfig()
+	if err != nil || cfg == nil {
+		t.Fatalf("failed to load created config: %v", err)
+	}
+
+	if !slices.Equal(cfg.UI.Overview.NodeCols, []string{"NAME", "STATUS"}) {
+		t.Errorf("expected node cols [NAME, STATUS], got %v", cfg.UI.Overview.NodeCols)
+	}
+	if !slices.Equal(cfg.UI.Overview.PodCols, DefaultPodColumns) {
+		t.Errorf("expected default pod cols, got %v", cfg.UI.Overview.PodCols)
+	}
+	if cfg.Metrics.Source != "prometheus" {
+		t.Errorf("expected default metrics source prometheus, got %s", cfg.Metrics.Source)
+	}
+
+	// Case 2: update pod columns only -> node columns & metrics preserved
+	if err := SaveOverviewColumns(nil, []string{"NAMESPACE", "POD"}); err != nil {
+		t.Fatalf("SaveOverviewColumns update failed: %v", err)
+	}
+
+	updated, err := LoadAppConfig()
+	if err != nil || updated == nil {
+		t.Fatalf("failed to load updated config: %v", err)
+	}
+	if !slices.Equal(updated.UI.Overview.NodeCols, []string{"NAME", "STATUS"}) {
+		t.Errorf("node cols should be preserved: %v", updated.UI.Overview.NodeCols)
+	}
+	if !slices.Equal(updated.UI.Overview.PodCols, []string{"NAMESPACE", "POD"}) {
+		t.Errorf("pod cols should be updated: %v", updated.UI.Overview.PodCols)
+	}
+}
+
+func TestAppConfig_EmptyColumnsYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv(userdir.EnvVar, tmpDir)
+
+	yamlContent := []byte(`
+ui:
+  overview:
+    node_cols: []
+    pod_cols: []
+metrics:
+  source: prometheus
+`)
+	configFile := filepath.Join(tmpDir, ConfigFileName)
+	if err := os.WriteFile(configFile, yamlContent, 0o600); err != nil {
+		t.Fatalf("write temp config failed: %v", err)
+	}
+
+	cfg, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig failed: %v", err)
+	}
+	if cfg == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if len(cfg.UI.Overview.NodeCols) != 0 || len(cfg.UI.Overview.PodCols) != 0 {
+		t.Errorf("expected empty slices for node and pod cols, got %v and %v",
+			cfg.UI.Overview.NodeCols, cfg.UI.Overview.PodCols)
 	}
 }

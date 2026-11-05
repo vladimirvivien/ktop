@@ -48,7 +48,10 @@ func (p *clusterSummaryPanel) GetTitle() string {
 
 func (p *clusterSummaryPanel) Layout(data any) {
 	// Detect metrics source type
-	metricsSource := p.app.GetMetricsSource()
+	var metricsSource metrics.MetricsSource
+	if p.app != nil {
+		metricsSource = p.app.GetMetricsSource()
+	}
 	if metricsSource != nil {
 		info := metricsSource.GetSourceInfo()
 		p.prometheusMode = (info.Type == metrics.SourceTypePrometheus)

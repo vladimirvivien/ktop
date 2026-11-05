@@ -62,6 +62,33 @@ func (p *podPanel) SetOnPodSelected(callback PodSelectedCallback) {
 	p.onPodSelected = callback
 }
 
+// SetOnConfigureColumns sets the callback when 'C' is pressed
+func (p *podPanel) SetOnConfigureColumns(callback func()) {
+	if p.tableCtrl != nil {
+		p.tableCtrl.SetOnConfigureColumns(callback)
+	}
+}
+
+// GetVisibleColumns returns currently visible column names
+func (p *podPanel) GetVisibleColumns() []string {
+	return p.listCols
+}
+
+// SetVisibleColumns updates the visible columns and immediately redraws the table
+func (p *podPanel) SetVisibleColumns(cols []string) {
+	p.listCols = cols
+	if p.list != nil {
+		p.list.Clear()
+		p.DrawHeader(cols)
+		if len(p.currentData) > 0 {
+			p.DrawBody(p.currentData)
+		}
+	}
+	if p.app != nil {
+		p.app.Refresh()
+	}
+}
+
 // getPodInfoFromRow returns the namespace and pod name from the given row index
 func (p *podPanel) getPodInfoFromRow(row int) (namespace, podName string) {
 	// Row 0 is header, data starts at row 1

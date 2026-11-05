@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/rivo/tview"
 	"github.com/vladimirvivien/ktop/application"
+	"github.com/vladimirvivien/ktop/config"
 	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
@@ -57,15 +59,13 @@ type MainPanel struct {
 }
 
 func New(app *application.Application, title string) *MainPanel {
-	return NewWithColumnOptions(app, title, true, nil, nil)
+	return NewWithColumnOptions(app, title, false, nil, nil)
 }
 
 func NewWithColumnOptions(app *application.Application, title string, showAllColumns bool, nodeColumns, podColumns []string) *MainPanel {
 	ctrl := &MainPanel{
 		app:            app,
-		metricsSource:  app.GetMetricsSource(),
 		title:          title,
-		refresh:        app.Refresh,
 		selPanelIndex:  -1,
 		showAllColumns: showAllColumns,
 		nodeColumns:    nodeColumns,
@@ -73,37 +73,48 @@ func NewWithColumnOptions(app *application.Application, title string, showAllCol
 		viewState:      NewViewStateManager(), // Centralized state tracking
 	}
 
+	if app != nil {
+		ctrl.metricsSource = app.GetMetricsSource()
+		ctrl.refresh = app.Refresh
+	}
+
 	return ctrl
 }
 
 func (p *MainPanel) Layout(data any) {
-	// Define the default columns
-	allNodeColumns := []string{"NAME", "STATUS", "RST", "PODS", "TAINTS", "PRESSURE", "IP", "VOLS", "DISK", "CPU", "MEM", "STALL"}
-	allPodColumns := []string{"NAMESPACE", "POD", "READY", "STATUS", "RST", "AGE", "VOLS", "IP", "NODE", "CPU", "MEMORY", "STALL"}
+	nodeColumnsToDisplay := config.DefaultNodeColumns
+	podColumnsToDisplay := config.DefaultPodColumns
 
-	// Use filtered columns if specified
-	nodeColumnsToDisplay := allNodeColumns
-	podColumnsToDisplay := allPodColumns
-
-	if !p.showAllColumns {
+	if p.showAllColumns {
+		nodeColumnsToDisplay = config.AllNodeColumns
+		podColumnsToDisplay = config.AllPodColumns
+	} else {
 		if len(p.nodeColumns) > 0 {
-			// Filter node columns
-			nodeColumnsToDisplay = filterColumns(allNodeColumns, p.nodeColumns)
+			nodeColumnsToDisplay = filterColumns(config.AllNodeColumns, p.nodeColumns)
 		}
 
 		if len(p.podColumns) > 0 {
-			// Filter pod columns
-			podColumnsToDisplay = filterColumns(allPodColumns, p.podColumns)
+			podColumnsToDisplay = filterColumns(config.AllPodColumns, p.podColumns)
 		}
 	}
 
 	p.nodePanel = NewNodePanel(p.app, fmt.Sprintf(" %s Nodes ", ui.Icons.Factory))
 	p.nodePanel.DrawHeader(nodeColumnsToDisplay)
 
-	// Set up node selection callback for navigation
+	// Set up node selection and column configuration callback
 	if np, ok := p.nodePanel.(*nodePanel); ok {
 		np.SetOnNodeSelected(func(nodeName string) {
 			p.app.NavigateToNodeDetail(nodeName)
+		})
+		np.SetOnConfigureColumns(func() {
+			p.openColumnSelector("Nodes", config.AllNodeColumns, np.GetVisibleColumns(), func(selected []string) {
+				p.nodeColumns = selected
+				p.showAllColumns = false
+				np.SetVisibleColumns(selected)
+				if err := config.SaveOverviewColumns(p.nodeColumns, p.podColumns); err != nil {
+					slog.Warn("failed to persist node columns", "error", err)
+				}
+			})
 		})
 	}
 
@@ -114,10 +125,20 @@ func (p *MainPanel) Layout(data any) {
 	p.podPanel = NewPodPanel(p.app, fmt.Sprintf(" %s Pods ", ui.Icons.Package))
 	p.podPanel.DrawHeader(podColumnsToDisplay)
 
-	// Set up pod selection callback for navigation
+	// Set up pod selection and column configuration callback
 	if pp, ok := p.podPanel.(*podPanel); ok {
 		pp.SetOnPodSelected(func(namespace, podName string) {
 			p.app.NavigateToPodDetail(namespace, podName)
+		})
+		pp.SetOnConfigureColumns(func() {
+			p.openColumnSelector("Pods", config.AllPodColumns, pp.GetVisibleColumns(), func(selected []string) {
+				p.podColumns = selected
+				p.showAllColumns = false
+				pp.SetVisibleColumns(selected)
+				if err := config.SaveOverviewColumns(p.nodeColumns, p.podColumns); err != nil {
+					slog.Warn("failed to persist pod columns", "error", err)
+				}
+			})
 		})
 	}
 
@@ -1116,21 +1137,42 @@ func (p *MainPanel) refreshWorkloadSummary(ctx context.Context, summary model.Cl
 	return nil
 }
 
+func (p *MainPanel) openColumnSelector(title string, allColumns, currentColumns []string, onApply func([]string)) {
+	modalID := "column-selector"
+	modal := ui.NewColumnSelectorModal(ui.ColumnSelectorConfig{
+		Title:          title,
+		AllColumns:     allColumns,
+		CurrentColumns: currentColumns,
+		Descriptions:   config.ColumnDescriptions,
+		OnApply: func(selected []string) {
+			p.app.DismissModalPage(modalID)
+			onApply(selected)
+		},
+		OnCancel: func() {
+			p.app.DismissModalPage(modalID)
+		},
+	})
+	p.app.ShowModalPage(modalID, modal.GetRootView())
+}
+
 // filterColumns filters the allColumns based on the user-provided filterCols
-// It returns a slice of columns that match the case-insensitive filter
+// It returns a slice of columns that match the case-insensitive filter, preserving specified order
 func filterColumns(allColumns []string, filterCols []string) []string {
 	if len(filterCols) == 0 {
 		return allColumns
 	}
 
 	result := []string{}
-	for _, col := range allColumns {
-		if slices.ContainsFunc(filterCols, func(f string) bool { return strings.EqualFold(col, f) }) {
-			result = append(result, col)
+	for _, fc := range filterCols {
+		for _, col := range allColumns {
+			if strings.EqualFold(col, fc) && !slices.Contains(result, col) {
+				result = append(result, col)
+				break
+			}
 		}
 	}
 
-	// If no matches found, return at least the first column (usually NAME)
+	// If no matches found, return at least the first column (usually NAME or NAMESPACE)
 	if len(result) == 0 && len(allColumns) > 0 {
 		return []string{allColumns[0]}
 	}

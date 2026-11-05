@@ -181,6 +181,21 @@ func (app *Application) ShowModal(view tview.Primitive) {
 	app.panel.showModalView(view)
 }
 
+// ShowModalPage displays a named modal overlay page on top of the UI
+func (app *Application) ShowModalPage(name string, view tview.Primitive) {
+	app.panel.showModalPage(name, view)
+}
+
+// DismissModalPage dismisses the named modal overlay page
+func (app *Application) DismissModalPage(name string) {
+	app.panel.dismissModalPage(name)
+}
+
+// HasActiveModalPage returns true if a modal overlay page is currently displayed
+func (app *Application) HasActiveModalPage() bool {
+	return app.panel.hasActiveModalPage()
+}
+
 func (app *Application) ShowToast(message string, level ui.ToastLevel, duration time.Duration) string {
 	return app.panel.showToast(message, level, duration)
 }
@@ -409,6 +424,13 @@ func (app *Application) setup(ctx context.Context) error {
 				return nil // Consume the event
 			}
 			return event // Pass other keys through
+		}
+
+		// When a modal page (e.g. column selector) is displayed, pass key events
+		// directly to the modal widget so it can handle Esc, Enter, Space, etc.
+		// Do NOT intercept ESC for app quit.
+		if app.HasActiveModalPage() {
+			return event
 		}
 
 		// Reset pending quit state on any non-ESC key

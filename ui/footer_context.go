@@ -24,6 +24,7 @@ func (c OverviewContext) GetItems() []FooterItem {
 			{Key: "[↑/↓]", Action: "navigate"},
 			{Key: "[Enter]", Action: "detail"},
 			{Key: "[Tab]", Action: "next"},
+			{Key: "[=]", Action: "cols"},
 			{Key: "[/]", Action: "filter"},
 			{Key: "[ESC | Ctrl+C]", Action: "quit"},
 		}
@@ -32,6 +33,7 @@ func (c OverviewContext) GetItems() []FooterItem {
 			{Key: "[↑/↓]", Action: "navigate"},
 			{Key: "[Enter]", Action: "detail"},
 			{Key: "[Tab]", Action: "next"},
+			{Key: "[=]", Action: "cols"},
 			{Key: "[/]", Action: "filter"},
 			{Key: "[ESC | Ctrl+C]", Action: "quit"},
 		}
