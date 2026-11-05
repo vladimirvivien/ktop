@@ -101,3 +101,38 @@ func TestGetPodContainerSummary(t *testing.T) {
 		})
 	}
 }
+
+func TestSortPodModelPointersBy(t *testing.T) {
+	pod1 := &PodModel{
+		Namespace: "default",
+		Name:      "b-pod",
+		PodUsageCpuQty: resource.NewMilliQuantity(500, resource.DecimalSI),
+		PodUsageMemQty: resource.NewQuantity(100*1024*1024, resource.BinarySI),
+	}
+	pod2 := &PodModel{
+		Namespace: "default",
+		Name:      "a-pod",
+		PodUsageCpuQty: resource.NewMilliQuantity(200, resource.DecimalSI),
+		PodUsageMemQty: resource.NewQuantity(300*1024*1024, resource.BinarySI),
+	}
+
+	pods := []*PodModel{pod1, pod2}
+
+	// Sort by NAME ascending -> a-pod then b-pod
+	SortPodModelPointersBy(pods, "NAME", true)
+	if pods[0].Name != "a-pod" || pods[1].Name != "b-pod" {
+		t.Fatalf("expected a-pod, b-pod on NAME sort, got %s, %s", pods[0].Name, pods[1].Name)
+	}
+
+	// Sort by CPU descending -> b-pod (500m) then a-pod (200m)
+	SortPodModelPointersBy(pods, "CPU", false)
+	if pods[0].Name != "b-pod" || pods[1].Name != "a-pod" {
+		t.Fatalf("expected b-pod, a-pod on CPU desc sort, got %s, %s", pods[0].Name, pods[1].Name)
+	}
+
+	// Sort by MEM descending -> a-pod (300Mi) then b-pod (100Mi)
+	SortPodModelPointersBy(pods, "MEM", false)
+	if pods[0].Name != "a-pod" || pods[1].Name != "b-pod" {
+		t.Fatalf("expected a-pod, b-pod on MEM desc sort, got %s, %s", pods[0].Name, pods[1].Name)
+	}
+}

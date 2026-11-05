@@ -79,7 +79,7 @@ func SortPodModelsBy(pods []PodModel, column string, ascending bool) {
 			return pods[i].Namespace < pods[j].Namespace
 		}
 
-	case "POD":
+	case "POD", "NAME":
 		sortFunc = func(i, j int) bool {
 			if pods[i].Name == pods[j].Name {
 				return pods[i].Namespace < pods[j].Namespace
@@ -127,7 +127,7 @@ func SortPodModelsBy(pods []PodModel, column string, ascending bool) {
 			return priI < priJ
 		}
 
-	case "RST":
+	case "RST", "RESTARTS":
 		sortFunc = func(i, j int) bool {
 			if pods[i].Restarts == pods[j].Restarts {
 				return pods[i].Name < pods[j].Name
@@ -195,7 +195,7 @@ func SortPodModelsBy(pods []PodModel, column string, ascending bool) {
 			return cpuI < cpuJ
 		}
 
-	case "MEMORY":
+	case "MEMORY", "MEM":
 		sortFunc = func(i, j int) bool {
 			memI := int64(0)
 			memJ := int64(0)
@@ -258,6 +258,35 @@ func SortPodModelsBy(pods []PodModel, column string, ascending bool) {
 		sort.Slice(pods, func(i, j int) bool {
 			return !sortFunc(i, j)
 		})
+	}
+}
+
+// SortPodModelPointersBy sorts a slice of *PodModel by the specified column and direction
+func SortPodModelPointersBy(pods []*PodModel, column string, ascending bool) {
+	if len(pods) <= 1 {
+		return
+	}
+	values := make([]PodModel, len(pods))
+	for i, p := range pods {
+		if p != nil {
+			values[i] = *p
+		}
+	}
+	SortPodModelsBy(values, column, ascending)
+	byKey := make(map[string][]*PodModel)
+	for _, p := range pods {
+		if p != nil {
+			k := p.Namespace + "/" + p.Name
+			byKey[k] = append(byKey[k], p)
+		}
+	}
+	for i, v := range values {
+		k := v.Namespace + "/" + v.Name
+		list := byKey[k]
+		if len(list) > 0 {
+			pods[i] = list[0]
+			byKey[k] = list[1:]
+		}
 	}
 }
 
