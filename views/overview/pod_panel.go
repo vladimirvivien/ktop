@@ -366,6 +366,22 @@ func (p *podPanel) DrawBody(data interface{}) {
 		panic(fmt.Sprintf("PodPanel.DrawBody got unexpected type %T", data))
 	}
 
+	// Prune sparkline entries for pods that are no longer present
+	activePods := make(map[string]struct{}, len(pods))
+	for _, pod := range pods {
+		activePods[pod.Namespace+"/"+pod.Name] = struct{}{}
+	}
+	for k := range p.cpuSparklines {
+		if _, exists := activePods[k]; !exists {
+			delete(p.cpuSparklines, k)
+		}
+	}
+	for k := range p.memSparklines {
+		if _, exists := activePods[k]; !exists {
+			delete(p.memSparklines, k)
+		}
+	}
+
 	// Store the data for re-sorting
 	p.currentData = pods
 

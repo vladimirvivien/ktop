@@ -378,6 +378,22 @@ func (p *nodePanel) DrawBody(data interface{}) {
 		panic(fmt.Sprintf("NodePanel.DrawBody: unexpected type %T", data))
 	}
 
+	// Prune sparkline entries for nodes that are no longer present
+	activeNodes := make(map[string]struct{}, len(nodes))
+	for _, node := range nodes {
+		activeNodes[node.Name] = struct{}{}
+	}
+	for k := range p.cpuSparklines {
+		if _, exists := activeNodes[k]; !exists {
+			delete(p.cpuSparklines, k)
+		}
+	}
+	for k := range p.memSparklines {
+		if _, exists := activeNodes[k]; !exists {
+			delete(p.memSparklines, k)
+		}
+	}
+
 	// Store the data for re-sorting
 	p.currentData = nodes
 

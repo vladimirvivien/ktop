@@ -659,32 +659,8 @@ func (p *MainPanel) showPodDetail(namespace, podName string) {
 }
 
 func (p *MainPanel) refreshNodeView(ctx context.Context, models []model.NodeModel) error {
-	// The controller passes us models, but we need to rebuild them with fresh metrics
-	// from our MetricsSource. We'll extract the node objects from the models.
-
-	// For now, use a simpler approach: update metrics in the existing models
-	// This requires accessing the original node objects, which the controller has via informers.
-	//
-	// Since we don't have direct access to Get methods, we'll work with what we have:
-	// The models already contain node information, we just need to update their metrics.
-
-	nodeModels := make([]model.NodeModel, 0, len(models))
-	for _, existingModel := range models {
-		// Fetch fresh metrics from our MetricsSource (if available)
-		if p.metricsSource != nil {
-			nodeMetrics, err := p.metricsSource.GetNodeMetrics(ctx, existingModel.Name)
-			if err == nil {
-				// Update the model's metrics fields
-				existingModel.UsageCpuQty = nodeMetrics.CPUUsage
-				existingModel.UsageMemQty = nodeMetrics.MemoryUsage
-				existingModel.PSI = nodeMetrics.PSI
-			}
-			// If err != nil, graceful degradation: keep existing model as-is
-		}
-		// If metricsSource is nil, keep existing model as-is (fallback mode)
-
-		nodeModels = append(nodeModels, existingModel)
-	}
+	// GetNodeModels already populates UsageCpuQty, UsageMemQty, and PSI from MetricsSource.
+	nodeModels := models
 
 	// Pre-fetch node detail data if detail view is visible (do network calls outside QueueUpdateDraw)
 	// Use ViewStateManager for thread-safe state access

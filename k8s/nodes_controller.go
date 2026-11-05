@@ -41,21 +41,29 @@ func (c *Controller) GetNodeModels(ctx context.Context) (models []model.NodeMode
 		return
 	}
 
-	// map each node to their pods
+	// Pre-index pods by node name in O(P) instead of scanning all pods per node O(N*P)
 	pods, err := c.GetPodList(ctx)
 	if err != nil {
 		return nil, err
 	}
+	podsByNode := make(map[string][]*coreV1.Pod, len(nodes))
+	for _, pod := range pods {
+		podsByNode[pod.Spec.NodeName] = append(podsByNode[pod.Spec.NodeName], pod)
+	}
 
+	emptyMetrics := new(metricsV1beta1.NodeMetrics)
+	models = make([]model.NodeModel, 0, len(nodes))
 	for _, node := range nodes {
-		metrics, err := c.GetNodeMetrics(ctx, node.Name)
-		if err != nil {
-			metrics = new(metricsV1beta1.NodeMetrics)
+		nodePods := podsByNode[node.Name]
+		nodeModel := model.NewNodeModel(node, emptyMetrics)
+		if c.metricsSource != nil {
+			if nodeMetrics, mErr := c.metricsSource.GetNodeMetrics(ctx, node.Name); mErr == nil && nodeMetrics != nil {
+				nodeModel.UsageCpuQty = nodeMetrics.CPUUsage
+				nodeModel.UsageMemQty = nodeMetrics.MemoryUsage
+				nodeModel.PSI = nodeMetrics.PSI
+			}
 		}
-		nodePods := getPodNodes(node.Name, pods)
-		podsCount := len(nodePods)
-		nodeModel := model.NewNodeModel(node, metrics)
-		nodeModel.PodsCount = podsCount
+		nodeModel.PodsCount = len(nodePods)
 		nodeModel.RequestedPodMemQty = resource.NewQuantity(0, resource.DecimalSI)
 		nodeModel.RequestedPodCpuQty = resource.NewQuantity(0, resource.DecimalSI)
 		for _, pod := range nodePods {
@@ -105,15 +113,4 @@ func (c *Controller) refreshNodes(ctx context.Context, handlerFunc RefreshNodesF
 	c.reportSuccess()
 	handlerFunc(ctx, models)
 	return nil
-}
-
-func getPodNodes(nodeName string, pods []*coreV1.Pod) []*coreV1.Pod {
-	var result []*coreV1.Pod
-
-	for _, pod := range pods {
-		if pod.Spec.NodeName == nodeName {
-			result = append(result, pod)
-		}
-	}
-	return result
 }

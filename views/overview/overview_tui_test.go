@@ -208,3 +208,37 @@ func TestPodPanel_SortAndFilterTUI(t *testing.T) {
 		t.Fatalf("expected api-gateway (400Mi) before coredns (120Mi) under MEMORY ▼ sort:\n%s", memDesc)
 	}
 }
+
+func TestSparklineEvictionOnDrawBody(t *testing.T) {
+	nodeCols := []string{"NAME", "STATUS", "CPU", "MEM"}
+	np := NewNodePanel(nil, " Nodes ").(*nodePanel)
+	np.DrawHeader(nodeCols)
+
+	allNodes := testNodeFixtures()
+	np.DrawBody(allNodes)
+	if len(np.cpuSparklines) != len(allNodes) || len(np.memSparklines) != len(allNodes) {
+		t.Fatalf("expected %d node sparklines after first DrawBody, got cpu=%d mem=%d", len(allNodes), len(np.cpuSparklines), len(np.memSparklines))
+	}
+
+	// Simulate node eviction (only 1 node remains)
+	np.DrawBody(allNodes[:1])
+	if len(np.cpuSparklines) != 1 || len(np.memSparklines) != 1 {
+		t.Fatalf("expected 1 node sparkline after pruning removed nodes, got cpu=%d mem=%d", len(np.cpuSparklines), len(np.memSparklines))
+	}
+
+	podCols := []string{"NAMESPACE", "POD", "CPU", "MEMORY"}
+	pp := NewPodPanel(nil, " Pods ").(*podPanel)
+	pp.DrawHeader(podCols)
+
+	allPods := testPodFixtures()
+	pp.DrawBody(allPods)
+	if len(pp.cpuSparklines) != len(allPods) || len(pp.memSparklines) != len(allPods) {
+		t.Fatalf("expected %d pod sparklines after first DrawBody, got cpu=%d mem=%d", len(allPods), len(pp.cpuSparklines), len(pp.memSparklines))
+	}
+
+	// Simulate pod deletion (only 1 pod remains)
+	pp.DrawBody(allPods[:1])
+	if len(pp.cpuSparklines) != 1 || len(pp.memSparklines) != 1 {
+		t.Fatalf("expected 1 pod sparkline after pruning deleted pods, got cpu=%d mem=%d", len(pp.cpuSparklines), len(pp.memSparklines))
+	}
+}

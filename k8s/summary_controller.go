@@ -61,6 +61,7 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	summary.AllocatableNodeCpuTotal = resource.NewQuantity(0, resource.DecimalSI)
 	summary.UsageNodeMemTotal = resource.NewQuantity(0, resource.DecimalSI)
 	summary.UsageNodeCpuTotal = resource.NewQuantity(0, resource.DecimalSI)
+	nodeMetricsByNode := make(map[string]*metrics.NodeMetrics, len(nodes))
 	for _, node := range nodes {
 		if model.GetNodeReadyStatus(node) == string(coreV1.NodeReady) {
 			summary.NodesReady++
@@ -69,24 +70,31 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 			summary.Uptime = node.CreationTimestamp
 		}
 
-		summary.Pressures += len(model.GetNodePressures(node))
+		pressures := model.GetNodePressures(node)
+		summary.Pressures += len(pressures)
+		if len(pressures) > 0 {
+			summary.NodePressureCount++
+		}
 		summary.ImagesCount += len(node.Status.Images)
 		summary.VolumesInUse += len(node.Status.VolumesInUse)
 
 		summary.AllocatableNodeMemTotal.Add(*node.Status.Allocatable.Memory())
 		summary.AllocatableNodeCpuTotal.Add(*node.Status.Allocatable.Cpu())
 
-		metrics, err := c.GetNodeMetrics(ctx, node.Name)
-		if err != nil {
+		if c.metricsSource == nil {
+			continue
+		}
+		nodeMetrics, err := c.metricsSource.GetNodeMetrics(ctx, node.Name)
+		if err != nil || nodeMetrics == nil {
 			// Metrics not available - skip adding to usage totals (graceful degradation)
 			continue
 		}
-		// Only add if metrics.Usage is not nil
-		if metrics.Usage.Memory() != nil {
-			summary.UsageNodeMemTotal.Add(*metrics.Usage.Memory())
+		nodeMetricsByNode[node.Name] = nodeMetrics
+		if nodeMetrics.MemoryUsage != nil {
+			summary.UsageNodeMemTotal.Add(*nodeMetrics.MemoryUsage)
 		}
-		if metrics.Usage.Cpu() != nil {
-			summary.UsageNodeCpuTotal.Add(*metrics.Usage.Cpu())
+		if nodeMetrics.CPUUsage != nil {
+			summary.UsageNodeCpuTotal.Add(*nodeMetrics.CPUUsage)
 		}
 	}
 
@@ -198,9 +206,10 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	}
 
 	// === Prometheus-Enhanced Metrics Collection ===
-	// When using Prometheus source, collect additional cluster-wide metrics
+	// When using Prometheus source, aggregate additional cluster-wide metrics
+	// from the already-fetched nodeMetricsByNode map without re-querying.
 	if c.metricsSource != nil && summary.MetricsSourceType == metrics.SourceTypePrometheus {
-		c.collectPrometheusEnhancedMetrics(ctx, &summary, nodes, pods)
+		c.collectPrometheusEnhancedMetrics(&summary, nodes, nodeMetricsByNode)
 	}
 
 	// Report success after all data is collected
@@ -210,13 +219,10 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 }
 
 // collectPrometheusEnhancedMetrics populates Prometheus-specific cluster summary fields
-func (c *Controller) collectPrometheusEnhancedMetrics(ctx context.Context, summary *model.ClusterSummary, nodes []*coreV1.Node, pods []*coreV1.Pod) {
-	// Aggregate enhanced metrics from all nodes
-	// These come from the NodeMetrics returned by GetNodeMetrics when using Prometheus source
-
+func (c *Controller) collectPrometheusEnhancedMetrics(summary *model.ClusterSummary, nodes []*coreV1.Node, nodeMetricsByNode map[string]*metrics.NodeMetrics) {
 	for _, node := range nodes {
-		nodeMetrics, err := c.metricsSource.GetNodeMetrics(ctx, node.Name)
-		if err != nil {
+		nodeMetrics, ok := nodeMetricsByNode[node.Name]
+		if !ok || nodeMetrics == nil {
 			continue
 		}
 
@@ -256,13 +262,5 @@ func (c *Controller) collectPrometheusEnhancedMetrics(ctx context.Context, summa
 		summary.LoadAverage1m /= float64(len(nodes))
 		summary.LoadAverage5m /= float64(len(nodes))
 		summary.LoadAverage15m /= float64(len(nodes))
-	}
-
-	// Count node pressures
-	for _, node := range nodes {
-		pressures := model.GetNodePressures(node)
-		if len(pressures) > 0 {
-			summary.NodePressureCount++
-		}
 	}
 }
