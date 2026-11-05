@@ -165,12 +165,12 @@ func (app *Application) GetAPIHealth() health.APIState {
 
 // IsAPIHealthy returns true if the API connection is healthy
 func (app *Application) IsAPIHealthy() bool {
-	return app.apiHealthTracker == nil || app.apiHealthTracker.IsHealthy()
+	return app == nil || app.apiHealthTracker == nil || app.apiHealthTracker.IsHealthy()
 }
 
 // IsAPIDisconnected returns true if the API connection has been lost
 func (app *Application) IsAPIDisconnected() bool {
-	return app.apiHealthTracker != nil && app.apiHealthTracker.IsDisconnected()
+	return app != nil && app.apiHealthTracker != nil && app.apiHealthTracker.IsDisconnected()
 }
 
 func (app *Application) AddPage(panel ui.PanelController) {
