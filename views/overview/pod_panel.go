@@ -27,6 +27,7 @@ type podPanel struct {
 	sortAsc     bool             // Sort direction: true=ascending, false=descending
 	currentData []model.PodModel // Store current data for re-sorting
 	filter      *ui.FilterState  // Filter state for row filtering
+	namespaceFilter string       // Global namespace filter from header
 
 	// Stateful sparklines for smooth sliding animation
 	cpuSparklines map[string]*ui.Sparkline // key: "namespace/podname"
@@ -286,6 +287,11 @@ func (p *podPanel) DrawHeader(data interface{}) {
 	p.list.SetFixed(1, 0)
 }
 
+// SetNamespaceFilter sets the runtime namespace filter
+func (p *podPanel) SetNamespaceFilter(ns string) {
+	p.namespaceFilter = ns
+}
+
 // GetSortParams returns the current sort column and direction
 func (p *podPanel) GetSortParams() (string, bool) {
 	return p.sortColumn, p.sortAsc
@@ -397,13 +403,21 @@ func (p *podPanel) DrawBody(data interface{}) {
 	p.filter.TotalRows = len(pods)
 	p.filter.MatchRows = 0
 
-	// Filter pods if filter is active or editing
+	// Filter pods if namespace filter or row filter is active
 	var filteredPods []model.PodModel
-	if p.filter.IsFiltering() && p.filter.Text != "" {
+	filterLower := strings.ToLower(p.namespaceFilter)
+	hasNSFilter := filterLower != ""
+	hasRowFilter := p.filter.IsFiltering() && p.filter.Text != ""
+
+	if hasNSFilter || hasRowFilter {
 		for _, pod := range pods {
-			if p.filter.MatchesRow(p.getPodCells(pod)) {
-				filteredPods = append(filteredPods, pod)
+			if hasNSFilter && !strings.Contains(strings.ToLower(pod.Namespace), filterLower) {
+				continue
 			}
+			if hasRowFilter && !p.filter.MatchesRow(p.getPodCells(pod)) {
+				continue
+			}
+			filteredPods = append(filteredPods, pod)
 		}
 		p.filter.MatchRows = len(filteredPods)
 	} else {

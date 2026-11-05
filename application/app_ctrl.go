@@ -203,7 +203,10 @@ func (app *Application) Focus(t tview.Primitive) {
 }
 
 func (app *Application) Refresh() {
-	app.refreshQ <- struct{}{}
+	select {
+	case app.refreshQ <- struct{}{}:
+	default:
+	}
 }
 
 // QueueUpdateDraw safely queues a UI update function to run on the main goroutine.
@@ -566,7 +569,7 @@ func (app *Application) Run(ctx context.Context) error {
 	// setup refresh queue
 	go func() {
 		for range app.refreshQ {
-			app.tviewApp.Draw()
+			app.QueueUpdateDraw(func() {})
 		}
 	}()
 

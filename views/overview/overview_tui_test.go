@@ -242,3 +242,40 @@ func TestSparklineEvictionOnDrawBody(t *testing.T) {
 		t.Fatalf("expected 1 pod sparkline after pruning deleted pods, got cpu=%d mem=%d", len(pp.cpuSparklines), len(pp.memSparklines))
 	}
 }
+
+func TestPodPanelNamespaceFilterSparklinePreservation(t *testing.T) {
+	podCols := []string{"NAMESPACE", "POD", "CPU", "MEMORY"}
+	pp := NewPodPanel(nil, " Pods ").(*podPanel)
+	pp.DrawHeader(podCols)
+
+	allPods := testPodFixtures()
+	if len(allPods) < 2 {
+		t.Fatalf("test requires at least 2 pod fixtures")
+	}
+
+	// 1. Initial draw with all pods
+	pp.DrawBody(allPods)
+	if len(pp.cpuSparklines) != len(allPods) {
+		t.Fatalf("expected %d sparklines initially, got %d", len(allPods), len(pp.cpuSparklines))
+	}
+
+	// 2. Filter to "kube-system" - only 1 pod displayed, but sparklines for all pods must NOT be pruned
+	pp.SetNamespaceFilter("kube-system")
+	pp.DrawBody(allPods)
+	if pp.filter.MatchRows != 1 {
+		t.Fatalf("expected 1 matched row with kube-system filter, got %d", pp.filter.MatchRows)
+	}
+	if len(pp.cpuSparklines) != len(allPods) {
+		t.Fatalf("expected all %d sparklines preserved during namespace filter, got %d", len(allPods), len(pp.cpuSparklines))
+	}
+
+	// 3. Clear namespace filter - all pods displayed and sparklines still present
+	pp.SetNamespaceFilter("")
+	pp.DrawBody(allPods)
+	if pp.filter.MatchRows != len(allPods) {
+		t.Fatalf("expected %d matched rows after clearing filter, got %d", len(allPods), pp.filter.MatchRows)
+	}
+	if len(pp.cpuSparklines) != len(allPods) {
+		t.Fatalf("expected %d sparklines retained after clearing filter, got %d", len(allPods), len(pp.cpuSparklines))
+	}
+}

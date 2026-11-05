@@ -865,21 +865,13 @@ func (p *MainPanel) displayFilteredPodsInternal() {
 		return
 	}
 
-	// Apply namespace filter
-	filteredModels := p.cachedPodModels
-	if p.namespaceFilter != "" {
-		filteredModels = make([]model.PodModel, 0, len(p.cachedPodModels))
-		filterLower := strings.ToLower(p.namespaceFilter)
-		for _, m := range p.cachedPodModels {
-			if strings.Contains(strings.ToLower(m.Namespace), filterLower) {
-				filteredModels = append(filteredModels, m)
-			}
-		}
+	if pp, ok := p.podPanel.(interface{ SetNamespaceFilter(string) }); ok {
+		pp.SetNamespaceFilter(p.namespaceFilter)
 	}
 
-	// Sorting is now handled by the panel itself in DrawBody
+	// Sorting and filtering are handled by the panel itself in DrawBody
 	p.podPanel.Clear()
-	p.podPanel.DrawBody(filteredModels)
+	p.podPanel.DrawBody(p.cachedPodModels)
 }
 
 // buildNodeDetailData builds the node detail data for live updates.
