@@ -62,6 +62,33 @@ func (p *podPanel) SetOnPodSelected(callback PodSelectedCallback) {
 	p.onPodSelected = callback
 }
 
+// SetOnConfigureColumns sets the callback when 'C' is pressed
+func (p *podPanel) SetOnConfigureColumns(callback func()) {
+	if p.tableCtrl != nil {
+		p.tableCtrl.SetOnConfigureColumns(callback)
+	}
+}
+
+// GetVisibleColumns returns currently visible column names
+func (p *podPanel) GetVisibleColumns() []string {
+	return p.listCols
+}
+
+// SetVisibleColumns updates the visible columns and immediately redraws the table
+func (p *podPanel) SetVisibleColumns(cols []string) {
+	p.listCols = cols
+	if p.list != nil {
+		p.list.Clear()
+		p.DrawHeader(cols)
+		if len(p.currentData) > 0 {
+			p.DrawBody(p.currentData)
+		}
+	}
+	if p.app != nil {
+		p.app.Refresh()
+	}
+}
+
 // getPodInfoFromRow returns the namespace and pod name from the given row index
 func (p *podPanel) getPodInfoFromRow(row int) (namespace, podName string) {
 	// Row 0 is header, data starts at row 1
@@ -95,7 +122,7 @@ func (p *podPanel) getSparkline(sparklines map[string]*ui.Sparkline, key string,
 	return ui.GetSparkline(sparklines, key, width, colors)
 }
 
-func (p *podPanel) Layout(_ interface{}) {
+func (p *podPanel) Layout(_ any) {
 	if !p.laidout {
 		p.list = tview.NewTable()
 		p.list.SetFixed(1, 0)
@@ -159,7 +186,7 @@ func (p *podPanel) formatColumnHeader(col string) string {
 	return p.tableCtrl.FormatColumnHeader(col)
 }
 
-func (p *podPanel) DrawHeader(data interface{}) {
+func (p *podPanel) DrawHeader(data any) {
 	cols, ok := data.([]string)
 	if !ok {
 		panic(fmt.Sprintf("podPanel.DrawBody got unexpected data type %T", data))
@@ -216,7 +243,7 @@ func (p *podPanel) handleSortKey(key rune) bool {
 	return handled
 }
 
-func (p *podPanel) DrawBody(data interface{}) {
+func (p *podPanel) DrawBody(data any) {
 	pods, ok := data.([]model.PodModel)
 	if !ok {
 		panic(fmt.Sprintf("PodPanel.DrawBody got unexpected type %T", data))
@@ -516,7 +543,7 @@ func (p *podPanel) DrawBody(data interface{}) {
 	}
 }
 
-func (p *podPanel) DrawFooter(_ interface{}) {}
+func (p *podPanel) DrawFooter(_ any) {}
 
 func (p *podPanel) Clear() {
 	p.list.Clear()

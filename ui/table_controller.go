@@ -11,37 +11,40 @@ import (
 
 // TableControllerConfig defines setup parameters for TableController
 type TableControllerConfig struct {
-	DefaultSortColumn string
-	DefaultSortAsc    bool
-	ColumnToKey       map[string]rune
-	OnRedraw          func()
-	OnSelect          func(row int) bool // Callback for Enter key on selected row. Return true if consumed.
+	DefaultSortColumn  string
+	DefaultSortAsc     bool
+	ColumnToKey        map[string]rune
+	OnRedraw           func()
+	OnSelect           func(row int) bool // Callback for Enter key on selected row. Return true if consumed.
+	OnConfigureColumns func()             // Callback for '=' column configuration key.
 }
 
 // TableController manages sorting, filtering, and header indicators for tabular panels
 type TableController struct {
-	table       *tview.Table
-	sortColumn  string
-	sortAsc     bool
-	columnToKey map[string]rune
-	keyToColumn map[rune]string
-	filter      *FilterState
-	visibleCols []string
-	onRedraw    func()
-	onSelect    func(row int) bool
+	table              *tview.Table
+	sortColumn         string
+	sortAsc            bool
+	columnToKey        map[string]rune
+	keyToColumn        map[rune]string
+	filter             *FilterState
+	visibleCols        []string
+	onRedraw           func()
+	onSelect           func(row int) bool
+	onConfigureColumns func()
 }
 
 // NewTableController initializes a TableController
 func NewTableController(table *tview.Table, cfg TableControllerConfig) *TableController {
 	tc := &TableController{
-		table:       table,
-		sortColumn:  cfg.DefaultSortColumn,
-		sortAsc:     cfg.DefaultSortAsc,
-		columnToKey: cfg.ColumnToKey,
-		keyToColumn: make(map[rune]string),
-		filter:      &FilterState{},
-		onRedraw:    cfg.OnRedraw,
-		onSelect:    cfg.OnSelect,
+		table:              table,
+		sortColumn:         cfg.DefaultSortColumn,
+		sortAsc:            cfg.DefaultSortAsc,
+		columnToKey:        cfg.ColumnToKey,
+		keyToColumn:        make(map[rune]string),
+		filter:             &FilterState{},
+		onRedraw:           cfg.OnRedraw,
+		onSelect:           cfg.OnSelect,
+		onConfigureColumns: cfg.OnConfigureColumns,
 	}
 	for col, key := range cfg.ColumnToKey {
 		tc.keyToColumn[key] = col
@@ -73,6 +76,11 @@ func (tc *TableController) SetVisibleColumns(cols []string) {
 // GetVisibleColumns returns the visible column subset
 func (tc *TableController) GetVisibleColumns() []string {
 	return tc.visibleCols
+}
+
+// SetOnConfigureColumns sets the callback invoked when 'C' is pressed
+func (tc *TableController) SetOnConfigureColumns(cb func()) {
+	tc.onConfigureColumns = cb
 }
 
 // ToggleSort toggles the sort direction or switches sort column
@@ -243,6 +251,12 @@ func (tc *TableController) HandleInput(event *tcell.EventKey) *tcell.EventKey {
 				return nil
 			}
 		}
+	}
+
+	// Column configuration trigger '='
+	if event.Key() == tcell.KeyRune && event.Rune() == '=' && tc.onConfigureColumns != nil {
+		tc.onConfigureColumns()
+		return nil
 	}
 
 	// Sorting shortcut keys

@@ -61,6 +61,33 @@ func (p *nodePanel) SetOnNodeSelected(callback NodeSelectedCallback) {
 	p.onNodeSelected = callback
 }
 
+// SetOnConfigureColumns sets the callback when 'C' is pressed
+func (p *nodePanel) SetOnConfigureColumns(callback func()) {
+	if p.tableCtrl != nil {
+		p.tableCtrl.SetOnConfigureColumns(callback)
+	}
+}
+
+// GetVisibleColumns returns currently visible column names
+func (p *nodePanel) GetVisibleColumns() []string {
+	return p.listCols
+}
+
+// SetVisibleColumns updates the visible columns and immediately redraws the table
+func (p *nodePanel) SetVisibleColumns(cols []string) {
+	p.listCols = cols
+	if p.list != nil {
+		p.list.Clear()
+		p.DrawHeader(cols)
+		if len(p.currentData) > 0 {
+			p.DrawBody(p.currentData)
+		}
+	}
+	if p.app != nil {
+		p.app.Refresh()
+	}
+}
+
 // getNodeNameFromRow returns the node name from the given row index
 func (p *nodePanel) getNodeNameFromRow(row int) string {
 	// Row 0 is header, data starts at row 1
@@ -94,7 +121,7 @@ func (p *nodePanel) getSparkline(sparklines map[string]*ui.Sparkline, key string
 	return ui.GetSparkline(sparklines, key, width, colors)
 }
 
-func (p *nodePanel) Layout(_ interface{}) {
+func (p *nodePanel) Layout(_ any) {
 	if !p.laidout {
 		p.list = tview.NewTable()
 		p.list.SetFixed(1, 0)
@@ -158,7 +185,7 @@ func (p *nodePanel) formatColumnHeader(col string) string {
 	return p.tableCtrl.FormatColumnHeader(col)
 }
 
-func (p *nodePanel) DrawHeader(data interface{}) {
+func (p *nodePanel) DrawHeader(data any) {
 	cols, ok := data.([]string)
 	if !ok {
 		panic(fmt.Sprintf("nodePanel.DrawHeader got unexpected data type %T", data))
@@ -224,7 +251,7 @@ func (p *nodePanel) handleSortKey(key rune) bool {
 	return handled
 }
 
-func (p *nodePanel) DrawBody(data interface{}) {
+func (p *nodePanel) DrawBody(data any) {
 	nodes, ok := data.([]model.NodeModel)
 	if !ok {
 		panic(fmt.Sprintf("NodePanel.DrawBody: unexpected type %T", data))
@@ -528,7 +555,7 @@ func (p *nodePanel) DrawBody(data interface{}) {
 	}
 }
 
-func (p *nodePanel) DrawFooter(_ interface{}) {}
+func (p *nodePanel) DrawFooter(_ any) {}
 
 func (p *nodePanel) Clear() {
 	p.list.Clear()

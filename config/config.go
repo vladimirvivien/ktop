@@ -2,11 +2,210 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/vladimirvivien/ktop/internal/userdir"
 	"github.com/vladimirvivien/ktop/prom"
+	"sigs.k8s.io/yaml"
 )
+
+// ConfigFileName is the standard configuration file name stored in ~/.ktop
+const ConfigFileName = "config.yaml"
+
+// Available Node and Pod columns in canonical display order
+var (
+	AllNodeColumns = []string{
+		"NAME", "STATUS", "RST", "PODS", "TAINTS", "PRESSURE", "IP", "VOLS", "DISK", "CPU", "MEM", "STALL",
+	}
+
+	AllPodColumns = []string{
+		"NAMESPACE", "POD", "READY", "STATUS", "RST", "AGE", "VOLS", "IP", "NODE", "CPU", "MEMORY", "STALL",
+	}
+
+	DefaultNodeColumns = []string{
+		"NAME", "STATUS", "RST", "PODS", "DISK", "CPU", "MEM",
+	}
+
+	DefaultPodColumns = []string{
+		"NAMESPACE", "POD", "READY", "STATUS", "RST", "AGE", "CPU", "MEMORY",
+	}
+
+	ColumnDescriptions = map[string]string{
+		// Node columns
+		"NAME":     "Node name",
+		"STATUS":   "Ready/NotReady status",
+		"RST":      "Total restarts across pods",
+		"PODS":     "Allocated pods / capacity",
+		"TAINTS":   "Configured node taints",
+		"PRESSURE": "Node resource pressure",
+		"IP":       "Internal node IP address",
+		"VOLS":     "Attached volume count",
+		"DISK":     "Ephemeral storage root usage",
+		"CPU":      "CPU usage graph and ratio",
+		"MEM":      "Memory usage graph and ratio",
+		"STALL":    "PSI resource pressure stall",
+
+		// Pod columns
+		"NAMESPACE": "Pod namespace",
+		"POD":       "Pod name",
+		"READY":     "Ready containers count",
+		"AGE":       "Time since creation",
+		"NODE":      "Assigned worker node",
+		"MEMORY":    "Memory usage graph and bytes",
+	}
+)
+
+// NormalizeColumns converts column names to uppercase and trims whitespace.
+func NormalizeColumns(cols []string) []string {
+	result := make([]string, 0, len(cols))
+	for _, c := range cols {
+		trimmed := strings.ToUpper(strings.TrimSpace(c))
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// AppConfig represents the root schema stored in ~/.ktop/config.yaml.
+type AppConfig struct {
+	UI      UIConfig      `json:"ui" yaml:"ui"`
+	Metrics MetricsConfig `json:"metrics" yaml:"metrics"`
+	Logging LoggingConfig `json:"logging" yaml:"logging"`
+}
+
+// UIConfig holds UI preferences.
+type UIConfig struct {
+	Overview OverviewUIConfig `json:"overview" yaml:"overview"`
+}
+
+// OverviewUIConfig holds column selections for overview tables.
+type OverviewUIConfig struct {
+	NodeCols []string `json:"node_cols,omitempty" yaml:"node_cols,omitempty"`
+	PodCols  []string `json:"pod_cols,omitempty" yaml:"pod_cols,omitempty"`
+}
+
+// MetricsConfig holds metrics collector configuration.
+type MetricsConfig struct {
+	Source         string   `json:"source" yaml:"source"`
+	ScrapeInterval string   `json:"scrape_interval" yaml:"scrape_interval"`
+	Retention      string   `json:"retention" yaml:"retention"`
+	MaxSamples     int      `json:"max_samples" yaml:"max_samples"`
+	Components     []string `json:"components" yaml:"components"`
+}
+
+// LoggingConfig holds application logging configuration.
+type LoggingConfig struct {
+	Level  string `json:"level" yaml:"level"`
+	Format string `json:"format" yaml:"format"`
+}
+
+// DefaultAppConfig returns an AppConfig populated with sensible resolved defaults.
+func DefaultAppConfig() *AppConfig {
+	return &AppConfig{
+		UI: UIConfig{
+			Overview: OverviewUIConfig{
+				NodeCols: slicesClone(DefaultNodeColumns),
+				PodCols:  slicesClone(DefaultPodColumns),
+			},
+		},
+		Metrics: MetricsConfig{
+			Source:         "prometheus",
+			ScrapeInterval: "5s",
+			Retention:      "1h",
+			MaxSamples:     10000,
+			Components:     []string{"kubelet", "cadvisor"},
+		},
+		Logging: LoggingConfig{
+			Level:  "info",
+			Format: "text",
+		},
+	}
+}
+
+func slicesClone(s []string) []string {
+	res := make([]string, len(s))
+	copy(res, s)
+	return res
+}
+
+// ConfigPath returns the resolved path to ~/.ktop/config.yaml.
+func ConfigPath() (string, error) {
+	dir, err := userdir.Path()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, ConfigFileName), nil
+}
+
+// LoadAppConfig reads ~/.ktop/config.yaml.
+// If the file does not exist, it returns (nil, nil) indicating default fallback.
+func LoadAppConfig() (*AppConfig, error) {
+	path, err := ConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read config %s: %w", path, err)
+	}
+
+	var cfg AppConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("unmarshal config %s: %w", path, err)
+	}
+
+	cfg.UI.Overview.NodeCols = NormalizeColumns(cfg.UI.Overview.NodeCols)
+	cfg.UI.Overview.PodCols = NormalizeColumns(cfg.UI.Overview.PodCols)
+
+	return &cfg, nil
+}
+
+// SaveAppConfig writes the given AppConfig to ~/.ktop/config.yaml (mode 0600).
+func SaveAppConfig(cfg *AppConfig) error {
+	dir, err := userdir.Ensure()
+	if err != nil {
+		return fmt.Errorf("ensure ktop directory: %w", err)
+	}
+
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+
+	header := "# ktop configuration file\n"
+	content := append([]byte(header), data...)
+
+	path := filepath.Join(dir, ConfigFileName)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		return fmt.Errorf("write config %s: %w", path, err)
+	}
+	return nil
+}
+
+// SaveOverviewColumns updates or creates ~/.ktop/config.yaml with specified node and pod columns.
+// If nodeCols or podCols is empty, existing configured columns or defaults are preserved.
+func SaveOverviewColumns(nodeCols, podCols []string) error {
+	cfg, err := LoadAppConfig()
+	if err != nil || cfg == nil {
+		cfg = DefaultAppConfig()
+	}
+
+	if len(nodeCols) > 0 {
+		cfg.UI.Overview.NodeCols = NormalizeColumns(nodeCols)
+	}
+	if len(podCols) > 0 {
+		cfg.UI.Overview.PodCols = NormalizeColumns(podCols)
+	}
+
+	return SaveAppConfig(cfg)
+}
 
 // ValidMetricsSources maps input values to canonical names
 var ValidMetricsSources = map[string]string{

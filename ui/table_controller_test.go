@@ -174,3 +174,46 @@ func TestTableController_Sparklines(t *testing.T) {
 		t.Fatalf("expected node1 pruned and node2 retained")
 	}
 }
+
+func TestTableController_ConfigureColumns(t *testing.T) {
+	configured := false
+	table := tview.NewTable()
+	tc := NewTableController(table, TableControllerConfig{
+		DefaultSortColumn: "NAME",
+		ColumnToKey: map[string]rune{
+			"CPU": 'c',
+		},
+		OnConfigureColumns: func() {
+			configured = true
+		},
+	})
+
+	// Pressing lowercase 'c' should sort by CPU, NOT trigger column configuration
+	evLowerC := tcell.NewEventKey(tcell.KeyRune, 'c', tcell.ModNone)
+	tc.HandleInput(evLowerC)
+	if configured {
+		t.Fatalf("lowercase 'c' should not trigger OnConfigureColumns")
+	}
+	col, _ := tc.GetSortParams()
+	if col != "CPU" {
+		t.Fatalf("expected sort column CPU, got %s", col)
+	}
+
+	// Pressing '=' should trigger OnConfigureColumns
+	evEqual := tcell.NewEventKey(tcell.KeyRune, '=', tcell.ModNone)
+	tc.HandleInput(evEqual)
+	if !configured {
+		t.Fatalf("'=' should trigger OnConfigureColumns")
+	}
+
+	// In filter edit mode, '=' should be typed into the filter, not trigger configuration
+	configured = false
+	tc.Filter().StartEditing()
+	tc.HandleInput(evEqual)
+	if configured {
+		t.Fatalf("'=' in filter edit mode should not trigger OnConfigureColumns")
+	}
+	if tc.Filter().Text != "=" {
+		t.Fatalf("expected filter text '=', got '%s'", tc.Filter().Text)
+	}
+}

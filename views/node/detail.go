@@ -2,6 +2,7 @@ package node
 
 import (
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -101,7 +102,7 @@ func (p *DetailPanel) GetTitle() string {
 }
 
 // Layout initializes the panel UI
-func (p *DetailPanel) Layout(_ interface{}) {
+func (p *DetailPanel) Layout(_ any) {
 	if !p.laidout {
 		// Initialize sparkline row (starts in non-prometheus mode, self-sizing)
 		p.sparklineRow = ui.NewSparklineRow(false)
@@ -272,12 +273,12 @@ func (p *DetailPanel) Layout(_ interface{}) {
 }
 
 // DrawHeader draws the header row
-func (p *DetailPanel) DrawHeader(data interface{}) {
+func (p *DetailPanel) DrawHeader(data any) {
 	// Header is part of the layout
 }
 
 // DrawBody draws the main content
-func (p *DetailPanel) DrawBody(data interface{}) {
+func (p *DetailPanel) DrawBody(data any) {
 	detailData, ok := data.(*model.NodeDetailData)
 	if !ok {
 		return
@@ -630,14 +631,7 @@ func (p *DetailPanel) drawSystemDetailSection() {
 	if len(labels) == 0 {
 		labelsBuilder.WriteString("[gray]None[-]")
 	} else {
-		// Sort labels for consistent display
-		labelKeys := make([]string, 0, len(labels))
-		for k := range labels {
-			labelKeys = append(labelKeys, k)
-		}
-		slices.Sort(labelKeys)
-
-		for _, k := range labelKeys {
+		for _, k := range slices.Sorted(maps.Keys(labels)) {
 			v := labels[k]
 			// Truncate long values
 			if len(v) > 25 {
@@ -656,14 +650,7 @@ func (p *DetailPanel) drawSystemDetailSection() {
 	if len(annotations) == 0 {
 		annotationsBuilder.WriteString("[gray]None[-]")
 	} else {
-		// Sort annotations for consistent display
-		annotationKeys := make([]string, 0, len(annotations))
-		for k := range annotations {
-			annotationKeys = append(annotationKeys, k)
-		}
-		slices.Sort(annotationKeys)
-
-		for _, k := range annotationKeys {
+		for _, k := range slices.Sorted(maps.Keys(annotations)) {
 			v := annotations[k]
 			// Truncate long values
 			if len(v) > 25 {
@@ -798,7 +785,7 @@ func formatStorage(q *resource.Quantity) string {
 }
 
 // DrawFooter draws the footer
-func (p *DetailPanel) DrawFooter(_ interface{}) {}
+func (p *DetailPanel) DrawFooter(_ any) {}
 
 // Clear clears the panel
 func (p *DetailPanel) Clear() {

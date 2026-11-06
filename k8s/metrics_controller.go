@@ -6,7 +6,6 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	metricsV1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
@@ -39,40 +38,4 @@ func (c *Controller) GetNodeMetrics(ctx context.Context, nodeName string) (*metr
 		Window:     metav1.Duration{Duration: 0},
 		Usage:      usage,
 	}, nil
-}
-
-// GetPodMetricsByName returns pod metrics for specified pod
-func (c *Controller) GetPodMetricsByName(ctx context.Context, pod *v1.Pod) (*metricsV1beta1.PodMetrics, error) {
-	if err := c.client.AssertMetricsAvailable(); err != nil {
-		return nil, fmt.Errorf("pod metrics by name: %s", err)
-	}
-
-	if c.podMetricsInformer == nil {
-		return nil, fmt.Errorf("pod metrics informer not available")
-	}
-
-	metrics, err := c.podMetricsInformer.Lister().Get(pod)
-	if err != nil {
-		return nil, err
-	}
-
-	return metrics, nil
-}
-
-// GetAllPodMetrics retrieve all available pod emtrics
-func (c *Controller) GetAllPodMetrics(ctx context.Context) ([]*metricsV1beta1.PodMetrics, error) {
-	if err := c.client.AssertMetricsAvailable(); err != nil {
-		return nil, fmt.Errorf("all pod metrics: %s", err)
-	}
-
-	if c.podMetricsInformer == nil {
-		return nil, fmt.Errorf("pod metrics informer not available")
-	}
-
-	metricsList, err := c.podMetricsInformer.Lister().List(labels.Everything())
-	if err != nil {
-		return nil, err
-	}
-
-	return metricsList, nil
 }
