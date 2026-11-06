@@ -3,6 +3,7 @@ package overview
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -160,6 +161,17 @@ func (p *nodePanel) Layout(_ any) {
 				nodeName := p.getNodeNameFromRow(row)
 				if nodeName != "" && p.onNodeSelected != nil {
 					p.onNodeSelected(nodeName)
+					return true
+				}
+				return false
+			},
+			OnYank: func(row int) bool {
+				nodeName := p.getNodeNameFromRow(row)
+				if nodeName != "" {
+					_ = ui.CopyToClipboard(nodeName)
+					if p.app != nil {
+						p.app.ShowToast(fmt.Sprintf("Copied \"%s\" to clipboard", nodeName), ui.ToastSuccess, 2*time.Second)
+					}
 					return true
 				}
 				return false

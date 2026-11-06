@@ -16,6 +16,7 @@ type TableControllerConfig struct {
 	ColumnToKey        map[string]rune
 	OnRedraw           func()
 	OnSelect           func(row int) bool // Callback for Enter key on selected row. Return true if consumed.
+	OnYank             func(row int) bool // Callback for 'y' key to copy row data. Return true if consumed.
 	OnConfigureColumns func()             // Callback for '=' column configuration key.
 }
 
@@ -30,6 +31,7 @@ type TableController struct {
 	visibleCols        []string
 	onRedraw           func()
 	onSelect           func(row int) bool
+	onYank             func(row int) bool
 	onConfigureColumns func()
 }
 
@@ -44,6 +46,7 @@ func NewTableController(table *tview.Table, cfg TableControllerConfig) *TableCon
 		filter:             &FilterState{},
 		onRedraw:           cfg.OnRedraw,
 		onSelect:           cfg.OnSelect,
+		onYank:             cfg.OnYank,
 		onConfigureColumns: cfg.OnConfigureColumns,
 	}
 	for col, key := range cfg.ColumnToKey {
@@ -257,6 +260,16 @@ func (tc *TableController) HandleInput(event *tcell.EventKey) *tcell.EventKey {
 	if event.Key() == tcell.KeyRune && event.Rune() == '=' && tc.onConfigureColumns != nil {
 		tc.onConfigureColumns()
 		return nil
+	}
+
+	// Clipboard copy / yank trigger 'y'
+	if event.Key() == tcell.KeyRune && (event.Rune() == 'y' || event.Rune() == 'Y') && tc.onYank != nil && tc.table != nil {
+		row, _ := tc.table.GetSelection()
+		if row > 0 {
+			if tc.onYank(row) {
+				return nil
+			}
+		}
 	}
 
 	// Sorting shortcut keys

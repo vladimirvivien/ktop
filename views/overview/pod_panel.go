@@ -3,6 +3,7 @@ package overview
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -161,6 +162,17 @@ func (p *podPanel) Layout(_ any) {
 				namespace, podName := p.getPodInfoFromRow(row)
 				if namespace != "" && podName != "" && p.onPodSelected != nil {
 					p.onPodSelected(namespace, podName)
+					return true
+				}
+				return false
+			},
+			OnYank: func(row int) bool {
+				_, podName := p.getPodInfoFromRow(row)
+				if podName != "" {
+					_ = ui.CopyToClipboard(podName)
+					if p.app != nil {
+						p.app.ShowToast(fmt.Sprintf("Copied \"%s\" to clipboard", podName), ui.ToastSuccess, 2*time.Second)
+					}
 					return true
 				}
 				return false

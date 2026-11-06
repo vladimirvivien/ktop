@@ -194,6 +194,14 @@ func (p *DetailPanel) Layout(_ any) {
 				}
 				return false
 			},
+			OnYank: func(row int) bool {
+				if row > 0 && row-1 < len(p.filteredPods) {
+					pod := p.filteredPods[row-1]
+					_ = ui.CopyToClipboard(pod.Name)
+					return true
+				}
+				return false
+			},
 		})
 
 		// Handle keyboard input on pods table
