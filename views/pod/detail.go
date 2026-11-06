@@ -1071,6 +1071,11 @@ func (p *DetailPanel) HasEscapableState() bool {
 	return true // Always allow ESC to go back
 }
 
+// IsFilterEditing returns whether the containers filter is being edited
+func (p *DetailPanel) IsFilterEditing() bool {
+	return p.containersTableCtrl != nil && p.containersTableCtrl.IsFilterEditing()
+}
+
 // HandleEscape implements ui.EscapablePanel
 func (p *DetailPanel) HandleEscape() bool {
 	if p.containersTableCtrl != nil && p.containersTableCtrl.HandleEscape() {

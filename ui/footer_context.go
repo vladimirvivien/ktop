@@ -17,6 +17,7 @@ func (c OverviewContext) GetItems() []FooterItem {
 		return []FooterItem{
 			{Key: "[Tab]", Action: "next"},
 			{Key: "[/]", Action: "filter"},
+			{Key: "[?]", Action: "help"},
 			{Key: "[ESC | Ctrl+C]", Action: "quit"},
 		}
 	case "nodes":
@@ -26,6 +27,8 @@ func (c OverviewContext) GetItems() []FooterItem {
 			{Key: "[Tab]", Action: "next"},
 			{Key: "[=]", Action: "cols"},
 			{Key: "[/]", Action: "filter"},
+			{Key: "[y]", Action: "copy"},
+			{Key: "[?]", Action: "help"},
 			{Key: "[ESC | Ctrl+C]", Action: "quit"},
 		}
 	case "pods":
@@ -35,11 +38,14 @@ func (c OverviewContext) GetItems() []FooterItem {
 			{Key: "[Tab]", Action: "next"},
 			{Key: "[=]", Action: "cols"},
 			{Key: "[/]", Action: "filter"},
+			{Key: "[y]", Action: "copy"},
+			{Key: "[?]", Action: "help"},
 			{Key: "[ESC | Ctrl+C]", Action: "quit"},
 		}
 	default: // summary or unknown
 		return []FooterItem{
 			{Key: "[Tab]", Action: "next"},
+			{Key: "[?]", Action: "help"},
 			{Key: "[ESC | Ctrl+C]", Action: "quit"},
 		}
 	}
@@ -58,6 +64,8 @@ func (c NodeDetailContext) GetItems() []FooterItem {
 			{Key: "[↑/↓]", Action: "navigate"},
 			{Key: "[Enter]", Action: "pod detail"},
 			{Key: "[Tab]", Action: "next"},
+			{Key: "[y]", Action: "copy"},
+			{Key: "[?]", Action: "help"},
 			{Key: "[ESC]", Action: "back"},
 			{Key: "[Ctrl+C]", Action: "quit"},
 		}
@@ -65,6 +73,7 @@ func (c NodeDetailContext) GetItems() []FooterItem {
 		return []FooterItem{
 			{Key: "[↑/↓]", Action: "scroll"},
 			{Key: "[Tab]", Action: "next"},
+			{Key: "[?]", Action: "help"},
 			{Key: "[ESC]", Action: "back"},
 			{Key: "[Ctrl+C]", Action: "quit"},
 		}
@@ -85,6 +94,8 @@ func (c PodDetailContext) GetItems() []FooterItem {
 			{Key: "[Enter]", Action: "container"},
 			{Key: "[Tab]", Action: "next"},
 			{Key: "[n]", Action: "node"},
+			{Key: "[y]", Action: "copy"},
+			{Key: "[?]", Action: "help"},
 			{Key: "[ESC]", Action: "back"},
 			{Key: "[Ctrl+C]", Action: "quit"},
 		}
@@ -93,6 +104,7 @@ func (c PodDetailContext) GetItems() []FooterItem {
 			{Key: "[↑/↓]", Action: "scroll"},
 			{Key: "[Tab]", Action: "next"},
 			{Key: "[n]", Action: "node"},
+			{Key: "[?]", Action: "help"},
 			{Key: "[ESC]", Action: "back"},
 			{Key: "[Ctrl+C]", Action: "quit"},
 		}
@@ -117,6 +129,7 @@ func (c ContainerDetailContext) GetItems() []FooterItem {
 			{Key: "[/]", Action: "filter"},
 			{Key: "[x]", Action: "expand"},
 			{Key: "[g/G]", Action: "top/btm"},
+			{Key: "[?]", Action: "help"},
 			{Key: "[ESC]", Action: "back"},
 		}
 	default: // detail panel
@@ -124,6 +137,7 @@ func (c ContainerDetailContext) GetItems() []FooterItem {
 			{Key: "[↑/↓]", Action: "scroll"},
 			{Key: "[Tab]", Action: "next"},
 			{Key: "[s]", Action: "spec"},
+			{Key: "[?]", Action: "help"},
 			{Key: "[ESC]", Action: "back"},
 			{Key: "[Ctrl+C]", Action: "quit"},
 		}

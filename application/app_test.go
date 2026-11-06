@@ -136,3 +136,32 @@ func TestApplication_ModalPageEscapeNotInterrupted(t *testing.T) {
 		t.Fatalf("expected pendingQuit to remain false when modal is active")
 	}
 }
+
+func TestApplication_ShowHelpModal(t *testing.T) {
+	tapp := tview.NewApplication()
+	panel := newPanel(tapp)
+	panel.root = tview.NewPages()
+	panel.root.AddPage("main", tview.NewBox(), true, true)
+
+	app := &Application{
+		tviewApp: tapp,
+		panel:    panel,
+		navStack: NewNavigationStack(),
+	}
+
+	if app.HasActiveModalPage() {
+		t.Fatalf("expected no active modal page initially")
+	}
+
+	app.ShowHelpModal()
+
+	if !app.HasActiveModalPage() {
+		t.Fatalf("expected active modal page after ShowHelpModal")
+	}
+
+	app.DismissModalPage(helpModalID)
+
+	if app.HasActiveModalPage() {
+		t.Fatalf("expected no active modal page after DismissModalPage")
+	}
+}

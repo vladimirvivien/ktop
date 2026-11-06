@@ -629,6 +629,11 @@ func (p *nodePanel) HasEscapableState() bool {
 	return p.tableCtrl.HasEscapableState()
 }
 
+// IsFilterEditing returns whether the filter input is currently being edited
+func (p *nodePanel) IsFilterEditing() bool {
+	return p.tableCtrl.IsFilterEditing()
+}
+
 // HandleEscape implements ui.EscapablePanel - handles ESC key press
 func (p *nodePanel) HandleEscape() bool {
 	return p.tableCtrl.HandleEscape()

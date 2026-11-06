@@ -322,6 +322,17 @@ func (p *MainPanel) HandleEscape() bool {
 	return false
 }
 
+// IsFilterEditing returns true if any child panel is currently editing its filter
+func (p *MainPanel) IsFilterEditing() bool {
+	if np, ok := p.nodePanel.(interface{ IsFilterEditing() bool }); ok && np.IsFilterEditing() {
+		return true
+	}
+	if pp, ok := p.podPanel.(interface{ IsFilterEditing() bool }); ok && pp.IsFilterEditing() {
+		return true
+	}
+	return false
+}
+
 // GetActiveDetailPanel returns the currently active detail panel as an EscapablePanel.
 // Returns nil if no detail panel is active or the panel doesn't implement EscapablePanel.
 func (p *MainPanel) GetActiveDetailPanel() ui.EscapablePanel {

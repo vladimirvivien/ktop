@@ -306,6 +306,14 @@ func (tc *TableController) HasEscapableState() bool {
 	return tc.filter.HasEscapableState()
 }
 
+// IsFilterEditing returns true if the filter is currently in edit mode (user is typing)
+func (tc *TableController) IsFilterEditing() bool {
+	if tc == nil || tc.filter == nil {
+		return false
+	}
+	return tc.filter.Editing
+}
+
 // GetSparkline returns an existing sparkline from the cache or creates a new one
 func GetSparkline(sparklines map[string]*Sparkline, key string, width int, colors ColorKeys) *Sparkline {
 	if spark, ok := sparklines[key]; ok {

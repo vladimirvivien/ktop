@@ -438,6 +438,12 @@ func (app *Application) setup(ctx context.Context) error {
 			app.pendingQuit = false
 		}
 
+		// Handle '?' and F1 for help overlay modal (when not actively editing text)
+		if !app.isFilterEditing() && (event.Key() == tcell.KeyF1 || (event.Key() == tcell.KeyRune && event.Rune() == '?')) {
+			app.ShowHelpModal()
+			return nil
+		}
+
 		// Handle ESC - check if header or visible panel has state to clear first
 		// Global handler runs BEFORE focused widget, so we must check panels here
 		if event.Key() == tcell.KeyEsc {
@@ -930,6 +936,61 @@ func (app *Application) getFocusedPanelName() string {
 	default:
 		return "summary"
 	}
+}
+
+const helpModalID = "help-modal"
+
+// ShowHelpModal displays the keyboard shortcut help overlay modal
+func (app *Application) ShowHelpModal() {
+	if app.HasActiveModalPage() {
+		return
+	}
+
+	pageName := "Overview"
+	focusedPanel := app.getFocusedPanelName()
+	if current := app.navStack.Current(); current != nil {
+		switch current.PageType {
+		case PageNodeDetail:
+			pageName = "Node Detail"
+			focusedPanel = "node_detail"
+		case PagePodDetail:
+			pageName = "Pod Detail"
+			focusedPanel = "pod_detail"
+		case PageContainerLogs:
+			pageName = "Container Logs"
+			focusedPanel = "logs"
+		}
+	}
+
+	modal := ui.NewHelpModal(ui.HelpModalConfig{
+		CurrentPage:  pageName,
+		FocusedPanel: focusedPanel,
+		OnClose: func() {
+			app.DismissModalPage(helpModalID)
+		},
+	})
+
+	app.ShowModalPage(helpModalID, modal.GetRootView())
+}
+
+// isFilterEditing returns true if any panel or header is currently editing filter text
+func (app *Application) isFilterEditing() bool {
+	if app.panel.isNamespaceFilterEditing() {
+		return true
+	}
+	if app.IsInDetailView() {
+		if panel := app.getActiveDetailPanel(); panel != nil {
+			if fe, ok := panel.(interface{ IsFilterEditing() bool }); ok {
+				return fe.IsFilterEditing()
+			}
+		}
+	}
+	if app.visibleView >= 0 && app.visibleView < len(app.pages) {
+		if fe, ok := app.pages[app.visibleView].Panel.(interface{ IsFilterEditing() bool }); ok {
+			return fe.IsFilterEditing()
+		}
+	}
+	return false
 }
 
 // updateFooterContext updates the navigation footer based on current page and focus
