@@ -97,11 +97,11 @@ krews:
   skip_upload: true
 
 # Homebrew
-homebrew_casks:
+brews:
   - name: ktop
     ids:
     - ktop
-    binary: ktop
+    directory: Formula
     repository:
       owner: vladimirvivien
       name: homebrew-oss-tools
@@ -111,7 +111,9 @@ homebrew_casks:
       email: 309126+vladimirvivien@users.noreply.github.com
     homepage: https://github.com/vladimirvivien/ktop
     description: A top-like tool to display kubernetes workload metrics
-    license: "Apache-2.0 license"
+    license: Apache-2.0
+    install: |
+      bin.install "ktop"
     skip_upload: auto
 
 # ko-generated images
