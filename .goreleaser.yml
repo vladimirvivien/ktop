@@ -112,7 +112,7 @@ homebrew_casks:
     homepage: https://github.com/vladimirvivien/ktop
     description: A top-like tool to display kubernetes workload metrics
     license: "Apache-2.0 license"
-    skip_upload: true
+    skip_upload: auto
 
 # ko-generated images
 kos:
