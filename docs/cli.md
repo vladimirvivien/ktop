@@ -49,6 +49,8 @@ Additional control plane components (apiserver, etcd, scheduler, controller-mana
 | `--node-columns` | Comma-separated node columns to show |
 | `--pod-columns` | Comma-separated pod columns to show |
 | `--show-all-columns` | Show all columns (default: true) |
+| `--sort-nodes` | Initial sort column and order for nodes (e.g. `+Name`, `-Memory`) |
+| `--sort-pods` | Initial sort column and order for pods (e.g. `-Memory`, `+CPU`) |
 
 ## Advanced Connection Flags
 
@@ -81,6 +83,9 @@ ktop --namespace kube-system
 
 # Combine options
 ktop --context staging --namespace default
+
+# Initial table sorting
+ktop --sort-pods=-Memory --sort-nodes=+Name
 ```
 
 ### Metrics Source Selection

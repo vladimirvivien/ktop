@@ -48,7 +48,7 @@ go install github.com/vladimirvivien/ktop@latest
 
 ### Binary download
 
-Download from [GitHub Releases](https://github.com/vladimirvivien/ktop/releases/latest) and add to your PATH.
+Download prebuilt binary archives for Linux, macOS, and Windows (`.zip` and `.tar.gz`) from [GitHub Releases](https://github.com/vladimirvivien/ktop/releases/latest) and add the binary to your PATH.
 
 ### Build from source
 
@@ -143,14 +143,22 @@ Overview → Node Detail → (back to Overview)
 | **Enter** | Drill down into selected node, pod, or container |
 | **ESC** | Go back to previous page (or exit filter mode if active) |
 | **Tab** | Cycle focus between panels |
+| **? / F1** | Toggle keyboard shortcuts help overlay modal |
+| **y / Y** | Copy selected resource name to clipboard |
+| **=** | Open column customization dialog to toggle visible columns |
+| **/** | Filter table rows by text (or filter namespace in Header) |
 | **Ctrl+C** | Quit immediately |
 
 ### Tips
 
 - The **footer** shows available shortcuts for the current context
+- Press **?** anywhere to view context-sensitive keyboard shortcuts
+- Press **y** to copy the selected node, pod, or container name to the clipboard
+- Press **=** to customize which columns appear in the Nodes or Pods tables
 - Press **ESC twice** from the Overview page to quit (first ESC shows confirmation)
-- When a table column header has a highlighted letter, press that letter to sort by that column
+- When a table column header has a highlighted letter, press that letter to sort by that column (repeat to toggle ascending/descending)
 - Press `/` when the header is focused to filter pods by namespace
+- Node and Pod detail pages show live PSI pressure stall sparklines for CPU, memory, and I/O
 
 ## Pages
 
@@ -186,6 +194,13 @@ Shows container specification (image, ports, probes, resource limits) and live s
 - `g/G` - Jump to top/bottom
 
 Press ESC to return to Pod Detail. If filtering is active, first ESC exits filter mode.
+
+## Configuration & Session Logs
+
+ktop creates and manages user files in `~/.ktop/`:
+
+- `~/.ktop/config.yaml` — Declarative configuration file for default metrics sources and customized column selections.
+- `~/.ktop/logs/ktop.log` — Rolling session logs for operational diagnostics (automatically rotates up to 5 archive files at 10MB each).
 
 ## Troubleshooting
 
