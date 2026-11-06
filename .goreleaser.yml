@@ -19,6 +19,7 @@ builds:
     goos:
       - darwin
       - linux
+      - windows
     goarch:
       - amd64
       - arm
@@ -30,6 +31,10 @@ builds:
       - goos: darwin
         goarch: arm
       - goos: darwin
+        goarch: riscv64
+      - goos: windows
+        goarch: arm
+      - goos: windows
         goarch: riscv64
     flags:
       - -trimpath
@@ -42,6 +47,7 @@ builds:
     goos:
       - darwin
       - linux
+      - windows
     goarch:
       - amd64
       - arm
@@ -54,6 +60,10 @@ builds:
         goarch: arm
       - goos: darwin
         goarch: riscv64
+      - goos: windows
+        goarch: arm
+      - goos: windows
+        goarch: riscv64
     flags:
       - -trimpath
     ldflags: -s -w -X github.com/vladimirvivien/ktop/buildinfo.Version=v{{.Version}} -X github.com/vladimirvivien/ktop/buildinfo.GitSHA={{.FullCommit}}
@@ -65,6 +75,9 @@ archives:
      name_template: '{{ .Binary }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}{{ if .Arm}}v{{ .Arm }}{{ end }}'
      wrap_in_directory: false
      formats: tar.gz
+     format_overrides:
+       - goos: windows
+         formats: zip
      files:
      - LICENSE
 
@@ -74,6 +87,9 @@ archives:
      name_template: '{{ .Binary }}_{{ .Tag }}_{{ .Os }}_{{ .Arch }}{{ if .Arm}}v{{ .Arm }}{{ end }}'
      wrap_in_directory: false
      formats: tar.gz
+     format_overrides:
+       - goos: windows
+         formats: zip
      files:
        - LICENSE
 
