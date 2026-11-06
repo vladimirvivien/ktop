@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/model"
 	corev1 "k8s.io/api/core/v1"
@@ -239,5 +240,61 @@ func TestNodeDetailPanel_PodsTableSortAndFilter(t *testing.T) {
 		if !strings.Contains(cleared, name) {
 			t.Fatalf("expected pod %q restored after Esc clears filter, got:\n%s", name, cleared)
 		}
+	}
+}
+
+func TestNodeDetailPanel_PSISparklines(t *testing.T) {
+	ts, err := ui.NewTestScreen(140, 42)
+	if err != nil {
+		t.Fatalf("NewTestScreen failed: %v", err)
+	}
+	t.Cleanup(ts.Close)
+
+	panel := NewDetailPanel()
+	detailData := &model.NodeDetailData{
+		NodeModel: &model.NodeModel{
+			Name:               "worker-psi-1",
+			PSIKernelSupported: true,
+			PSI: metrics.PSIMetrics{
+				CPUStallPct: 2.5,
+				MemStallPct: 8.1,
+				IOStallPct:  14.3,
+			},
+		},
+	}
+
+	panel.DrawBody(detailData)
+	root := panel.GetRootView()
+	ts.Draw(root)
+	panel.DrawBody(detailData)
+	ts.Draw(root)
+
+	text := ts.Text()
+	for _, expected := range []string{
+		"CPU Stall",
+		"MEM Stall",
+		"IO Stall",
+		"2.5%",
+		"8.1%",
+		"14%",
+	} {
+		if !strings.Contains(text, expected) {
+			t.Fatalf("expected PSI stall text %q in NodeDetailPanel, got:\n%s", expected, text)
+		}
+	}
+
+	// Test unsupported kernel shows warning N/A
+	detailDataUnsupported := &model.NodeDetailData{
+		NodeModel: &model.NodeModel{
+			Name:               "worker-old-kernel",
+			PSIKernelSupported: false,
+		},
+	}
+	panel.DrawBody(detailDataUnsupported)
+	ts.Draw(root)
+
+	unsupportedText := ts.Text()
+	if !strings.Contains(unsupportedText, "⚠ N/A") {
+		t.Fatalf("expected '⚠ N/A' in unsupported kernel detail view, got:\n%s", unsupportedText)
 	}
 }
