@@ -54,6 +54,9 @@ type DetailPanel struct {
 	middleDetailTable *tview.Table
 	containersTable   *tview.Table
 
+	containersTableCtrl *ui.TableController
+	filteredContainers  []model.ContainerInfo
+
 	// Text views for labels/annotations/resources (sorted for stable display)
 	labelsTextView      *tview.TextView
 	annotationsTextView *tview.TextView
@@ -193,8 +196,37 @@ func (p *DetailPanel) Layout(_ any) {
 		p.containersTable.SetBorders(false)
 		p.containersTable.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorLightGray).Foreground(tcell.ColorBlack))
 
+		containerColToKey := map[string]rune{
+			"CONTAINER": 'o',
+			"IMAGE":     'i',
+			"STATE":     's',
+			"READY":     'r',
+			"RESTARTS":  't',
+			"CPU":       'c',
+			"MEM":       'm',
+		}
+
+		p.containersTableCtrl = ui.NewTableController(p.containersTable, ui.TableControllerConfig{
+			DefaultSortColumn: "CONTAINER",
+			DefaultSortAsc:    true,
+			ColumnToKey:       containerColToKey,
+			OnRedraw:          p.drawContainersTable,
+			OnSelect: func(row int) bool {
+				if row > 0 && row-1 < len(p.filteredContainers) {
+					p.handleContainerSelect()
+					return true
+				}
+				return false
+			},
+		})
+
 		// Handle keyboard input on containers table
 		p.containersTable.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			if p.containersTableCtrl != nil {
+				if handled := p.containersTableCtrl.HandleInput(event); handled == nil {
+					return nil
+				}
+			}
 			switch event.Key() {
 			case tcell.KeyTab:
 				p.cycleFocus()
@@ -203,6 +235,9 @@ func (p *DetailPanel) Layout(_ any) {
 				p.cycleFocusReverse()
 				return nil
 			case tcell.KeyEscape:
+				if p.containersTableCtrl != nil && p.containersTableCtrl.HandleEscape() {
+					return nil
+				}
 				if p.onBack != nil {
 					p.onBack()
 					return nil
@@ -276,9 +311,8 @@ func (p *DetailPanel) Layout(_ any) {
 // handleContainerSelect handles Enter/l on the containers table
 func (p *DetailPanel) handleContainerSelect() {
 	row, _ := p.containersTable.GetSelection()
-	containers := p.data.GetContainers()
-	if row > 0 && p.data != nil && row-1 < len(containers) {
-		container := containers[row-1]
+	if row > 0 && p.data != nil && row-1 < len(p.filteredContainers) {
+		container := p.filteredContainers[row-1]
 		if p.onContainerSelected != nil {
 			p.onContainerSelected(
 				p.data.PodModel.Namespace,
@@ -796,19 +830,47 @@ func (p *DetailPanel) drawContainersTable() {
 
 	p.containersTable.Clear()
 
-	containers := p.data.GetContainers()
+	allContainers := p.data.GetContainers()
+	p.filteredContainers = make([]model.ContainerInfo, 0, len(allContainers))
 
-	// Update title with container count
-	p.containersPanel.SetTitle(fmt.Sprintf(" Containers (%d) - [yellow]Enter/l: logs[-] ", len(containers)))
+	if p.containersTableCtrl != nil {
+		filter := p.containersTableCtrl.Filter()
+		filter.TotalRows = len(allContainers)
+
+		if filter.IsFiltering() && filter.Text != "" {
+			filterLower := strings.ToLower(filter.Text)
+			for _, c := range allContainers {
+				combined := strings.ToLower(fmt.Sprintf("%s %s %s", c.Name, c.Image, c.State))
+				if strings.Contains(combined, filterLower) {
+					p.filteredContainers = append(p.filteredContainers, c)
+				}
+			}
+			filter.MatchRows = len(p.filteredContainers)
+		} else {
+			p.filteredContainers = append(p.filteredContainers, allContainers...)
+			filter.MatchRows = len(p.filteredContainers)
+		}
+
+		sortCol, sortAsc := p.containersTableCtrl.GetSortParams()
+		model.SortContainerInfosBy(p.filteredContainers, sortCol, sortAsc)
+		p.containersPanel.SetTitle(p.containersTableCtrl.FormatTitleWithScroll("Containers", "", len(p.filteredContainers), "- [yellow]Enter/l: logs[-]"))
+	} else {
+		p.filteredContainers = append(p.filteredContainers, allContainers...)
+		p.containersPanel.SetTitle(fmt.Sprintf(" Containers (%d) - [yellow]Enter/l: logs[-] ", len(p.filteredContainers)))
+	}
 
 	// Draw header
-	headers := []string{"NAME", "IMAGE", "STATE", "READY", "RESTARTS", "CPU", "MEM"}
+	headers := []string{"CONTAINER", "IMAGE", "STATE", "READY", "RESTARTS", "CPU", "MEM"}
 	for col, header := range headers {
 		expansion := 1
 		if header == "IMAGE" {
 			expansion = 2
 		}
-		cell := tview.NewTableCell(header).
+		headerText := header
+		if p.containersTableCtrl != nil {
+			headerText = p.containersTableCtrl.FormatColumnHeader(header)
+		}
+		cell := tview.NewTableCell(headerText).
 			SetTextColor(tcell.ColorWhite).
 			SetBackgroundColor(tcell.ColorDarkCyan).
 			SetSelectable(false).
@@ -816,12 +878,12 @@ func (p *DetailPanel) drawContainersTable() {
 		p.containersTable.SetCell(0, col, cell)
 	}
 
-	if len(containers) == 0 {
+	if len(p.filteredContainers) == 0 {
 		return
 	}
 
 	// Draw containers
-	for row, container := range containers {
+	for row, container := range p.filteredContainers {
 		rowIdx := row + 1 // Offset for header
 
 		stateColor := tcell.ColorGreen
@@ -875,7 +937,7 @@ func (p *DetailPanel) drawContainersTable() {
 			memColor = tcell.ColorGreen
 		} else if container.MemoryRequest != "" {
 			memStr = container.MemoryRequest
-			memColor = tcell.ColorGray
+			cpuColor = tcell.ColorGray
 		} else if container.MemoryLimit != "" {
 			memStr = container.MemoryLimit
 			memColor = tcell.ColorGray
@@ -891,7 +953,7 @@ func (p *DetailPanel) drawContainersTable() {
 	}
 
 	// Restore selection (clamped to valid range)
-	maxRow := len(containers)
+	maxRow := len(p.filteredContainers)
 	if selectedRow < 1 {
 		selectedRow = 1 // Minimum is first data row
 	} else if selectedRow > maxRow {
@@ -995,11 +1057,17 @@ func (p *DetailPanel) SetFocused(focused bool) {
 
 // HasEscapableState implements ui.EscapablePanel
 func (p *DetailPanel) HasEscapableState() bool {
+	if p.containersTableCtrl != nil && p.containersTableCtrl.HasEscapableState() {
+		return true
+	}
 	return true // Always allow ESC to go back
 }
 
 // HandleEscape implements ui.EscapablePanel
 func (p *DetailPanel) HandleEscape() bool {
+	if p.containersTableCtrl != nil && p.containersTableCtrl.HandleEscape() {
+		return true
+	}
 	if p.onBack != nil {
 		p.onBack()
 		return true
