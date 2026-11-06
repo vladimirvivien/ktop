@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*.*.**'
 
+permissions:
+  contents: write
+  packages: write
+
 jobs:
   go-release:
     name: goreleaser-release
@@ -12,16 +16,25 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version-file: 'go.mod'
+    - name: Log in to GHCR
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     - name: Binary release
       uses: goreleaser/goreleaser-action@v6
       with:
         version: latest
         args: release --clean
       env:
-        GITHUB_TOKEN: ${{ secrets.RELEASER_SECRET }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     - name: Update new version in krew-index
       uses: rajatjindal/krew-release-bot@v0.0.47
+      continue-on-error: true
