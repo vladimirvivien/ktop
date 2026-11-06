@@ -56,6 +56,19 @@ type MainPanel struct {
 	// Dynamic layout tracking
 	lastHeightCategory int // 0=small, 1=medium, 2=large, 3=extraLarge - for detecting resize category changes
 	lastTerminalHeight int // Track height for dynamic resizing in ExtraLarge category
+
+	initialNodeSortCol string
+	initialNodeSortAsc bool
+	initialPodSortCol  string
+	initialPodSortAsc  bool
+}
+
+// SetInitialSort sets the initial sort column and direction for nodes and pods tables
+func (p *MainPanel) SetInitialSort(nodeCol string, nodeAsc bool, podCol string, podAsc bool) {
+	p.initialNodeSortCol = nodeCol
+	p.initialNodeSortAsc = nodeAsc
+	p.initialPodSortCol = podCol
+	p.initialPodSortAsc = podAsc
 }
 
 func New(app *application.Application, title string) *MainPanel {
@@ -103,6 +116,9 @@ func (p *MainPanel) Layout(data any) {
 
 	// Set up node selection and column configuration callback
 	if np, ok := p.nodePanel.(*nodePanel); ok {
+		if p.initialNodeSortCol != "" {
+			np.tableCtrl.SetSortParams(p.initialNodeSortCol, p.initialNodeSortAsc)
+		}
 		np.SetOnNodeSelected(func(nodeName string) {
 			p.app.NavigateToNodeDetail(nodeName)
 		})
@@ -127,6 +143,9 @@ func (p *MainPanel) Layout(data any) {
 
 	// Set up pod selection and column configuration callback
 	if pp, ok := p.podPanel.(*podPanel); ok {
+		if p.initialPodSortCol != "" {
+			pp.tableCtrl.SetSortParams(p.initialPodSortCol, p.initialPodSortAsc)
+		}
 		pp.SetOnPodSelected(func(namespace, podName string) {
 			p.app.NavigateToPodDetail(namespace, podName)
 		})

@@ -53,6 +53,8 @@ type ktopCmdOptions struct {
 	nodeColumns    string // comma-separated list of node columns to display
 	podColumns     string // comma-separated list of pod columns to display
 	showAllColumns bool   // show all columns
+	sortNodes      string // initial sort column for nodes table (+NAME, -CPU)
+	sortPods       string // initial sort column for pods table (+POD, -MEMORY)
 
 	// Metrics configuration
 	metricsSource            string
@@ -90,6 +92,8 @@ func NewKtopCmd() *cobra.Command {
 	cmd.Flags().StringVar(&o.nodeColumns, "node-columns", "", "Comma-separated list of node columns to display (e.g. 'NAME,CPU,MEM')")
 	cmd.Flags().StringVar(&o.podColumns, "pod-columns", "", "Comma-separated list of pod columns to display (e.g. 'NAMESPACE,POD,STATUS')")
 	cmd.Flags().BoolVar(&o.showAllColumns, "show-all-columns", false, "If true, show all columns")
+	cmd.Flags().StringVar(&o.sortNodes, "sort-nodes", "", "Initial sort column for nodes table, prefix with + for asc, - for desc (e.g. '+NAME', '-CPU')")
+	cmd.Flags().StringVar(&o.sortPods, "sort-pods", "", "Initial sort column for pods table, prefix with + for asc, - for desc (e.g. '-MEMORY', '+POD')")
 
 	// Metrics source flags
 	cmd.Flags().StringVar(&o.metricsSource, "metrics-source", "prometheus",
@@ -357,7 +361,22 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	}
 
 	// Create a new overview page with column options
-	app.AddPage(overview.NewWithColumnOptions(app, "Overview", o.showAllColumns, nodeColumns, podColumns))
+	overviewPage := overview.NewWithColumnOptions(app, "Overview", o.showAllColumns, nodeColumns, podColumns)
+	nodeSortCol, nodeSortAsc := parseSortFlag(o.sortNodes)
+	if nodeSortCol == "MEMORY" {
+		nodeSortCol = "MEM"
+	}
+	podSortCol, podSortAsc := parseSortFlag(o.sortPods)
+	if podSortCol == "NAME" {
+		podSortCol = "POD"
+	}
+	if podSortCol == "MEM" {
+		podSortCol = "MEMORY"
+	}
+	if nodeSortCol != "" || podSortCol != "" {
+		overviewPage.SetInitialSort(nodeSortCol, nodeSortAsc, podSortCol, podSortAsc)
+	}
+	app.AddPage(overviewPage)
 
 	if err := k8sC.AssertCoreAuthz(ctx); err != nil {
 		slog.Error("kubernetes authorization check failed", "error", err)
@@ -394,4 +413,24 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func parseSortFlag(val string) (string, bool) {
+	if val == "" {
+		return "", true
+	}
+	val = strings.TrimSpace(val)
+	asc := true
+	if strings.HasPrefix(val, "+") {
+		val = strings.TrimPrefix(val, "+")
+		asc = true
+	} else if strings.HasPrefix(val, "-") {
+		val = strings.TrimPrefix(val, "-")
+		asc = false
+	}
+	col := strings.ToUpper(val)
+	if col == "RESTARTS" {
+		col = "RST"
+	}
+	return col, asc
 }
