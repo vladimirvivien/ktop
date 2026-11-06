@@ -271,15 +271,13 @@ func TestNodeDetailPanel_PSISparklines(t *testing.T) {
 
 	text := ts.Text()
 	for _, expected := range []string{
-		"CPU Stall",
-		"MEM Stall",
-		"IO Stall",
-		"2.5%",
-		"8.1%",
-		"14%",
+		"PSI:",
+		"CPU 2.5%",
+		"MEM 8.1%",
+		"IO 14%",
 	} {
 		if !strings.Contains(text, expected) {
-			t.Fatalf("expected PSI stall text %q in NodeDetailPanel, got:\n%s", expected, text)
+			t.Fatalf("expected PSI stall text %q in NodeDetailPanel Info box, got:\n%s", expected, text)
 		}
 	}
 
@@ -294,7 +292,7 @@ func TestNodeDetailPanel_PSISparklines(t *testing.T) {
 	ts.Draw(root)
 
 	unsupportedText := ts.Text()
-	if !strings.Contains(unsupportedText, "⚠ N/A") {
-		t.Fatalf("expected '⚠ N/A' in unsupported kernel detail view, got:\n%s", unsupportedText)
+	if !strings.Contains(unsupportedText, "PSI: ⚠ N/A") {
+		t.Fatalf("expected 'PSI: ⚠ N/A' in unsupported kernel detail view Info box, got:\n%s", unsupportedText)
 	}
 }

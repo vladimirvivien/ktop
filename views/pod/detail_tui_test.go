@@ -167,15 +167,13 @@ func TestPodDetailPanel_PSISparklines(t *testing.T) {
 
 	text := ts.Text()
 	for _, expected := range []string{
-		"CPU Stall",
-		"MEM Stall",
-		"IO Stall",
-		"1.8%",
-		"6.4%",
-		"12%",
+		"PSI:",
+		"CPU 1.8%",
+		"MEM 6.4%",
+		"IO 12%",
 	} {
 		if !strings.Contains(text, expected) {
-			t.Fatalf("expected PSI stall text %q in PodDetailPanel, got:\n%s", expected, text)
+			t.Fatalf("expected PSI stall text %q in PodDetailPanel Info box, got:\n%s", expected, text)
 		}
 	}
 
@@ -191,7 +189,7 @@ func TestPodDetailPanel_PSISparklines(t *testing.T) {
 	ts.Draw(root)
 
 	unsupportedText := ts.Text()
-	if !strings.Contains(unsupportedText, "⚠ N/A") {
-		t.Fatalf("expected '⚠ N/A' in unsupported kernel pod detail view, got:\n%s", unsupportedText)
+	if !strings.Contains(unsupportedText, "PSI: ⚠ N/A") {
+		t.Fatalf("expected 'PSI: ⚠ N/A' in unsupported kernel pod detail view Info box, got:\n%s", unsupportedText)
 	}
 }

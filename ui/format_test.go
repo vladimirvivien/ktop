@@ -1,11 +1,13 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/metrics"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -137,6 +139,29 @@ func TestAdaptiveRateMax(t *testing.T) {
 	if res2 != 1024*1024 || peak != 1024*1024 {
 		t.Errorf("expected 1MB/s, got %v, peak %v", res2, peak)
 	}
+}
+
+func TestFormatPSIInfo(t *testing.T) {
+	t.Run("supported kernel", func(t *testing.T) {
+		psi := metrics.PSIMetrics{
+			CPUStallPct: 0.03,
+			MemStallPct: 0.0,
+			IOStallPct:  12.5,
+		}
+		got := FormatPSIInfo(psi, true)
+		for _, exp := range []string{"CPU [green]0.03%[-]", "MEM [gray]0%[-]", "IO [orange]12%[-]"} {
+			if !strings.Contains(got, exp) {
+				t.Errorf("expected FormatPSIInfo to contain %q, got: %s", exp, got)
+			}
+		}
+	})
+
+	t.Run("unsupported kernel", func(t *testing.T) {
+		got := FormatPSIInfo(metrics.PSIMetrics{CPUStallPct: 1.0}, false)
+		if got != "[gray]PSI:[yellow] ⚠ N/A[-]" {
+			t.Errorf("expected unsupported kernel warning, got: %s", got)
+		}
+	})
 }
 
 func TestCycleFocus(t *testing.T) {

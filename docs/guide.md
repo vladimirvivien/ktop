@@ -158,7 +158,7 @@ Overview → Node Detail → (back to Overview)
 - Press **ESC twice** from the Overview page to quit (first ESC shows confirmation)
 - When a table column header has a highlighted letter, press that letter to sort by that column (repeat to toggle ascending/descending)
 - Press `/` when the header is focused to filter pods by namespace
-- Node and Pod detail pages show live PSI pressure stall sparklines for CPU, memory, and I/O
+- Node and Pod detail pages show live PSI pressure stall indicators for CPU, memory, and I/O in the Info header
 
 ## Pages
 

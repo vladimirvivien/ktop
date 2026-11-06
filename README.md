@@ -14,7 +14,7 @@ Following the tradition of Unix/Linux `top` tools, `ktop` is a tool that display
 
 * **Real-Time Monitoring** - Continuously updated view of nodes, pods, and containers
 * **Interactive Table Controls** - Column sorting, live filtering (`/`), and custom column selection (`=`)
-* **Pressure Stall Information (PSI)** - Cluster summary and node/pod detail stall sparklines for CPU, memory, and I/O pressure
+* **Pressure Stall Information (PSI)** - Cluster summary and node/pod detail stall indicators for CPU, memory, and I/O pressure
 * **Drill-Down Navigation** - Explore from cluster overview → node → pod → container logs
 * **Zero Cluster Installation** - Runs locally using your kubeconfig; no agents or server-side components
 * **Works Anywhere kubectl Works** - Connects through the Kubernetes API; no direct node access required

@@ -1,6 +1,6 @@
 # PSI Metrics
 
-Pressure Stall Information measures the percentage of wall time a cgroup spent with at least one task blocked waiting on a resource. ktop surfaces PSI in a `STALL` column on the Pods and Nodes tables and as an aggregate `Stall:` value on the cluster summary strip.
+Pressure Stall Information measures the percentage of wall time a cgroup spent with at least one task blocked waiting on a resource. ktop surfaces PSI in a `STALL` column on the Pods and Nodes tables, as an aggregate `Stall:` value on the cluster summary strip, and as live stall percentages in the Node and Pod detail Info headers.
 
 PSI distinguishes a healthy busy workload from a throttled one — a signal that pure utilization metrics (`kubectl top`-style CPU%) cannot show.
 

@@ -7,6 +7,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/metrics"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 )
@@ -171,4 +172,44 @@ func Truncate(s string, max int) string {
 		return s[:max]
 	}
 	return s[:max-3] + "..."
+}
+
+// FormatPSIInfo formats PSI pressure stall metrics for display in detail view info bars
+func FormatPSIInfo(psi metrics.PSIMetrics, kernelSupported bool) string {
+	if !kernelSupported {
+		return "[gray]PSI:[yellow] ⚠ N/A[-]"
+	}
+
+	formatVal := func(pct float64) string {
+		switch {
+		case pct < 0.01:
+			return "[gray]0%[-]"
+		case pct < 1.0:
+			return fmt.Sprintf("[%s]%.2f%%[-]", StallColor(pct), pct)
+		case pct < 10.0:
+			return fmt.Sprintf("[%s]%.1f%%[-]", StallColor(pct), pct)
+		default:
+			return fmt.Sprintf("[%s]%.0f%%[-]", StallColor(pct), pct)
+		}
+	}
+
+	return fmt.Sprintf("[gray]PSI:[white] CPU %s [white]MEM %s [white]IO %s",
+		formatVal(psi.CPUStallPct),
+		formatVal(psi.MemStallPct),
+		formatVal(psi.IOStallPct),
+	)
+}
+
+// StallColor returns the color name for a given stall percentage
+func StallColor(pct float64) string {
+	switch {
+	case pct < 2:
+		return "green"
+	case pct < 10:
+		return "yellow"
+	case pct < 25:
+		return "orange"
+	default:
+		return "red"
+	}
 }

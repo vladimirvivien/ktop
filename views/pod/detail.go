@@ -63,8 +63,7 @@ type DetailPanel struct {
 	resourcesTextView   *tview.TextView
 
 	// Sparkline row component for metrics visualization
-	sparklineRow    *ui.SparklineRow
-	psiSparklineRow *ui.PSISparklineRow
+	sparklineRow *ui.SparklineRow
 
 	// Adaptive scaling for Disk sparkline
 	peakDiskRate float64
@@ -114,9 +113,8 @@ func (p *DetailPanel) GetTitle() string {
 // Layout initializes the panel UI
 func (p *DetailPanel) Layout(_ any) {
 	if !p.laidout {
-		// Initialize sparkline rows
+		// Initialize sparkline row (starts in non-prometheus mode, self-sizing)
 		p.sparklineRow = ui.NewSparklineRow(false)
-		p.psiSparklineRow = ui.NewPSISparklineRow()
 
 		// Create info header panel
 		p.infoHeaderPanel = tview.NewFlex().SetDirection(tview.FlexColumn)
@@ -125,10 +123,9 @@ func (p *DetailPanel) Layout(_ any) {
 		p.infoHeaderPanel.SetTitleAlign(tview.AlignLeft)
 		p.infoHeaderPanel.SetBorderColor(tcell.ColorLightGray)
 
-		// Create sparkline panel and add sparkline rows to it
-		p.sparklinePanel = tview.NewFlex().SetDirection(tview.FlexRow)
+		// Create sparkline panel and add sparkline row to it
+		p.sparklinePanel = tview.NewFlex().SetDirection(tview.FlexColumn)
 		p.sparklinePanel.AddItem(p.sparklineRow, 0, 1, false)
-		p.sparklinePanel.AddItem(p.psiSparklineRow, 0, 1, false)
 
 		// Create pod detail panel (4 columns)
 		p.podDetailPanel = tview.NewFlex().SetDirection(tview.FlexColumn)
@@ -405,7 +402,6 @@ func (p *DetailPanel) DrawBody(data any) {
 // resetSparklines clears all sparkline state for a fresh start
 func (p *DetailPanel) resetSparklines() {
 	p.sparklineRow.Reset()
-	p.psiSparklineRow.Reset()
 }
 
 // drawInfoHeader draws the condensed info header row
@@ -432,6 +428,7 @@ func (p *DetailPanel) drawInfoHeader() {
 		fmt.Sprintf("[gray]IP:[white] %s", pod.IP),
 		fmt.Sprintf("[gray]Age:[white] %s", pod.TimeSince),
 		fmt.Sprintf("[gray]Restarts:[white] %d", totalRestarts),
+		ui.FormatPSIInfo(pod.PSI, pod.NodePSIKernelSupported),
 	}
 
 	// Create a text view with all items on one line
@@ -527,11 +524,6 @@ func (p *DetailPanel) drawSparklines() {
 			diskNormalized = 1
 		}
 		p.sparklineRow.UpdateDisk(diskNormalized, diskTitle)
-	}
-
-	// Update PSI resource stall sparklines
-	if p.data != nil && p.data.PodModel != nil {
-		p.psiSparklineRow.Update(p.data.PodModel.PSI, p.data.PodModel.NodePSIKernelSupported)
 	}
 }
 
@@ -1116,11 +1108,11 @@ func (p *DetailPanel) calculatePanelHeights(terminalHeight int) podDetailHeights
 	// Normal layout for larger terminals
 	switch ui.GetHeightCategory(terminalHeight) {
 	case ui.HeightCategorySmall:
-		return podDetailHeights{infoHeader: 3, sparklines: 6, podDetail: 11}
+		return podDetailHeights{infoHeader: 3, sparklines: 4, podDetail: 12}
 	case ui.HeightCategoryMedium:
-		return podDetailHeights{infoHeader: 3, sparklines: 7, podDetail: 13}
+		return podDetailHeights{infoHeader: 3, sparklines: 4, podDetail: 14}
 	default:
-		return podDetailHeights{infoHeader: 3, sparklines: 8, podDetail: 13}
+		return podDetailHeights{infoHeader: 3, sparklines: 4, podDetail: 14}
 	}
 }
 
@@ -1137,13 +1129,6 @@ func (p *DetailPanel) buildLayout() {
 	terminalHeight := height
 	currentCategory := ui.GetHeightCategory(terminalHeight)
 	heights := p.calculatePanelHeights(terminalHeight)
-
-	// Configure sparkline panel content based on available height
-	p.sparklinePanel.Clear()
-	p.sparklinePanel.AddItem(p.sparklineRow, 0, 1, false)
-	if heights.sparklines >= 6 {
-		p.sparklinePanel.AddItem(p.psiSparklineRow, 0, 1, false)
-	}
 
 	// Build the layout with correct sizes
 	p.root.Clear()
@@ -1186,13 +1171,6 @@ func (p *DetailPanel) checkAndRebuildLayout() {
 
 	// Track if sparkline height is changing (need to reset sparklines)
 	sparklineHeightChanged := heights.sparklines != p.lastSparklineHeight
-
-	// Configure sparkline panel content based on available height
-	p.sparklinePanel.Clear()
-	p.sparklinePanel.AddItem(p.sparklineRow, 0, 1, false)
-	if heights.sparklines >= 6 {
-		p.sparklinePanel.AddItem(p.psiSparklineRow, 0, 1, false)
-	}
 
 	// Clear and rebuild the flex layout
 	p.root.Clear()
