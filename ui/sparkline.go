@@ -169,5 +169,9 @@ func (s *Sparkline) Draw(screen tcell.Screen) {
 
 // DefaultColorKeys returns standard color thresholds for sparklines.
 func DefaultColorKeys() ColorKeys {
-	return ColorKeys{0: "olivedrab", 50: "yellow", 90: "red"}
+	return ColorKeys{
+		0:  Theme.SparklineNormal,
+		50: Theme.SparklineMedium,
+		90: Theme.SparklineHigh,
+	}
 }

@@ -1,6 +1,212 @@
 package ui
 
-import "github.com/gdamore/tcell/v2"
+import (
+	"sync/atomic"
+
+	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/ui/theme"
+)
+
+var activeTheme atomic.Pointer[theme.ResolvedTheme]
+
+func init() {
+	ApplyTheme(theme.ResolvedTheme{
+		Palette: theme.DarkPalette(),
+		Mode:    theme.ColorModeTrueColor,
+	})
+}
+
+// ActiveTheme returns the currently active resolved theme and color mode.
+func ActiveTheme() theme.ResolvedTheme {
+	if rt := activeTheme.Load(); rt != nil {
+		return *rt
+	}
+	return theme.ResolvedTheme{
+		Palette: theme.DarkPalette(),
+		Mode:    theme.ColorModeTrueColor,
+	}
+}
+
+// ActivePalette returns the active semantic Palette.
+func ActivePalette() theme.Palette {
+	return ActiveTheme().Palette
+}
+
+// IsMonochrome reports whether UI rendering must use attributes without color codes.
+func IsMonochrome() bool {
+	return ActiveTheme().IsMonochrome()
+}
+
+// ResolveAndApplyTheme resolves theme/color-mode settings against the environment and applies them.
+func ResolveAndApplyTheme(themeName, colorMode string) (theme.ResolvedTheme, error) {
+	rt, err := theme.Resolve(theme.ResolveOptions{
+		Theme:     themeName,
+		ColorMode: colorMode,
+	})
+	if err != nil {
+		return theme.ResolvedTheme{}, err
+	}
+	ApplyTheme(rt)
+	return rt, nil
+}
+
+// ApplyTheme activates rt across ui.Theme tokens and tview.Styles defaults.
+func ApplyTheme(rt theme.ResolvedTheme) {
+	resolved := rt
+	activeTheme.Store(&resolved)
+
+	p := resolved.Palette
+	mode := resolved.Mode
+	tag := func(c tcell.Color) string {
+		return theme.ColorTag(c, mode)
+	}
+
+	Theme.HeaderBackground = tag(p.HeaderBg)
+	Theme.HeaderForeground = tag(p.HeaderFg)
+	Theme.HeaderShortcutKey = tag(p.HeaderHotkey)
+	Theme.HeaderSortIndicator = tag(p.HeaderSortArrow)
+
+	Theme.SelectionBackground = tag(p.RowSelectedBg)
+	Theme.SelectionForeground = tag(p.RowSelectedFg)
+
+	Theme.StatusOK = tag(p.StatusOK)
+	Theme.StatusWarning = tag(p.StatusWarning)
+	Theme.StatusError = tag(p.StatusError)
+	Theme.StatusUnknown = tag(p.StatusMuted)
+	Theme.StatusInfo = tag(p.StatusInfo)
+
+	Theme.DataPrimary = tag(p.DataPrimary)
+	Theme.DataSecondary = tag(p.DataSecondary)
+	Theme.DataHighlight = tag(p.Accent)
+
+	Theme.GraphLow = tag(p.GaugeLow)
+	Theme.GraphMedium = tag(p.GaugeMedium)
+	Theme.GraphHigh = tag(p.GaugeHigh)
+
+	Theme.BorderColor = tag(p.BorderNormal)
+	Theme.SeparatorColor = tag(p.StatusMuted)
+
+	Theme.ResourceLowColor = tag(p.GaugeLow)
+	Theme.ResourceMediumColor = tag(p.GaugeMedium)
+	Theme.ResourceHighColor = tag(p.GaugeHigh)
+
+	Theme.RestartsLowColor = tag(p.GaugeLow)
+	Theme.RestartsMediumColor = tag(p.GaugeMedium)
+	Theme.RestartsHighColor = tag(p.GaugeHigh)
+
+	Theme.SparklineNormal = tag(p.SparklineNormal)
+	Theme.SparklineMedium = tag(p.GaugeMedium)
+	Theme.SparklineHigh = tag(p.SparklineAlert)
+	Theme.SparklineEmpty = tag(p.SparklineEmpty)
+
+	Theme.TrendNormalColor = tag(p.SparklineNormal)
+	Theme.TrendHighColor = tag(p.SparklineAlert)
+
+	Theme.FocusBorderColor = tag(p.BorderFocused)
+	Theme.UnfocusBorderColor = tag(p.BorderNormal)
+
+	if resolved.IsMonochrome() {
+		tview.Styles = tview.Theme{
+			PrimitiveBackgroundColor:    tcell.ColorDefault,
+			ContrastBackgroundColor:     tcell.ColorDefault,
+			MoreContrastBackgroundColor: tcell.ColorDefault,
+			BorderColor:                 tcell.ColorDefault,
+			TitleColor:                  tcell.ColorDefault,
+			GraphicsColor:               tcell.ColorDefault,
+			PrimaryTextColor:            tcell.ColorDefault,
+			SecondaryTextColor:          tcell.ColorDefault,
+			TertiaryTextColor:           tcell.ColorDefault,
+			InverseTextColor:            tcell.ColorDefault,
+			ContrastSecondaryTextColor:  tcell.ColorDefault,
+		}
+		return
+	}
+
+	tview.Styles = tview.Theme{
+		PrimitiveBackgroundColor:    p.CanvasBg,
+		ContrastBackgroundColor:     p.HeaderBg,
+		MoreContrastBackgroundColor: p.RowSelectedBg,
+		BorderColor:                 p.BorderNormal,
+		TitleColor:                  p.TitleNormal,
+		GraphicsColor:               p.BorderNormal,
+		PrimaryTextColor:            p.CanvasFg,
+		SecondaryTextColor:          p.DataPrimary,
+		TertiaryTextColor:           p.StatusOK,
+		InverseTextColor:            p.HeaderFg,
+		ContrastSecondaryTextColor:  p.StatusMuted,
+	}
+}
+
+// TagFg returns a tview foreground color tag string for c under the active theme mode.
+func TagFg(c tcell.Color) string {
+	return theme.ColorTag(c, ActiveTheme().Mode)
+}
+
+// ErrorMarkup formats error text for inline tview markup using semantic error styling.
+func ErrorMarkup(text string) string {
+	rt := ActiveTheme()
+	return theme.WrapError(text, rt.Palette, rt.Mode)
+}
+
+// StyleHeaderCell applies theme styling to a table column header cell.
+func StyleHeaderCell(cell *tview.TableCell) *tview.TableCell {
+	if cell == nil {
+		return nil
+	}
+	rt := ActiveTheme()
+	if rt.IsMonochrome() {
+		return cell.
+			SetTextColor(tcell.ColorDefault).
+			SetBackgroundColor(tcell.ColorDefault).
+			SetAttributes(tcell.AttrReverse | tcell.AttrBold)
+	}
+	return cell.
+		SetTextColor(rt.Palette.HeaderFg).
+		SetBackgroundColor(rt.Palette.HeaderBg).
+		SetAttributes(tcell.AttrBold)
+}
+
+// StyleStatusCell applies semantic status color or monochrome text attributes to a status cell.
+func StyleStatusCell(cell *tview.TableCell, status, resourceType string) *tview.TableCell {
+	if cell == nil {
+		return nil
+	}
+	rt := ActiveTheme()
+	statusColor := GetStatusColor(status, resourceType)
+	if rt.IsMonochrome() {
+		cell.SetTextColor(tcell.ColorDefault)
+		switch statusColor {
+		case Theme.StatusError:
+			if len(cell.Text) < 2 || cell.Text[:2] != "! " {
+				cell.SetText("! " + cell.Text)
+			}
+			cell.SetAttributes(tcell.AttrUnderline | tcell.AttrBold)
+		case Theme.StatusWarning:
+			cell.SetAttributes(tcell.AttrBold)
+		case Theme.StatusUnknown:
+			cell.SetAttributes(tcell.AttrDim)
+		default:
+			cell.SetAttributes(tcell.AttrNone)
+		}
+		return cell
+	}
+	return cell.SetTextColor(GetTcellColor(statusColor))
+}
+
+// SelectedRowStyle returns the tcell.Style for highlighted table rows.
+func SelectedRowStyle() tcell.Style {
+	rt := ActiveTheme()
+	if rt.IsMonochrome() {
+		return tcell.StyleDefault.
+			Foreground(tcell.ColorDefault).
+			Background(tcell.ColorDefault).
+			Reverse(true)
+	}
+	return tcell.StyleDefault.
+		Foreground(rt.Palette.RowSelectedFg).
+		Background(rt.Palette.RowSelectedBg)
+}
 
 // Theme contains all color and style constants for the ktop UI
 // This allows for centralized theming and easy color customization
@@ -134,9 +340,12 @@ var Theme = struct {
 	UnfocusBorderColor: "lightgray",  // Border color when panel is unfocused
 }
 
-// FormatTag returns a tview color/style tag string
-// Usage: FormatTag(Theme.HeaderShortcutKey, "", "b") returns "[orange::b]"
+// FormatTag returns a tview color/style tag string.
 func FormatTag(foreground, background, attributes string) string {
+	rt := ActiveTheme()
+	if rt.IsMonochrome() {
+		return theme.FormatTag(tcell.ColorDefault, tcell.ColorDefault, attributes, theme.ColorModeNone)
+	}
 	if background == "" && attributes == "" {
 		return "[" + foreground + "]"
 	}
@@ -273,8 +482,14 @@ func GetReadyColor(ready, total int) string {
 	return Theme.StatusError // Few/none ready - red
 }
 
-// GetTcellColor converts a theme color string to tcell.Color
+// GetTcellColor converts a theme color string to tcell.Color.
 func GetTcellColor(color string) tcell.Color {
+	if color == "" || color == "-" || color == "default" {
+		return tcell.ColorDefault
+	}
+	if IsMonochrome() {
+		return tcell.ColorDefault
+	}
 	switch color {
 	case "green":
 		return tcell.ColorGreen
@@ -305,20 +520,21 @@ func GetTcellColor(color string) tcell.Color {
 	case "white":
 		return tcell.ColorWhite
 	default:
+		if c := tcell.GetColor(color); c != tcell.ColorDefault {
+			return c
+		}
 		return tcell.ColorYellow
 	}
 }
 
-// GetRowColorForStatus returns the tcell.Color for an entire row based on resource status
-// Healthy resources get default yellow text, unhealthy resources get their status color
+// GetRowColorForStatus returns the tcell.Color for an entire row based on resource status.
 func GetRowColorForStatus(status string, resourceType string) tcell.Color {
-	statusColor := GetStatusColor(status, resourceType)
-
-	// Healthy resources use default yellow row color
-	if statusColor == Theme.StatusOK {
-		return tcell.ColorYellow
+	if IsMonochrome() {
+		return tcell.ColorDefault
 	}
-
-	// Unhealthy resources: entire row uses the status color
+	statusColor := GetStatusColor(status, resourceType)
+	if statusColor == Theme.StatusOK {
+		return ActivePalette().DataPrimary
+	}
 	return GetTcellColor(statusColor)
 }
