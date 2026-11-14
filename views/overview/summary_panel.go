@@ -121,6 +121,9 @@ func (p *clusterSummaryPanel) DrawHeader(data any) {}
 
 // checkAndRebuildLayout checks if terminal size changed across the threshold and rebuilds layout if needed
 func (p *clusterSummaryPanel) checkAndRebuildLayout() {
+	if p.app == nil {
+		return
+	}
 	terminalHeight := p.app.GetTerminalHeight()
 	isSmallHeight := terminalHeight <= 45
 	wasSmallHeight := p.lastTerminalHeight > 0 && p.lastTerminalHeight <= 45
@@ -140,7 +143,7 @@ func (p *clusterSummaryPanel) DrawBody(data any) {
 	p.checkAndRebuildLayout()
 
 	// Update title with disconnected state if applicable
-	if p.app.IsAPIDisconnected() {
+	if p.app != nil && p.app.IsAPIDisconnected() {
 		p.root.SetTitle(fmt.Sprintf("%s [red][DISCONNECTED - Press R to reconnect]", p.GetTitle()))
 	} else {
 		p.root.SetTitle(p.GetTitle())
