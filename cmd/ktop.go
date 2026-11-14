@@ -61,6 +61,10 @@ type ktopCmdOptions struct {
 	prometheusMaxSamples     int
 	prometheusComponents     []string
 
+	// UI appearance configuration
+	theme     string
+	colorMode string
+
 	// Logging configuration
 	logLevel  string
 	logFormat string
@@ -92,6 +96,8 @@ func NewKtopCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&o.showAllColumns, "show-all-columns", false, "If true, show all columns")
 	cmd.Flags().StringVar(&o.sortNodes, "sort-nodes", "", "Initial sort column for nodes table, prefix with + for asc, - for desc (e.g. '+NAME', '-CPU')")
 	cmd.Flags().StringVar(&o.sortPods, "sort-pods", "", "Initial sort column for pods table, prefix with + for asc, - for desc (e.g. '-MEMORY', '+POD')")
+	cmd.Flags().StringVar(&o.theme, "theme", "auto", "UI color theme (auto, dark, light, ansi, monochrome)")
+	cmd.Flags().StringVar(&o.colorMode, "color-mode", "auto", "Terminal color depth override (auto, truecolor, 256, 16, none)")
 
 	// Metrics source flags
 	cmd.Flags().StringVar(&o.metricsSource, "metrics-source", "prometheus",
@@ -228,8 +234,14 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 		o.namespace = k8s.AllNamespaces
 	}
 
-	// Apply metrics settings from config if not overridden by CLI flags
+	// Apply metrics and UI appearance settings from config if not overridden by CLI flags
 	if appConfig != nil {
+		if !c.Flags().Changed("theme") && appConfig.UI.Theme != "" {
+			o.theme = appConfig.UI.Theme
+		}
+		if !c.Flags().Changed("color-mode") && appConfig.UI.ColorMode != "" {
+			o.colorMode = appConfig.UI.ColorMode
+		}
 		if !c.Flags().Changed("metrics-source") && appConfig.Metrics.Source != "" {
 			o.metricsSource = appConfig.Metrics.Source
 		}
@@ -289,6 +301,20 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 		slog.Error("invalid configuration", "error", err)
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
+
+	normalizedTheme, err := config.NormalizeTheme(o.theme)
+	if err != nil {
+		slog.Error("invalid theme", "value", o.theme, "error", err)
+		return err
+	}
+	o.theme = normalizedTheme
+
+	normalizedColorMode, err := config.NormalizeColorMode(o.colorMode)
+	if err != nil {
+		slog.Error("invalid color-mode", "value", o.colorMode, "error", err)
+		return err
+	}
+	o.colorMode = normalizedColorMode
 
 	k8sC, err := k8s.New(o.kubeFlags)
 	if err != nil {
@@ -365,6 +391,8 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 
 	var runner application.Runner
 	runner, err = tui.NewRunner(ctx, k8sC, metricsSource, tui.Options{
+		Theme:          o.theme,
+		ColorMode:      o.colorMode,
 		ShowAllColumns: o.showAllColumns,
 		NodeColumns:    nodeColumns,
 		PodColumns:     podColumns,

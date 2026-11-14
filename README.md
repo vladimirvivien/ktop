@@ -22,6 +22,7 @@ Following the tradition of Unix/Linux `top` tools, `ktop` is a tool that display
 * **Ergonomic Shortcuts** - Integrated keyboard shortcuts help (`?` or `F1`) and clipboard resource copying (`y`)
 * **Multiple Metrics Sources** - Support Prometheus for enhanced metrics, Metrics-Server, or no-metrics as fallback
 * **Graceful Degradation** - Works even without metrics infrastructure by showing resource requests/limits
+* **Adaptive Terminal Themes** - Automatic dark/light background detection, TrueColor/256/16-color/monochrome degradation, and `$NO_COLOR` compliance
 * **Session Directory & Config** - Automatic rotating session logs in `~/.ktop/logs/` and persistent configuration in `~/.ktop/config.yaml`
 * **Single Binary** - Download and run; no dependencies beyond a valid kubeconfig
 
@@ -80,7 +81,7 @@ Press `?` inside ktop at any time to open the keyboard shortcuts reference.
 
 ktop stores state and diagnostic data under `~/.ktop/`:
 
-- `~/.ktop/config.yaml` — Declarative user preferences for default metrics sources and customized table column subsets.
+- `~/.ktop/config.yaml` — Declarative user preferences for default metrics sources, customized table column subsets, and UI theme (`ui.theme`, `ui.color_mode`).
 - `~/.ktop/logs/ktop.log` — Automatic rotating diagnostic session logs (retained up to 5 backups, 10MB each).
 
 ## Documentation

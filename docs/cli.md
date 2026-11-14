@@ -51,6 +51,34 @@ Additional control plane components (apiserver, etcd, scheduler, controller-mana
 | `--show-all-columns` | Show all columns (default: true) |
 | `--sort-nodes` | Initial sort column and order for nodes (e.g. `+Name`, `-Memory`) |
 | `--sort-pods` | Initial sort column and order for pods (e.g. `-Memory`, `+CPU`) |
+| `--theme` | UI color theme: `auto` (default), `dark`, `light`, `ansi`, or `monochrome` |
+| `--color-mode` | Terminal color depth override: `auto` (default), `truecolor`, `256`, `16`, or `none` |
+
+## Themes and Terminal Color Adaptation
+
+Terminal emulators vary in background luminance and color-depth support, from 24-bit TrueColor local consoles to 16-color multiplexers or `$NO_COLOR` sessions. `ktop` adapts both its semantic color palette and color encoding tier to keep status indicators, sparklines, and selection highlights legible without per-host configuration.
+
+Use `--theme` to pick a palette or leave it set to `auto` for automatic detection:
+
+| Theme | Intended Terminal |
+|-------|-------------------|
+| `auto` | Resolves `$NO_COLOR` / `TERM=dumb` to `monochrome`, checks `$COLORFGBG`, probes OSC 11 background luminance on interactive TTYs, and defaults to `dark` |
+| `dark` | High-contrast palette for dark terminal backgrounds |
+| `light` | Deep-foreground palette tuned for light terminal backgrounds |
+| `ansi` | Uses the terminal profile's 16 ANSI colors and default background |
+| `monochrome` | Emits no color sequences; uses bold, underline, reverse video, and `!` error prefixes |
+
+Use `--color-mode` (`truecolor`, `256`, `16`, `none`, or `auto`) when connecting through SSH, `tmux`, or terminfo profiles where automatic detection under- or over-reports color capability.
+
+Persist preferred defaults in `~/.ktop/config.yaml`:
+
+```yaml
+ui:
+  theme: auto
+  color_mode: auto
+```
+
+Command-line `--theme` and `--color-mode` flags override saved values for the current session only.
 
 ## Advanced Connection Flags
 

@@ -634,4 +634,97 @@ metrics:
 		t.Errorf("expected empty slices for node and pod cols, got %v and %v",
 			cfg.UI.Overview.NodeCols, cfg.UI.Overview.PodCols)
 	}
+	if cfg.UI.Theme != "auto" || cfg.UI.ColorMode != "auto" {
+		t.Errorf("expected empty UI theme/color_mode to default to auto, got theme=%q color_mode=%q",
+			cfg.UI.Theme, cfg.UI.ColorMode)
+	}
+}
+
+func TestAppConfig_ThemeDefaultsAndPreservation(t *testing.T) {
+	def := DefaultAppConfig()
+	if def.UI.Theme != "auto" || def.UI.ColorMode != "auto" {
+		t.Fatalf("expected DefaultAppConfig theme/color_mode 'auto', got theme=%q color_mode=%q",
+			def.UI.Theme, def.UI.ColorMode)
+	}
+
+	tmpDir := t.TempDir()
+	t.Setenv(userdir.EnvVar, tmpDir)
+
+	cfgPath := filepath.Join(tmpDir, ConfigFileName)
+	yamlContent := []byte("ui:\n  theme: light\n  color_mode: \"256\"\n")
+	if err := os.WriteFile(cfgPath, yamlContent, 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	loaded, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig failed: %v", err)
+	}
+	if loaded.UI.Theme != "light" || loaded.UI.ColorMode != "256" {
+		t.Fatalf("expected theme=light color_mode=256, got theme=%q color_mode=%q",
+			loaded.UI.Theme, loaded.UI.ColorMode)
+	}
+
+	if err := SaveOverviewColumns([]string{"NAME", "CPU"}, nil); err != nil {
+		t.Fatalf("SaveOverviewColumns failed: %v", err)
+	}
+
+	afterSave, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig after SaveOverviewColumns failed: %v", err)
+	}
+	if afterSave.UI.Theme != "light" || afterSave.UI.ColorMode != "256" {
+		t.Fatalf("expected SaveOverviewColumns to preserve theme/color_mode, got theme=%q color_mode=%q",
+			afterSave.UI.Theme, afterSave.UI.ColorMode)
+	}
+}
+
+func TestNormalizeThemeAndColorMode(t *testing.T) {
+	themeCases := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", "auto", false},
+		{"  AUTO ", "auto", false},
+		{"dark", "dark", false},
+		{"LIGHT", "light", false},
+		{"ansi", "ansi", false},
+		{"Monochrome", "monochrome", false},
+		{"solarized", "", true},
+	}
+	for _, tc := range themeCases {
+		got, err := NormalizeTheme(tc.in)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("NormalizeTheme(%q) err=%v, wantErr=%v", tc.in, err, tc.wantErr)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("NormalizeTheme(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+
+	modeCases := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", "auto", false},
+		{"auto", "auto", false},
+		{"TrueColor", "truecolor", false},
+		{"256", "256", false},
+		{"16", "16", false},
+		{"none", "none", false},
+		{"8bit", "", true},
+	}
+	for _, tc := range modeCases {
+		got, err := NormalizeColorMode(tc.in)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("NormalizeColorMode(%q) err=%v, wantErr=%v", tc.in, err, tc.wantErr)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("NormalizeColorMode(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
 }

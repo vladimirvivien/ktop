@@ -80,7 +80,9 @@ type AppConfig struct {
 
 // UIConfig holds UI preferences.
 type UIConfig struct {
-	Overview OverviewUIConfig `json:"overview" yaml:"overview"`
+	Theme     string           `json:"theme,omitempty" yaml:"theme,omitempty"`
+	ColorMode string           `json:"color_mode,omitempty" yaml:"color_mode,omitempty"`
+	Overview  OverviewUIConfig `json:"overview" yaml:"overview"`
 }
 
 // OverviewUIConfig holds column selections for overview tables.
@@ -108,6 +110,8 @@ type LoggingConfig struct {
 func DefaultAppConfig() *AppConfig {
 	return &AppConfig{
 		UI: UIConfig{
+			Theme:     "auto",
+			ColorMode: "auto",
 			Overview: OverviewUIConfig{
 				NodeCols: slicesClone(DefaultNodeColumns),
 				PodCols:  slicesClone(DefaultPodColumns),
@@ -162,6 +166,12 @@ func LoadAppConfig() (*AppConfig, error) {
 		return nil, fmt.Errorf("unmarshal config %s: %w", path, err)
 	}
 
+	if strings.TrimSpace(cfg.UI.Theme) == "" {
+		cfg.UI.Theme = "auto"
+	}
+	if strings.TrimSpace(cfg.UI.ColorMode) == "" {
+		cfg.UI.ColorMode = "auto"
+	}
 	cfg.UI.Overview.NodeCols = NormalizeColumns(cfg.UI.Overview.NodeCols)
 	cfg.UI.Overview.PodCols = NormalizeColumns(cfg.UI.Overview.PodCols)
 
@@ -216,11 +226,51 @@ var ValidMetricsSources = map[string]string{
 	"none":           "none",
 }
 
+// ValidThemes lists valid canonical UI theme names.
+var ValidThemes = map[string]string{
+	"auto":       "auto",
+	"dark":       "dark",
+	"light":      "light",
+	"ansi":       "ansi",
+	"monochrome": "monochrome",
+}
+
+// ValidColorModes lists valid terminal color depth overrides.
+var ValidColorModes = map[string]string{
+	"auto":      "auto",
+	"truecolor": "truecolor",
+	"256":       "256",
+	"16":        "16",
+	"none":      "none",
+}
+
 // NormalizeMetricsSource converts aliases to canonical names
 func NormalizeMetricsSource(source string) (string, error) {
 	normalized, ok := ValidMetricsSources[strings.ToLower(source)]
 	if !ok {
 		return "", fmt.Errorf("invalid metrics source: %s (valid: prom, prometheus, metrics-server, none)", source)
+	}
+	return normalized, nil
+}
+
+// NormalizeTheme validates and canonicalizes a UI theme name.
+func NormalizeTheme(theme string) (string, error) {
+	return normalizeOption(theme, "auto", "theme", ValidThemes, "auto, dark, light, ansi, monochrome")
+}
+
+// NormalizeColorMode validates and canonicalizes a terminal color mode override.
+func NormalizeColorMode(mode string) (string, error) {
+	return normalizeOption(mode, "auto", "color mode", ValidColorModes, "auto, truecolor, 256, 16, none")
+}
+
+func normalizeOption(raw, emptyDefault, kind string, valid map[string]string, validList string) (string, error) {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	if v == "" {
+		return emptyDefault, nil
+	}
+	normalized, ok := valid[v]
+	if !ok {
+		return "", fmt.Errorf("invalid %s: %s (valid: %s)", kind, raw, validList)
 	}
 	return normalized, nil
 }

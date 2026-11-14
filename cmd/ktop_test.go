@@ -1,7 +1,13 @@
 package cmd
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/vladimirvivien/ktop/config"
+	"github.com/vladimirvivien/ktop/internal/userdir"
 )
 
 func TestNewKtopCmd_Flags(t *testing.T) {
@@ -18,6 +24,8 @@ func TestNewKtopCmd_Flags(t *testing.T) {
 		{"show-all-columns", "", "false"},
 		{"sort-nodes", "", ""},
 		{"sort-pods", "", ""},
+		{"theme", "", "auto"},
+		{"color-mode", "", "auto"},
 		{"metrics-source", "", "prometheus"},
 		{"prometheus-scrape-interval", "", "5s"},
 		{"prometheus-retention", "", "1h"},
@@ -39,6 +47,44 @@ func TestNewKtopCmd_Flags(t *testing.T) {
 			t.Errorf("flag --%s expected default '%s', got '%s'", f.name, f.defVal, flag.DefValue)
 		}
 	}
+}
+
+func TestNewKtopCmd_ThemeValidationFailsFast(t *testing.T) {
+	t.Run("invalid theme flag", func(t *testing.T) {
+		t.Setenv(userdir.EnvVar, t.TempDir())
+		c := NewKtopCmd()
+		c.SetArgs([]string{"--theme=solarized"})
+		err := c.Execute()
+		if err == nil || !strings.Contains(err.Error(), "invalid theme") {
+			t.Fatalf("expected invalid theme error, got: %v", err)
+		}
+	})
+
+	t.Run("invalid color-mode flag", func(t *testing.T) {
+		t.Setenv(userdir.EnvVar, t.TempDir())
+		c := NewKtopCmd()
+		c.SetArgs([]string{"--color-mode=8bit"})
+		err := c.Execute()
+		if err == nil || !strings.Contains(err.Error(), "invalid color mode") {
+			t.Fatalf("expected invalid color mode error, got: %v", err)
+		}
+	})
+
+	t.Run("invalid ui.theme in config file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv(userdir.EnvVar, tmpDir)
+		cfgPath := filepath.Join(tmpDir, config.ConfigFileName)
+		if err := os.WriteFile(cfgPath, []byte("ui:\n  theme: neon\n"), 0o600); err != nil {
+			t.Fatalf("write config file: %v", err)
+		}
+
+		c := NewKtopCmd()
+		c.SetArgs([]string{})
+		err := c.Execute()
+		if err == nil || !strings.Contains(err.Error(), "invalid theme") {
+			t.Fatalf("expected invalid theme error from config file, got: %v", err)
+		}
+	})
 }
 
 func TestParseSortFlag(t *testing.T) {

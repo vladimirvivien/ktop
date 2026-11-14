@@ -15,6 +15,8 @@ import (
 
 // Options configures the interactive TUI application runner.
 type Options struct {
+	Theme          string
+	ColorMode      string
 	ShowAllColumns bool
 	NodeColumns    []string
 	PodColumns     []string
@@ -35,6 +37,10 @@ var _ application.Runner = (*App)(nil)
 // NewRunner wires the interactive TUI application, overview page, health
 // tracker, and pre-flight checks.
 func NewRunner(ctx context.Context, k8sC *k8s.Client, metricsSource metrics.MetricsSource, opts Options) (*App, error) {
+	if _, err := ui.ResolveAndApplyTheme(opts.Theme, opts.ColorMode); err != nil {
+		return nil, fmt.Errorf("resolve UI theme: %w", err)
+	}
+
 	app := application.New(k8sC, metricsSource)
 	k8sC.Controller().SetHealthTracker(app.GetAPIHealthTracker())
 	app.WelcomeBanner()
