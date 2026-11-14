@@ -212,6 +212,9 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 		c.collectPrometheusEnhancedMetrics(&summary, nodes, nodeMetricsByNode)
 	}
 
+	hasMetrics := c.metricsSource != nil && len(nodeMetricsByNode) > 0
+	summary.HealthScore = model.CalculateHealthScore(summary, hasMetrics)
+
 	// Report success after all data is collected
 	c.reportSuccess()
 	handlerFunc(ctx, summary)
@@ -233,6 +236,10 @@ func (c *Controller) collectPrometheusEnhancedMetrics(summary *model.ClusterSumm
 		// Disk I/O rates (sum across nodes)
 		summary.DiskReadRate += nodeMetrics.DiskReadRate
 		summary.DiskWriteRate += nodeMetrics.DiskWriteRate
+
+		// Native Kubelet pod and container inventory counts
+		summary.KubeletRunningPods += nodeMetrics.PodCount
+		summary.KubeletRunningContainers += nodeMetrics.ContainerCount
 
 		// Load averages (compute cluster average)
 		// Note: Load averages are not exposed by kubelet/cAdvisor (require node_exporter)

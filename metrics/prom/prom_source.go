@@ -116,6 +116,111 @@ func (p *PromMetricsSource) TestConnection(ctx context.Context) error {
 	return p.controller.TestScrape(ctx)
 }
 
+// counterDelta computes the counter delta and elapsed seconds between the first
+// and last samples in a window, handling counter resets.
+func counterDelta(samples []*prom.MetricSample) (deltaVal float64, deltaSec float64) {
+	if len(samples) < 2 {
+		return 0, 0
+	}
+	first := samples[0]
+	last := samples[len(samples)-1]
+	deltaSec = float64(last.Timestamp-first.Timestamp) / 1000.0
+	if deltaSec <= 0 {
+		return 0, 0
+	}
+	deltaVal = last.Value - first.Value
+	if deltaVal < 0 {
+		deltaVal = last.Value
+	}
+	return deltaVal, deltaSec
+}
+
+func clampPct(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 100 {
+		return 100
+	}
+	return v
+}
+
+// calculateCFSThrottleByContainer computes CFS CPU throttling percentages
+// per container and the maximum across workload containers for a pod.
+func (p *PromMetricsSource) calculateCFSThrottleByContainer(labelMatchers map[string]string, window time.Duration) (map[string]float64, float64) {
+	now := time.Now()
+	start := now.Add(-window)
+	perContainer := make(map[string]float64)
+	var podMax float64
+
+	throttledPeriods := make(map[string]float64)
+	if tpSeries, err := p.store.QueryRangePerSeries("container_cpu_cfs_throttled_periods_total", labelMatchers, start, now); err == nil {
+		for seriesKey, samples := range tpSeries {
+			if !isPSIWorkloadContainer(seriesKey) || len(samples) < 2 {
+				continue
+			}
+			cName, ok := seriesLabelValue(seriesKey, "container")
+			if !ok || cName == "" {
+				continue
+			}
+			deltaVal, deltaSec := counterDelta(samples)
+			if deltaSec > 0 {
+				throttledPeriods[cName] = deltaVal
+			}
+		}
+	}
+
+	if totalSeries, err := p.store.QueryRangePerSeries("container_cpu_cfs_periods_total", labelMatchers, start, now); err == nil {
+		for seriesKey, samples := range totalSeries {
+			if !isPSIWorkloadContainer(seriesKey) || len(samples) < 2 {
+				continue
+			}
+			cName, ok := seriesLabelValue(seriesKey, "container")
+			if !ok || cName == "" {
+				continue
+			}
+			deltaTotal, deltaSec := counterDelta(samples)
+			if deltaSec <= 0 || deltaTotal <= 0 {
+				continue
+			}
+			if tp, exists := throttledPeriods[cName]; exists {
+				pct := clampPct((tp / deltaTotal) * 100)
+				perContainer[cName] = pct
+				if pct > podMax {
+					podMax = pct
+				}
+			}
+		}
+	}
+
+	if len(perContainer) > 0 {
+		return perContainer, podMax
+	}
+
+	if tsSeries, err := p.store.QueryRangePerSeries("container_cpu_cfs_throttled_seconds_total", labelMatchers, start, now); err == nil {
+		for seriesKey, samples := range tsSeries {
+			if !isPSIWorkloadContainer(seriesKey) || len(samples) < 2 {
+				continue
+			}
+			cName, ok := seriesLabelValue(seriesKey, "container")
+			if !ok || cName == "" {
+				continue
+			}
+			deltaVal, deltaSec := counterDelta(samples)
+			if deltaSec <= 0 {
+				continue
+			}
+			pct := clampPct((deltaVal / deltaSec) * 100)
+			perContainer[cName] = pct
+			if pct > podMax {
+				podMax = pct
+			}
+		}
+	}
+
+	return perContainer, podMax
+}
+
 // calculateCPURate calculates CPU usage rate from counter samples over a time window
 // Returns CPU cores (e.g., 0.1 = 100 millicores)
 // Uses silent fallback - returns error without logging on insufficient samples
@@ -532,6 +637,20 @@ func (p *PromMetricsSource) GetPodMetrics(ctx context.Context, namespace, podNam
 		podMetrics.Containers = append(podMetrics.Containers, containerMetrics)
 	}
 
+	// CFS CPU throttling percentage per container and pod-level max.
+	const cfsWindow = 40 * time.Second
+	perContainerThrottle, podMaxThrottle := p.calculateCFSThrottleByContainer(labelMatchers, cfsWindow)
+	podMetrics.CPUThrottledPct = podMaxThrottle
+	if len(podMetrics.Containers) > 0 {
+		podMetrics.Containers[0].CPUThrottled = podMaxThrottle
+	}
+	for cName, pct := range perContainerThrottle {
+		podMetrics.Containers = append(podMetrics.Containers, metrics.ContainerMetrics{
+			Name:         cName,
+			CPUThrottled: pct,
+		})
+	}
+
 	// Pressure Stall Information at pod scope. PSI percentages don't sum
 	// meaningfully across containers; pod-level signal is the worst-affected
 	// container per axis.
@@ -623,13 +742,14 @@ func (p *PromMetricsSource) GetAllPodMetrics(ctx context.Context) ([]*metrics.Po
 		pod       string
 	}
 	type podAgg struct {
-		cpuRate        float64
-		hasCPU         bool
-		workloadMem    float64
-		hasWorkloadMem bool
-		aggMem         float64
-		hasAggMem      bool
-		psi            metrics.PSIMetrics
+		cpuRate         float64
+		hasCPU          bool
+		workloadMem     float64
+		hasWorkloadMem  bool
+		aggMem          float64
+		hasAggMem       bool
+		psi             metrics.PSIMetrics
+		cpuThrottledPct float64
 	}
 
 	now := time.Now()
@@ -757,13 +877,88 @@ func (p *PromMetricsSource) GetAllPodMetrics(ctx context.Context) ([]*metrics.Po
 		}
 	})
 
+	// 4. Single pass for CFS CPU throttling percentage (periods ratio, fallback to throttled seconds rate)
+	type containerKey struct {
+		ns        string
+		pod       string
+		container string
+	}
+	throttledPeriods := make(map[containerKey]float64)
+	if tpSeries, err := store.QueryRangePerSeries("container_cpu_cfs_throttled_periods_total", nil, rateStart, now); err == nil {
+		for seriesKey, samples := range tpSeries {
+			if !isPSIWorkloadContainer(seriesKey) || len(samples) < 2 {
+				continue
+			}
+			ns, ok1 := seriesLabelValue(seriesKey, "namespace")
+			pod, ok2 := seriesLabelValue(seriesKey, "pod")
+			cName, ok3 := seriesLabelValue(seriesKey, "container")
+			if !ok1 || !ok2 || !ok3 || ns == "" || pod == "" {
+				continue
+			}
+			deltaVal, _ := counterDelta(samples)
+			if deltaVal >= 0 {
+				throttledPeriods[containerKey{ns: ns, pod: pod, container: cName}] = deltaVal
+			}
+		}
+	}
+	hasPeriodRatio := false
+	if totalSeries, err := store.QueryRangePerSeries("container_cpu_cfs_periods_total", nil, rateStart, now); err == nil {
+		for seriesKey, samples := range totalSeries {
+			if !isPSIWorkloadContainer(seriesKey) || len(samples) < 2 {
+				continue
+			}
+			ns, ok1 := seriesLabelValue(seriesKey, "namespace")
+			pod, ok2 := seriesLabelValue(seriesKey, "pod")
+			cName, ok3 := seriesLabelValue(seriesKey, "container")
+			if !ok1 || !ok2 || !ok3 || ns == "" || pod == "" {
+				continue
+			}
+			deltaTotal, _ := counterDelta(samples)
+			if deltaTotal <= 0 {
+				continue
+			}
+			if tp, ok := throttledPeriods[containerKey{ns: ns, pod: pod, container: cName}]; ok {
+				hasPeriodRatio = true
+				pct := clampPct((tp / deltaTotal) * 100)
+				agg := getOrCreate(ns, pod)
+				if pct > agg.cpuThrottledPct {
+					agg.cpuThrottledPct = pct
+				}
+			}
+		}
+	}
+	if !hasPeriodRatio {
+		if tsSeries, err := store.QueryRangePerSeries("container_cpu_cfs_throttled_seconds_total", nil, rateStart, now); err == nil {
+			for seriesKey, samples := range tsSeries {
+				if !isPSIWorkloadContainer(seriesKey) || len(samples) < 2 {
+					continue
+				}
+				ns, ok1 := seriesLabelValue(seriesKey, "namespace")
+				pod, ok2 := seriesLabelValue(seriesKey, "pod")
+				if !ok1 || !ok2 || ns == "" || pod == "" {
+					continue
+				}
+				deltaVal, deltaSec := counterDelta(samples)
+				if deltaSec <= 0 {
+					continue
+				}
+				pct := clampPct((deltaVal / deltaSec) * 100)
+				agg := getOrCreate(ns, pod)
+				if pct > agg.cpuThrottledPct {
+					agg.cpuThrottledPct = pct
+				}
+			}
+		}
+	}
+
 	allPodMetrics := make([]*metrics.PodMetrics, 0, len(pods))
 	for k, agg := range pods {
 		pm := &metrics.PodMetrics{
-			PodName:   k.pod,
-			Namespace: k.namespace,
-			Timestamp: now,
-			PSI:       agg.psi,
+			PodName:         k.pod,
+			Namespace:       k.namespace,
+			Timestamp:       now,
+			PSI:             agg.psi,
+			CPUThrottledPct: agg.cpuThrottledPct,
 		}
 		cm := metrics.ContainerMetrics{Name: "main"}
 		if agg.hasCPU {

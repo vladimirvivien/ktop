@@ -213,3 +213,32 @@ func StallColor(pct float64) string {
 		return "red"
 	}
 }
+
+// FormatThrottleCell formats a CFS CPU throttling percentage for table cells.
+func FormatThrottleCell(pct float64) string {
+	switch {
+	case pct < 0.01:
+		return "[gray]·[-]"
+	case pct < 1.0:
+		return fmt.Sprintf("[%s]%.2f%%[-]", StallColor(pct), pct)
+	case pct < 10.0:
+		return fmt.Sprintf("[%s]%.1f%%[-]", StallColor(pct), pct)
+	default:
+		return fmt.Sprintf("[%s]%.0f%%[-]", StallColor(pct), pct)
+	}
+}
+
+// FormatHealthScore formats the 0-100 cluster health score percentage with
+// threshold color coding.
+func FormatHealthScore(score int) string {
+	color := "red"
+	switch {
+	case score >= 90:
+		color = "green"
+	case score >= 70:
+		color = "yellow"
+	case score >= 50:
+		color = "orange"
+	}
+	return fmt.Sprintf("[%s]%d%%[-]", color, score)
+}

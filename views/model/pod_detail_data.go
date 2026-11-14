@@ -36,8 +36,9 @@ type PodDetailData struct {
 
 // ContainerUsage holds formatted CPU and memory usage strings for a container
 type ContainerUsage struct {
-	CPUUsage    string // e.g., "45m"
-	MemoryUsage string // e.g., "128Mi"
+	CPUUsage        string  // e.g., "45m"
+	MemoryUsage     string  // e.g., "128Mi"
+	CPUThrottledPct float64 // CFS CPU throttling percentage (0.0-100.0)
 }
 
 // ContainerInfo provides structured container information
@@ -56,8 +57,9 @@ type ContainerInfo struct {
 	MemoryLimit   string
 
 	// Resource usage (from metrics)
-	CPUUsage    string
-	MemoryUsage string
+	CPUUsage        string
+	MemoryUsage     string
+	CPUThrottledPct float64
 
 	// Probes
 	LivenessProbe  string
@@ -148,10 +150,18 @@ func (d *PodDetailData) GetContainers() []ContainerInfo {
 			if usage, ok := d.ContainerMetrics[container.Name]; ok {
 				info.CPUUsage = usage.CPUUsage
 				info.MemoryUsage = usage.MemoryUsage
-			} else if usage, ok := d.ContainerMetrics["main"]; ok && len(d.Pod.Spec.Containers) == 1 {
-				// Fallback to "main" for single-container pods (static pod aggregate)
-				info.CPUUsage = usage.CPUUsage
-				info.MemoryUsage = usage.MemoryUsage
+				info.CPUThrottledPct = usage.CPUThrottledPct
+			}
+			if mainUsage, ok := d.ContainerMetrics["main"]; ok && len(d.Pod.Spec.Containers) == 1 {
+				if info.CPUUsage == "" {
+					info.CPUUsage = mainUsage.CPUUsage
+				}
+				if info.MemoryUsage == "" {
+					info.MemoryUsage = mainUsage.MemoryUsage
+				}
+				if info.CPUThrottledPct == 0 {
+					info.CPUThrottledPct = mainUsage.CPUThrottledPct
+				}
 			}
 		}
 

@@ -45,6 +45,10 @@ type PodModel struct {
 	// NodePSIKernelSupported mirrors NodeModel.PSIKernelSupported for the pod's
 	// node, denormalized here to avoid a per-row node lookup at render time.
 	NodePSIKernelSupported bool
+
+	// CPUThrottledPct is the worst-case CFS CPU throttling percentage (0.0-100.0)
+	// across workload containers in this pod.
+	CPUThrottledPct float64
 }
 
 type PodContainerSummary struct {
@@ -211,6 +215,12 @@ func podLess(a, b PodModel, column string) bool {
 			return a.Name < b.Name
 		}
 		return sa < sb
+
+	case "THROTTLE":
+		if a.CPUThrottledPct == b.CPUThrottledPct {
+			return a.Name < b.Name
+		}
+		return a.CPUThrottledPct < b.CPUThrottledPct
 
 	default:
 		// Default to NAMESPACE then NAME sorting

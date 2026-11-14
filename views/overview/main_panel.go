@@ -697,6 +697,7 @@ func (p *MainPanel) showPodDetail(namespace, podName string) {
 				if cm.MemoryUsage != nil {
 					usage.MemoryUsage = ui.FormatMemory(cm.MemoryUsage)
 				}
+				usage.CPUThrottledPct = cm.CPUThrottled
 				detailData.ContainerMetrics[cm.Name] = usage
 			}
 		}
@@ -794,6 +795,7 @@ func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) er
 					existingModel.PodUsageMemQty = totalMem
 				}
 				existingModel.PSI = podMetrics.PSI
+				existingModel.CPUThrottledPct = podMetrics.CPUThrottledPct
 			}
 			existingModel.NodePSIKernelSupported = nodeKernelSupport[existingModel.Node]
 			updatedModels = append(updatedModels, existingModel)
@@ -1125,6 +1127,7 @@ func (p *MainPanel) buildPodDetailData(ctx context.Context, podKey string, podMo
 				if cm.MemoryUsage != nil {
 					usage.MemoryUsage = ui.FormatMemory(cm.MemoryUsage)
 				}
+				usage.CPUThrottledPct = cm.CPUThrottled
 				detailData.ContainerMetrics[cm.Name] = usage
 			}
 		}

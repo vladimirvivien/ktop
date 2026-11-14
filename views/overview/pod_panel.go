@@ -151,6 +151,7 @@ func (p *podPanel) Layout(_ any) {
 			"CPU":       'c',
 			"MEMORY":    'm',
 			"STALL":     'l',
+			"THROTTLE":  'h',
 		}
 
 		p.tableCtrl = ui.NewTableController(p.list, ui.TableControllerConfig{
@@ -548,6 +549,16 @@ func (p *podPanel) DrawBody(data any) {
 						Text:     renderStallCell(pod.PSI, pod.NodePSIKernelSupported),
 						Align:    tview.AlignLeft,
 						MaxWidth: 12,
+					},
+				)
+
+			case "THROTTLE":
+				p.list.SetCell(
+					rowIdx, colIdx,
+					&tview.TableCell{
+						Text:     ui.FormatThrottleCell(pod.CPUThrottledPct),
+						Align:    tview.AlignLeft,
+						MaxWidth: 10,
 					},
 				)
 			}

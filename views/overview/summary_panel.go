@@ -190,7 +190,8 @@ func (p *clusterSummaryPanel) DrawBody(data any) {
 
 		// Stats format is the same for both modes
 		statsText := fmt.Sprintf(
-			"[yellow]Uptime: [white]%s [yellow]│ Nodes: [white]%d [yellow]│ NS: [white]%d [yellow]│ Deploys: [%s]%d/%d [yellow]│ Pods: [%s]%d/%d [yellow]│ Vols: [white]%d [yellow]│ PVs: [white]%s [yellow]│ PVCs: [white]%s",
+			"[yellow]Health: %s [yellow]│ Uptime: [white]%s [yellow]│ Nodes: [white]%d [yellow]│ NS: [white]%d [yellow]│ Deploys: [%s]%d/%d [yellow]│ Pods: [%s]%d/%d [yellow]│ Vols: [white]%d [yellow]│ PVs: [white]%s [yellow]│ PVCs: [white]%s",
+			ui.FormatHealthScore(summary.HealthScore),
 			duration.HumanDuration(time.Since(summary.Uptime.Time)),
 			summary.NodesReady,
 			summary.Namespaces,

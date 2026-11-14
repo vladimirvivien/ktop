@@ -79,6 +79,11 @@ func containerLess(a, b ContainerInfo, column string) bool {
 			return aQty < bQty
 		}
 		return a.Name < b.Name
+	case "THROTTLE":
+		if a.CPUThrottledPct != b.CPUThrottledPct {
+			return a.CPUThrottledPct < b.CPUThrottledPct
+		}
+		return a.Name < b.Name
 	default:
 		return a.Name < b.Name
 	}

@@ -22,7 +22,7 @@ var (
 	}
 
 	AllPodColumns = []string{
-		"NAMESPACE", "POD", "READY", "STATUS", "RST", "AGE", "VOLS", "IP", "NODE", "CPU", "MEMORY", "STALL",
+		"NAMESPACE", "POD", "READY", "STATUS", "RST", "AGE", "VOLS", "IP", "NODE", "CPU", "MEMORY", "STALL", "THROTTLE",
 	}
 
 	DefaultNodeColumns = []string{
@@ -55,6 +55,7 @@ var (
 		"AGE":       "Time since creation",
 		"NODE":      "Assigned worker node",
 		"MEMORY":    "Memory usage graph and bytes",
+		"THROTTLE":  "CFS CPU throttling percentage",
 	}
 )
 

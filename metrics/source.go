@@ -171,6 +171,10 @@ type PodMetrics struct {
 	// Computed as max(container.PSI.*) per axis — a pod with any heavily
 	// stalled container surfaces that container's stall percentage.
 	PSI PSIMetrics
+
+	// CPUThrottledPct is the worst-case CFS CPU throttling percentage (0.0-100.0)
+	// across workload containers in this pod.
+	CPUThrottledPct float64
 }
 
 // ContainerMetrics represents resource usage metrics for a single container.

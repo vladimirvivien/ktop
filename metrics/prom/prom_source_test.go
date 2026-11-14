@@ -938,3 +938,33 @@ func BenchmarkGetAllPodMetrics(b *testing.B) {
 		}
 	}
 }
+
+func TestCFSThrottling_GetPodMetricsAndAllPodMetrics(t *testing.T) {
+	store := newPSITestStore()
+	// Container "api": 25 throttled periods out of 100 total periods => 25%
+	store.set("container_cpu_cfs_throttled_periods_total", `{container="api", namespace="prod", pod="web-1"}`, 100, 125, 40)
+	store.set("container_cpu_cfs_periods_total", `{container="api", namespace="prod", pod="web-1"}`, 500, 600, 40)
+	// Container "sidecar": 5 throttled periods out of 100 total periods => 5%
+	store.set("container_cpu_cfs_throttled_periods_total", `{container="sidecar", namespace="prod", pod="web-1"}`, 10, 15, 40)
+	store.set("container_cpu_cfs_periods_total", `{container="sidecar", namespace="prod", pod="web-1"}`, 200, 300, 40)
+
+	src, _ := NewPromMetricsSource(&rest.Config{}, DefaultPromConfig())
+	src.store = store
+	src.setHealthyForTesting(true)
+
+	pm, err := src.GetPodMetrics(context.Background(), "prod", "web-1")
+	if err != nil {
+		t.Fatalf("GetPodMetrics failed: %v", err)
+	}
+	if pm.CPUThrottledPct != 25.0 {
+		t.Errorf("GetPodMetrics CPUThrottledPct = %.2f, want 25.0", pm.CPUThrottledPct)
+	}
+
+	all, err := src.GetAllPodMetrics(context.Background())
+	if err != nil {
+		t.Fatalf("GetAllPodMetrics failed: %v", err)
+	}
+	if len(all) != 1 || all[0].CPUThrottledPct != 25.0 {
+		t.Errorf("GetAllPodMetrics = %+v, want single pod with CPUThrottledPct=25.0", all)
+	}
+}

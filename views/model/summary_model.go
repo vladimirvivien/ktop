@@ -42,7 +42,12 @@ type ClusterSummary struct {
 	MetricsSourceType string // "prometheus" or "metrics-server"
 
 	// Container stats
-	ContainerCount int // Total running containers
+	ContainerCount           int // Total running containers (pod status)
+	KubeletRunningPods       int // Native kubelet_running_pods sum across nodes
+	KubeletRunningContainers int // Native kubelet container_count sum across nodes
+
+	// HealthScore is a composite 0-100 cluster health score.
+	HealthScore int
 
 	// Network I/O (aggregated across nodes)
 	NetworkRxBytes *resource.Quantity
@@ -79,4 +84,41 @@ type ClusterSummary struct {
 	// PSIBeta is true when the cluster's Kubernetes version is below 1.36 (GA).
 	// Surfaced by the UI to mark stall values as best-effort.
 	PSIBeta bool
+}
+
+// CalculateHealthScore computes a composite 0-100 cluster health score from
+// node readiness, pod failures/OOMs, PSI saturation, node pressure, and metrics
+// availability.
+func CalculateHealthScore(summary ClusterSummary, hasMetrics bool) int {
+	score := 100
+
+	if summary.NodesCount > 0 && summary.NodesReady < summary.NodesCount {
+		unready := summary.NodesCount - summary.NodesReady
+		score -= unready * 30
+	}
+
+	if summary.FailedPods > 0 || summary.OOMKillCount > 0 {
+		score -= 15
+	}
+
+	maxPSI := summary.AvgNodeCPUStallPct
+	if summary.AvgNodeMemStallPct > maxPSI {
+		maxPSI = summary.AvgNodeMemStallPct
+	}
+	if summary.AvgNodeIOStallPct > maxPSI {
+		maxPSI = summary.AvgNodeIOStallPct
+	}
+	if maxPSI > 20.0 {
+		score -= 10
+	}
+
+	if summary.NodePressureCount > 0 {
+		score -= summary.NodePressureCount * 5
+	}
+
+	if !hasMetrics {
+		score -= 5
+	}
+
+	return max(0, min(100, score))
 }

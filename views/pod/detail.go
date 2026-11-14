@@ -204,6 +204,7 @@ func (p *DetailPanel) Layout(_ any) {
 			"RESTARTS":  't',
 			"CPU":       'c',
 			"MEM":       'm',
+			"THROTTLE":  'h',
 		}
 
 		p.containersTableCtrl = ui.NewTableController(p.containersTable, ui.TableControllerConfig{
@@ -429,6 +430,7 @@ func (p *DetailPanel) drawInfoHeader() {
 		fmt.Sprintf("[gray]Age:[white] %s", pod.TimeSince),
 		fmt.Sprintf("[gray]Restarts:[white] %d", totalRestarts),
 		ui.FormatPSIInfo(pod.PSI, pod.NodePSIKernelSupported),
+		fmt.Sprintf("[gray]CFS: %s", ui.FormatThrottleCell(pod.CPUThrottledPct)),
 	}
 
 	// Create a text view with all items on one line
@@ -869,7 +871,7 @@ func (p *DetailPanel) drawContainersTable() {
 	}
 
 	// Draw header
-	headers := []string{"CONTAINER", "IMAGE", "STATE", "READY", "RESTARTS", "CPU", "MEM"}
+	headers := []string{"CONTAINER", "IMAGE", "STATE", "READY", "RESTARTS", "CPU", "MEM", "THROTTLE"}
 	for col, header := range headers {
 		expansion := 1
 		if header == "IMAGE" {
@@ -959,6 +961,7 @@ func (p *DetailPanel) drawContainersTable() {
 		p.containersTable.SetCell(rowIdx, 4, tview.NewTableCell(fmt.Sprintf("%d", container.RestartCount)).SetTextColor(restartColor))
 		p.containersTable.SetCell(rowIdx, 5, tview.NewTableCell(cpuStr).SetTextColor(cpuColor))
 		p.containersTable.SetCell(rowIdx, 6, tview.NewTableCell(memStr).SetTextColor(memColor))
+		p.containersTable.SetCell(rowIdx, 7, tview.NewTableCell(ui.FormatThrottleCell(container.CPUThrottledPct)))
 	}
 
 	// Restore selection (clamped to valid range)

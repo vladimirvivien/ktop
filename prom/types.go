@@ -29,8 +29,11 @@ const (
 // to make them available to the store.
 var DefaultMetricAllowlist = map[string]bool{
 	// CPU, memory, network, disk — used by node/pod tables and sparklines.
-	"container_cpu_usage_seconds_total":      true,
-	"container_memory_working_set_bytes":     true,
+	"container_cpu_usage_seconds_total":         true,
+	"container_cpu_cfs_throttled_seconds_total": true,
+	"container_cpu_cfs_throttled_periods_total": true,
+	"container_cpu_cfs_periods_total":           true,
+	"container_memory_working_set_bytes":        true,
 	"container_network_receive_bytes_total":  true,
 	"container_network_transmit_bytes_total": true,
 	"container_fs_reads_bytes_total":         true,
