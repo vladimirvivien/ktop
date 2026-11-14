@@ -11,6 +11,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/internal/snapshot"
 	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
@@ -147,6 +148,14 @@ func (p *DetailPanel) SetGetPodMetricsFunc(fn func(ctx context.Context, namespac
 // Kept for backward compatibility.
 func (p *DetailPanel) SetGetTerminalHeightFunc(fn func() int) {
 	p.getTerminalHeight = fn
+}
+
+// UpdateFromSnapshot updates container CPU and memory usage from a Snapshot.
+func (p *DetailPanel) UpdateFromSnapshot(snap *snapshot.Snapshot) {
+	if cpu, mem, ok := snapshot.ContainerUsageFromSnapshot(snap, p.namespace, p.podName, p.containerName); ok {
+		p.cpuUsage = cpu
+		p.memUsage = mem
+	}
 }
 
 // GetRootView returns the root view for this panel

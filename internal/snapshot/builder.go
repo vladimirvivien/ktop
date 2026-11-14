@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/vladimirvivien/ktop/metrics"
@@ -361,4 +362,90 @@ func (p PodData) ToPodModel() model.PodModel {
 		NodePSIKernelSupported: p.NodePSIKernelSupported,
 		CPUThrottledPct:        p.CPUThrottledPct,
 	}
+}
+
+// NodeDetailProjection bundles a Snapshot with the target node name for
+// snapshot-driven Node Detail rendering.
+type NodeDetailProjection struct {
+	Snapshot *Snapshot
+	NodeName string
+}
+
+// ToNodeDetailData projects the named node and its scheduled pods into *model.NodeDetailData.
+func (p *NodeDetailProjection) ToNodeDetailData() *model.NodeDetailData {
+	if p == nil || p.Snapshot == nil || p.NodeName == "" {
+		return nil
+	}
+	nd, ok := p.Snapshot.NodeByName(p.NodeName)
+	if !ok {
+		return nil
+	}
+	nm := nd.ToNodeModel()
+	snapPods := p.Snapshot.PodsOnNode(p.NodeName)
+	pods := make([]*model.PodModel, 0, len(snapPods))
+	for _, sp := range snapPods {
+		pm := sp.ToPodModel()
+		pods = append(pods, &pm)
+	}
+	return &model.NodeDetailData{
+		NodeModel:         &nm,
+		PodsOnNode:        pods,
+		MetricsSourceType: p.Snapshot.Cluster.MetricsSource,
+	}
+}
+
+// PodDetailProjection bundles a Snapshot with the target pod key for
+// snapshot-driven Pod Detail rendering.
+type PodDetailProjection struct {
+	Snapshot  *Snapshot
+	Namespace string
+	PodName   string
+}
+
+// ToPodDetailData projects the named pod and its container metrics into *model.PodDetailData.
+func (p *PodDetailProjection) ToPodDetailData() *model.PodDetailData {
+	if p == nil || p.Snapshot == nil || p.Namespace == "" || p.PodName == "" {
+		return nil
+	}
+	pd, ok := p.Snapshot.PodByKey(p.Namespace, p.PodName)
+	if !ok {
+		return nil
+	}
+	pm := pd.ToPodModel()
+	cmMap := make(map[string]model.ContainerUsage, len(pd.Containers))
+	for _, c := range pd.Containers {
+		usage := model.ContainerUsage{
+			CPUThrottledPct: c.CPUThrottledPct,
+		}
+		if c.UsageCPUMillis > 0 {
+			usage.CPUUsage = fmt.Sprintf("%dm", c.UsageCPUMillis)
+		}
+		if c.UsageMemBytes > 0 {
+			usage.MemoryUsage = fmt.Sprintf("%dMi", c.UsageMemBytes/(1024*1024))
+		}
+		cmMap[c.Name] = usage
+	}
+	return &model.PodDetailData{
+		PodModel:          &pm,
+		ContainerMetrics:  cmMap,
+		MetricsSourceType: p.Snapshot.Cluster.MetricsSource,
+	}
+}
+
+// ContainerUsageFromSnapshot extracts formatted CPU and memory usage for a
+// container from a Snapshot.
+func ContainerUsageFromSnapshot(snap *Snapshot, namespace, podName, containerName string) (cpuUsage, memUsage string, ok bool) {
+	if snap == nil {
+		return "", "", false
+	}
+	pd, found := snap.PodByKey(namespace, podName)
+	if !found {
+		return "", "", false
+	}
+	for _, c := range pd.Containers {
+		if c.Name == containerName {
+			return fmt.Sprintf("%dm", c.UsageCPUMillis), fmt.Sprintf("%dMi", c.UsageMemBytes/(1024*1024)), true
+		}
+	}
+	return "", "", false
 }

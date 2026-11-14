@@ -8,6 +8,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/internal/snapshot"
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/model"
@@ -287,8 +288,16 @@ func (p *DetailPanel) DrawHeader(data any) {
 
 // DrawBody draws the main content
 func (p *DetailPanel) DrawBody(data any) {
-	detailData, ok := data.(*model.NodeDetailData)
-	if !ok {
+	var detailData *model.NodeDetailData
+	switch v := data.(type) {
+	case *snapshot.NodeDetailProjection:
+		detailData = v.ToNodeDetailData()
+	case *model.NodeDetailData:
+		detailData = v
+	default:
+		return
+	}
+	if detailData == nil {
 		return
 	}
 	p.data = detailData
