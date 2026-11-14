@@ -276,7 +276,7 @@ var Theme = struct {
 	UnfocusBorderColor string // Border color when panel is unfocused (white)
 }{
 	// Header colors
-	HeaderBackground:    "darkcyan",
+	HeaderBackground:    "#005f5f",
 	HeaderForeground:    "white",
 	HeaderShortcutKey:   "orange", // Keyboard shortcut key color
 	HeaderSortIndicator: "white",  // Sort arrow color

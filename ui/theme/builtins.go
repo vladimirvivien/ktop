@@ -20,7 +20,7 @@ func DarkPalette() Palette {
 		TitleNormal:   tcell.ColorWhite,
 		TitleFocused:  tcell.ColorAqua,
 
-		HeaderBg:        tcell.ColorDarkCyan,
+		HeaderBg:        tcell.NewHexColor(0x005f5f),
 		HeaderFg:        tcell.ColorWhite,
 		HeaderHotkey:    tcell.ColorOrange,
 		HeaderSortArrow: tcell.ColorWhite,
