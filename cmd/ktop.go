@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gdamore/tcell/v2"
 	"github.com/spf13/cobra"
 	"github.com/vladimirvivien/ktop/application"
+	"github.com/vladimirvivien/ktop/application/tui"
 	"github.com/vladimirvivien/ktop/buildinfo"
 	"github.com/vladimirvivien/ktop/config"
 	"github.com/vladimirvivien/ktop/internal/logging"
@@ -21,8 +21,6 @@ import (
 	"github.com/vladimirvivien/ktop/metrics"
 	k8sMetrics "github.com/vladimirvivien/ktop/metrics/k8s"
 	promMetrics "github.com/vladimirvivien/ktop/metrics/prom"
-	"github.com/vladimirvivien/ktop/ui"
-	"github.com/vladimirvivien/ktop/views/overview"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/rest"
 )
@@ -319,13 +317,6 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 		defer promSource.Stop()
 	}
 
-	app := application.New(k8sC, metricsSource)
-
-	// Connect API health tracker to the k8s controller
-	k8sC.Controller().SetHealthTracker(app.GetAPIHealthTracker())
-
-	app.WelcomeBanner()
-
 	// Process column options
 	var nodeColumns []string
 	var podColumns []string
@@ -360,8 +351,6 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 		}
 	}
 
-	// Create a new overview page with column options
-	overviewPage := overview.NewWithColumnOptions(app, "Overview", o.showAllColumns, nodeColumns, podColumns)
 	nodeSortCol, nodeSortAsc := parseSortFlag(o.sortNodes)
 	if nodeSortCol == "MEMORY" {
 		nodeSortCol = "MEM"
@@ -373,34 +362,25 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, args []string) error {
 	if podSortCol == "MEM" {
 		podSortCol = "MEMORY"
 	}
-	if nodeSortCol != "" || podSortCol != "" {
-		overviewPage.SetInitialSort(nodeSortCol, nodeSortAsc, podSortCol, podSortAsc)
-	}
-	app.AddPage(overviewPage)
 
-	if err := k8sC.AssertCoreAuthz(ctx); err != nil {
-		slog.Error("kubernetes authorization check failed", "error", err)
-		return fmt.Errorf("ktop: %w", err)
-	}
-	slog.Info("kubernetes authorization checks passed")
-
-	// Check terminal height before starting TUI
-	screen, err := tcell.NewScreen()
-	if err == nil {
-		if err := screen.Init(); err == nil {
-			_, height := screen.Size()
-			screen.Fini()
-			if height < ui.MinTerminalHeight {
-				slog.Error("terminal too small", "height", height, "min", ui.MinTerminalHeight)
-				return fmt.Errorf("terminal height too small (%d rows). Minimum required: %d rows", height, ui.MinTerminalHeight)
-			}
-		}
+	var runner application.Runner
+	runner, err = tui.NewRunner(ctx, k8sC, metricsSource, tui.Options{
+		ShowAllColumns: o.showAllColumns,
+		NodeColumns:    nodeColumns,
+		PodColumns:     podColumns,
+		NodeSortCol:    nodeSortCol,
+		NodeSortAsc:    nodeSortAsc,
+		PodSortCol:     podSortCol,
+		PodSortAsc:     podSortAsc,
+	})
+	if err != nil {
+		return err
 	}
 
 	// launch application
 	appErr := make(chan error)
 	go func() {
-		appErr <- app.Run(ctx)
+		appErr <- runner.Run(ctx)
 	}()
 
 	select {
