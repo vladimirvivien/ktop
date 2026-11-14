@@ -8,6 +8,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/vladimirvivien/ktop/application"
+	"github.com/vladimirvivien/ktop/internal/snapshot"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/model"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -264,8 +265,18 @@ func (p *nodePanel) handleSortKey(key rune) bool {
 }
 
 func (p *nodePanel) DrawBody(data any) {
-	nodes, ok := data.([]model.NodeModel)
-	if !ok {
+	var nodes []model.NodeModel
+	switch v := data.(type) {
+	case *snapshot.Snapshot:
+		if v != nil {
+			nodes = make([]model.NodeModel, len(v.Nodes))
+			for i, nd := range v.Nodes {
+				nodes[i] = nd.ToNodeModel()
+			}
+		}
+	case []model.NodeModel:
+		nodes = v
+	default:
 		panic(fmt.Sprintf("NodePanel.DrawBody: unexpected type %T", data))
 	}
 

@@ -8,6 +8,7 @@ import (
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/vladimirvivien/ktop/application"
+	"github.com/vladimirvivien/ktop/internal/snapshot"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/model"
 )
@@ -257,8 +258,18 @@ func (p *podPanel) handleSortKey(key rune) bool {
 }
 
 func (p *podPanel) DrawBody(data any) {
-	pods, ok := data.([]model.PodModel)
-	if !ok {
+	var pods []model.PodModel
+	switch v := data.(type) {
+	case *snapshot.Snapshot:
+		if v != nil {
+			pods = make([]model.PodModel, len(v.Pods))
+			for i, pd := range v.Pods {
+				pods[i] = pd.ToPodModel()
+			}
+		}
+	case []model.PodModel:
+		pods = v
+	default:
 		panic(fmt.Sprintf("PodPanel.DrawBody got unexpected type %T", data))
 	}
 

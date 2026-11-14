@@ -12,6 +12,7 @@ import (
 	"github.com/rivo/tview"
 	"github.com/vladimirvivien/ktop/application"
 	"github.com/vladimirvivien/ktop/config"
+	"github.com/vladimirvivien/ktop/internal/snapshot"
 	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
@@ -27,6 +28,7 @@ import (
 type MainPanel struct {
 	app                 *application.Application
 	metricsSource       metrics.MetricsSource
+	snapshotBuilder     *snapshot.Builder
 	title               string
 	refresh             func()
 	root                *tview.Flex
@@ -729,7 +731,14 @@ func (p *MainPanel) refreshNodeView(ctx context.Context, models []model.NodeMode
 		// Cache the updated models for detail view access
 		p.cachedNodeModels = nodeModels
 		p.nodePanel.Clear()
-		p.nodePanel.DrawBody(nodeModels)
+		if p.snapshotBuilder == nil {
+			p.snapshotBuilder = snapshot.NewBuilder()
+		}
+		if snap, err := p.snapshotBuilder.Build(ctx, snapshot.BuildInput{Nodes: nodeModels}); err == nil {
+			p.nodePanel.DrawBody(snap)
+		} else {
+			p.nodePanel.DrawBody(nodeModels)
+		}
 
 		// If node detail is currently displayed, update it with pre-fetched data
 		// CRITICAL: Re-verify the view state matches what we fetched - user may have
@@ -920,7 +929,14 @@ func (p *MainPanel) displayFilteredPodsInternal() {
 
 	// Sorting and filtering are handled by the panel itself in DrawBody
 	p.podPanel.Clear()
-	p.podPanel.DrawBody(p.cachedPodModels)
+	if p.snapshotBuilder == nil {
+		p.snapshotBuilder = snapshot.NewBuilder()
+	}
+	if snap, err := p.snapshotBuilder.Build(context.Background(), snapshot.BuildInput{Pods: p.cachedPodModels}); err == nil {
+		p.podPanel.DrawBody(snap)
+	} else {
+		p.podPanel.DrawBody(p.cachedPodModels)
+	}
 }
 
 // buildNodeDetailData builds the node detail data for live updates.
@@ -1165,7 +1181,14 @@ func (p *MainPanel) refreshWorkloadSummary(ctx context.Context, summary model.Cl
 		p.checkAndRebuildLayout()
 
 		p.clusterSummaryPanel.Clear()
-		p.clusterSummaryPanel.DrawBody(summary)
+		if p.snapshotBuilder == nil {
+			p.snapshotBuilder = snapshot.NewBuilder()
+		}
+		if snap, err := p.snapshotBuilder.Build(ctx, snapshot.BuildInput{Summary: summary}); err == nil {
+			p.clusterSummaryPanel.DrawBody(snap)
+		} else {
+			p.clusterSummaryPanel.DrawBody(summary)
+		}
 	})
 	return nil
 }

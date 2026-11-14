@@ -6,6 +6,7 @@ import (
 
 	"github.com/rivo/tview"
 	"github.com/vladimirvivien/ktop/application"
+	"github.com/vladimirvivien/ktop/internal/snapshot"
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/model"
@@ -143,6 +144,10 @@ func (p *clusterSummaryPanel) DrawBody(data any) {
 		p.root.SetTitle(fmt.Sprintf("%s [red][DISCONNECTED - Press R to reconnect]", p.GetTitle()))
 	} else {
 		p.root.SetTitle(p.GetTitle())
+	}
+
+	if snap, ok := data.(*snapshot.Snapshot); ok && snap != nil {
+		data = snap.Summary.ToClusterSummary(snap.Cluster)
 	}
 
 	switch summary := data.(type) {
