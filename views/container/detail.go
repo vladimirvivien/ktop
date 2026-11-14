@@ -222,14 +222,14 @@ func (p *DetailPanel) buildLayout() {
 	p.infoHeaderPanel.SetBorder(true)
 	p.infoHeaderPanel.SetTitle(" Info ")
 	p.infoHeaderPanel.SetTitleAlign(tview.AlignLeft)
-	p.infoHeaderPanel.SetBorderColor(tcell.ColorLightGray)
+	ui.SetFlexFocused(p.infoHeaderPanel, false)
 
 	// === Container Detail Section (12 rows) ===
 	p.containerDetailPanel = tview.NewFlex().SetDirection(tview.FlexColumn)
 	p.containerDetailPanel.SetBorder(true)
 	p.containerDetailPanel.SetTitle(" Container Detail ")
 	p.containerDetailPanel.SetTitleAlign(tview.AlignCenter)
-	p.containerDetailPanel.SetBorderColor(tcell.ColorLightGray)
+	ui.SetFlexFocused(p.containerDetailPanel, false)
 
 	// Left column: Container Info table
 	p.leftDetailTable = tview.NewTable()
@@ -261,7 +261,7 @@ func (p *DetailPanel) buildLayout() {
 	p.logsView.SetBorder(true)
 	p.logsView.SetTitle(" Logs ")
 	p.logsView.SetTitleAlign(tview.AlignLeft)
-	p.logsView.SetBorderColor(tcell.ColorLightGray)
+	ui.SetBoxFocused(p.logsView.Box, false)
 
 	// Assemble main layout with dynamic heights
 	// Use default height (50) during initial layout since root may not be rendered yet
@@ -422,14 +422,22 @@ func (p *DetailPanel) drawInfoHeader() {
 		restarts = int(p.containerStatus.RestartCount)
 	}
 
+	var mutedOpen, valOpen, closeTag string
+	if !ui.IsMonochrome() {
+		pal := ui.ActivePalette()
+		mutedOpen = "[" + ui.TagFg(pal.StatusMuted) + "]"
+		valOpen = "[" + ui.TagFg(pal.DataSecondary) + "]"
+		closeTag = "[-]"
+	}
+
 	// Build info items
 	items := []string{
-		fmt.Sprintf("[gray]Status:[white] %s", status),
-		fmt.Sprintf("[gray]Node:[white] %s", nodeName),
-		fmt.Sprintf("[gray]NS:[white] %s", p.namespace),
-		fmt.Sprintf("[gray]IP:[white] %s", podIP),
-		fmt.Sprintf("[gray]Age:[white] %s", age),
-		fmt.Sprintf("[gray]Restarts:[white] %d", restarts),
+		fmt.Sprintf("%sStatus:%s %s%s", mutedOpen, valOpen, status, closeTag),
+		fmt.Sprintf("%sNode:%s %s%s", mutedOpen, valOpen, nodeName, closeTag),
+		fmt.Sprintf("%sNS:%s %s%s", mutedOpen, valOpen, p.namespace, closeTag),
+		fmt.Sprintf("%sIP:%s %s%s", mutedOpen, valOpen, podIP, closeTag),
+		fmt.Sprintf("%sAge:%s %s%s", mutedOpen, valOpen, age, closeTag),
+		fmt.Sprintf("%sRestarts:%s %d%s", mutedOpen, valOpen, restarts, closeTag),
 	}
 
 	// Create a text view with all items on one line
@@ -526,19 +534,35 @@ func (p *DetailPanel) drawContainerDetail() {
 	p.addDetailHeader(p.centerDetailTable, row, "State Details")
 	row++
 
+	pal := ui.ActivePalette()
+	mono := ui.IsMonochrome()
+	okColor := pal.StatusOK
+	warnColor := pal.StatusWarning
+	errColor := pal.StatusError
+	mutedColor := pal.StatusMuted
+	if mono {
+		okColor = tcell.ColorDefault
+		warnColor = tcell.ColorDefault
+		errColor = tcell.ColorDefault
+		mutedColor = tcell.ColorDefault
+	}
+
 	if p.containerStatus != nil {
 		// State
 		state := "Unknown"
-		stateColor := tcell.ColorGray
+		stateColor := mutedColor
 		if p.containerStatus.State.Running != nil {
 			state = "Running"
-			stateColor = tcell.ColorGreen
+			stateColor = okColor
 		} else if p.containerStatus.State.Waiting != nil {
 			state = "Waiting"
-			stateColor = tcell.ColorYellow
+			stateColor = warnColor
 		} else if p.containerStatus.State.Terminated != nil {
 			state = "Terminated"
-			stateColor = tcell.ColorRed
+			if mono {
+				state = "! " + state
+			}
+			stateColor = errColor
 		}
 		ui.AddDetailRowColor(p.centerDetailTable, row, "State", state, stateColor)
 		row++
@@ -553,21 +577,23 @@ func (p *DetailPanel) drawContainerDetail() {
 
 		// Ready
 		readyStr := "No"
-		readyColor := tcell.ColorRed
+		if mono {
+			readyStr = "! No"
+		}
+		readyColor := errColor
 		if p.containerStatus.Ready {
 			readyStr = "Yes"
-			readyColor = tcell.ColorGreen
+			readyColor = okColor
 		}
 		ui.AddDetailRowColor(p.centerDetailTable, row, "Ready", readyStr, readyColor)
 		row++
 
 		// Restarts
-		restartColor := tcell.ColorGreen
-		if p.containerStatus.RestartCount > 0 {
-			restartColor = tcell.ColorYellow
-		}
+		restartColor := okColor
 		if p.containerStatus.RestartCount > 5 {
-			restartColor = tcell.ColorRed
+			restartColor = errColor
+		} else if p.containerStatus.RestartCount > 0 {
+			restartColor = warnColor
 		}
 		ui.AddDetailRowColor(p.centerDetailTable, row, "Restarts", fmt.Sprintf("%d", p.containerStatus.RestartCount), restartColor)
 		row++
@@ -635,20 +661,20 @@ func (p *DetailPanel) drawContainerDetail() {
 
 		// CPU Usage (actual)
 		cpuUse := p.cpuUsage
-		cpuUseColor := tcell.ColorGreen
+		cpuUseColor := okColor
 		if cpuUse == "" {
 			cpuUse = "n/a"
-			cpuUseColor = tcell.ColorGray
+			cpuUseColor = mutedColor
 		}
 		ui.AddDetailRowColor(p.rightDetailTable, row, "CPU Use", cpuUse, cpuUseColor)
 		row++
 
 		// Mem Usage (actual)
 		memUse := p.memUsage
-		memUseColor := tcell.ColorGreen
+		memUseColor := okColor
 		if memUse == "" {
 			memUse = "n/a"
-			memUseColor = tcell.ColorGray
+			memUseColor = mutedColor
 		}
 		ui.AddDetailRowColor(p.rightDetailTable, row, "Mem Use", memUse, memUseColor)
 		row++
@@ -713,22 +739,39 @@ func (p *DetailPanel) formatProbe(probe *corev1.Probe) string {
 }
 
 func (p *DetailPanel) addDetailHeader(table *tview.Table, row int, title string) {
-	table.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("[::b]%s[::-]", title)).SetTextColor(tcell.ColorAqua).SetSelectable(false))
+	sectionColor := ui.ActivePalette().Accent
+	if ui.IsMonochrome() {
+		sectionColor = tcell.ColorDefault
+	}
+	table.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("[::b]%s[::-]", title)).SetTextColor(sectionColor).SetSelectable(false))
+}
+
+func formatLogsTitle(count int, following, expanded bool) string {
+	mono := ui.IsMonochrome()
+	pal := ui.ActivePalette()
+
+	expandIndicator := ""
+	if expanded {
+		if mono {
+			expandIndicator = " [::b]expanded[::-]"
+		} else {
+			expandIndicator = fmt.Sprintf(" [%s]expanded[-]", ui.TagFg(pal.StatusInfo))
+		}
+	}
+
+	if following {
+		if mono {
+			return fmt.Sprintf(" Logs (%d lines streaming)%s ", count, expandIndicator)
+		}
+		return fmt.Sprintf(" Logs (%d lines [%s]streaming[-])%s ", count, ui.TagFg(pal.StatusOK), expandIndicator)
+	}
+	return fmt.Sprintf(" Logs (%d lines)%s ", count, expandIndicator)
 }
 
 // updateLogsTitle updates the logs panel title with line count and streaming status
 // Use this only when called from the main goroutine (e.g., toggleFollow)
 func (p *DetailPanel) updateLogsTitle() {
-	expandIndicator := ""
-	if p.logsExpanded {
-		expandIndicator = " [blue]expanded[-]"
-	}
-
-	if p.following {
-		p.logsView.SetTitle(fmt.Sprintf(" Logs (%d lines [green]streaming[-])%s ", p.lineCount, expandIndicator))
-	} else {
-		p.logsView.SetTitle(fmt.Sprintf(" Logs (%d lines)%s ", p.lineCount, expandIndicator))
-	}
+	p.logsView.SetTitle(formatLogsTitle(p.lineCount, p.following, p.logsExpanded))
 }
 
 // updateLogsTitleWithCount updates the logs panel title with the given line count
@@ -739,16 +782,7 @@ func (p *DetailPanel) updateLogsTitleWithCount(count int) {
 	expanded := p.logsExpanded
 	p.streamMu.Unlock()
 
-	expandIndicator := ""
-	if expanded {
-		expandIndicator = " [blue]expanded[-]"
-	}
-
-	if following {
-		p.logsView.SetTitle(fmt.Sprintf(" Logs (%d lines [green]streaming[-])%s ", count, expandIndicator))
-	} else {
-		p.logsView.SetTitle(fmt.Sprintf(" Logs (%d lines)%s ", count, expandIndicator))
-	}
+	p.logsView.SetTitle(formatLogsTitle(count, following, expanded))
 }
 
 func (p *DetailPanel) setupInputCapture() {
@@ -906,7 +940,7 @@ func (p *DetailPanel) loadMoreLogs() {
 
 		stream, err := p.getLogStream(ctx, p.namespace, p.podName, opts)
 		if err != nil {
-			p.appendLog(fmt.Sprintf("[red]Error loading more logs: %v", err))
+			p.appendLog(ui.ErrorMarkup(fmt.Sprintf("Error loading more logs: %v", err)))
 			return
 		}
 		defer stream.Close()
@@ -966,9 +1000,18 @@ func (p *DetailPanel) enterFilterMode() {
 	// Create filter input if not exists
 	if p.filterInput == nil {
 		p.filterInput = tview.NewInputField()
-		p.filterInput.SetLabel("[yellow]/[-] ")
-		p.filterInput.SetFieldBackgroundColor(tcell.ColorDarkBlue)
-		p.filterInput.SetLabelColor(tcell.ColorYellow)
+		if ui.IsMonochrome() {
+			p.filterInput.SetLabel("/ ")
+			p.filterInput.SetFieldBackgroundColor(tcell.ColorDefault)
+			p.filterInput.SetFieldTextColor(tcell.ColorDefault)
+			p.filterInput.SetLabelColor(tcell.ColorDefault)
+		} else {
+			pal := ui.ActivePalette()
+			p.filterInput.SetLabel(fmt.Sprintf("[%s]/[-] ", ui.TagFg(pal.DataPrimary)))
+			p.filterInput.SetFieldBackgroundColor(pal.HeaderBg)
+			p.filterInput.SetFieldTextColor(pal.HeaderFg)
+			p.filterInput.SetLabelColor(pal.DataPrimary)
+		}
 
 		// Handle Enter and Escape keys via DoneFunc
 		p.filterInput.SetDoneFunc(func(key tcell.Key) {
@@ -1074,7 +1117,7 @@ func (p *DetailPanel) exitFilterMode() {
 
 func (p *DetailPanel) startLogStream(previous bool) {
 	if p.getLogStream == nil {
-		p.appendLog("[red]Error: log stream function not configured")
+		p.appendLog(ui.ErrorMarkup("Error: log stream function not configured"))
 		return
 	}
 
@@ -1101,7 +1144,7 @@ func (p *DetailPanel) startLogStream(previous bool) {
 	go func() {
 		stream, err := p.getLogStream(ctx, namespace, podName, opts)
 		if err != nil {
-			p.appendLog(fmt.Sprintf("[red]Error getting logs: %v", err))
+			p.appendLog(ui.ErrorMarkup(fmt.Sprintf("Error getting logs: %v", err)))
 			return
 		}
 		defer stream.Close()
@@ -1140,7 +1183,11 @@ func (p *DetailPanel) startLogStream(previous bool) {
 			case <-ctx.Done():
 				// Context cancelled, don't report error
 			default:
-				p.appendLog(fmt.Sprintf("[yellow]Stream ended: %v", err))
+				if ui.IsMonochrome() {
+					p.appendLog(fmt.Sprintf("[::b]Stream ended: %v[::-]", err))
+				} else {
+					p.appendLog(fmt.Sprintf("[%s]Stream ended: %v[-]", ui.TagFg(ui.ActivePalette().StatusWarning), err))
+				}
 			}
 		}
 	}()
@@ -1157,22 +1204,34 @@ func (p *DetailPanel) stopStream() {
 }
 
 func (p *DetailPanel) formatLogLine(line string) string {
+	mono := ui.IsMonochrome()
+	pal := ui.ActivePalette()
+
 	// Color timestamps if present (RFC3339 format: 2024-01-15T10:30:00Z)
 	if p.timestamps && len(line) > 30 && line[4] == '-' && line[7] == '-' {
 		if idx := strings.Index(line, " "); idx > 0 && idx < 35 {
 			timestamp := line[:idx]
 			rest := line[idx+1:]
-			return fmt.Sprintf("[gray]%s[white] %s", timestamp, rest)
+			if mono {
+				return fmt.Sprintf("%s %s", timestamp, rest)
+			}
+			return fmt.Sprintf("[%s]%s[%s] %s[-]", ui.TagFg(pal.StatusMuted), timestamp, ui.TagFg(pal.DataSecondary), rest)
 		}
 	}
 
 	// Color error/warning lines
 	lineLower := strings.ToLower(line)
 	if strings.Contains(lineLower, "error") || strings.Contains(lineLower, "fatal") {
-		return "[red]" + line
+		if mono {
+			return "[::u]" + line + "[::-]"
+		}
+		return fmt.Sprintf("[%s]%s[-]", ui.TagFg(pal.StatusError), line)
 	}
 	if strings.Contains(lineLower, "warn") {
-		return "[yellow]" + line
+		if mono {
+			return "[::b]" + line + "[::-]"
+		}
+		return fmt.Sprintf("[%s]%s[-]", ui.TagFg(pal.StatusWarning), line)
 	}
 
 	return line
@@ -1260,24 +1319,22 @@ func (p *DetailPanel) notifyFooterContextChange() {
 
 // updateFocusVisuals updates border colors to indicate focused panel
 func (p *DetailPanel) updateFocusVisuals() {
-	// Container Detail panel: dodgerblue when focused, lightgray otherwise
 	if p.containerDetailPanel != nil {
+		ui.SetFlexFocused(p.containerDetailPanel, p.focusedChildIdx == 0)
 		if p.focusedChildIdx == 0 {
-			p.containerDetailPanel.SetBorderColor(tcell.ColorDodgerBlue)
-			p.containerDetailPanel.SetTitle(" Container Detail [yellow][s][white]:spec ")
+			if ui.IsMonochrome() {
+				p.containerDetailPanel.SetTitle(" Container Detail [::b][s][::-]:spec ")
+			} else {
+				pal := ui.ActivePalette()
+				p.containerDetailPanel.SetTitle(fmt.Sprintf(" Container Detail [%s][s][%s]:spec[-] ", ui.TagFg(pal.DataPrimary), ui.TagFg(pal.TitleFocused)))
+			}
 		} else {
-			p.containerDetailPanel.SetBorderColor(tcell.ColorLightGray)
 			p.containerDetailPanel.SetTitle(" Container Detail ")
 		}
 	}
 
-	// Logs view: dodgerblue when focused, lightgray otherwise
 	if p.logsView != nil {
-		if p.focusedChildIdx == 1 {
-			p.logsView.SetBorderColor(tcell.ColorDodgerBlue)
-		} else {
-			p.logsView.SetBorderColor(tcell.ColorLightGray)
-		}
+		ui.SetBoxFocused(p.logsView.Box, p.focusedChildIdx == 1)
 	}
 }
 

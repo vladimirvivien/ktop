@@ -27,10 +27,12 @@ type ToastCallback func(buttonLabel string)
 // If a callback is provided, ESC key will trigger it with "Quit"
 func NewToast(message string, level ToastLevel) *tview.Modal {
 	icon, color := getIconAndColor(level)
+	text := fmt.Sprintf("%s %s", icon, message)
 
 	modal := tview.NewModal().
-		SetText(fmt.Sprintf("%s %s", icon, message)).
+		SetText(text).
 		SetBackgroundColor(color)
+	applyToastTheme(modal, level, text)
 
 	return modal
 }
@@ -38,10 +40,12 @@ func NewToast(message string, level ToastLevel) *tview.Modal {
 // NewToastWithEscHandler creates a toast that handles ESC key to quit
 func NewToastWithEscHandler(message string, level ToastLevel, callback ToastCallback) *tview.Modal {
 	icon, color := getIconAndColor(level)
+	text := fmt.Sprintf("%s %s", icon, message)
 
 	modal := tview.NewModal().
-		SetText(fmt.Sprintf("%s %s", icon, message)).
+		SetText(text).
 		SetBackgroundColor(color)
+	applyToastTheme(modal, level, text)
 
 	// Handle ESC key to quit
 	modal.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -62,9 +66,10 @@ func NewToastWithEscHandler(message string, level ToastLevel, callback ToastCall
 // ESC key triggers "Quit" callback if Quit button exists, otherwise dismisses
 func NewToastWithButtons(message string, level ToastLevel, buttons []string, callback ToastCallback) *tview.Modal {
 	icon, color := getIconAndColor(level)
+	text := fmt.Sprintf("%s %s", icon, message)
 
 	modal := tview.NewModal().
-		SetText(fmt.Sprintf("%s %s", icon, message)).
+		SetText(text).
 		SetBackgroundColor(color).
 		AddButtons(buttons).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
@@ -72,6 +77,7 @@ func NewToastWithButtons(message string, level ToastLevel, buttons []string, cal
 				callback(buttonLabel)
 			}
 		})
+	applyToastTheme(modal, level, text)
 
 	// Handle ESC key to trigger Quit (or dismiss if no Quit button)
 	modal.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -100,16 +106,32 @@ func NewToastWithButtons(message string, level ToastLevel, buttons []string, cal
 	return modal
 }
 
+func applyToastTheme(modal *tview.Modal, level ToastLevel, text string) {
+	if IsMonochrome() {
+		if level == ToastError {
+			modal.SetText("! " + text)
+		}
+		modal.SetBackgroundColor(tcell.ColorDefault).
+			SetTextColor(tcell.ColorDefault).
+			SetButtonBackgroundColor(tcell.ColorDefault).
+			SetButtonTextColor(tcell.ColorDefault).
+			SetBorderAttributes(tcell.AttrBold)
+		return
+	}
+	modal.SetTextColor(ActivePalette().ToastFg)
+}
+
 func getIconAndColor(level ToastLevel) (string, tcell.Color) {
+	p := ActivePalette()
 	switch level {
 	case ToastSuccess:
-		return "✓", tcell.ColorDarkGreen
+		return "✓", p.ToastSuccessBg
 	case ToastError:
-		return "✗", tcell.ColorDarkRed
+		return "✗", p.ToastErrorBg
 	case ToastWarning:
-		return "⚠", tcell.ColorDarkOrange
+		return "⚠", p.ToastWarnBg
 	default: // ToastInfo
-		return "ℹ", tcell.ColorDarkBlue
+		return "ℹ", p.ToastInfoBg
 	}
 }
 

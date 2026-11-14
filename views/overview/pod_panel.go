@@ -132,7 +132,7 @@ func (p *podPanel) Layout(_ any) {
 		p.list.SetBorders(false)
 		p.list.SetFocusFunc(func() {
 			p.list.SetSelectable(true, false)
-			p.list.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorLightGray).Foreground(tcell.ColorBlack))
+			p.list.SetSelectedStyle(ui.SelectedRowStyle())
 			p.list.Select(1, 0) // Select row 1 (first data row), column 0
 		})
 		p.list.SetBlurFunc(func() {
@@ -217,12 +217,10 @@ func (p *podPanel) DrawHeader(data any) {
 		headerText := p.formatColumnHeader(col)
 
 		p.list.SetCell(0, i,
-			tview.NewTableCell(headerText).
-				SetTextColor(tcell.ColorWhite).
-				SetBackgroundColor(tcell.ColorDarkCyan).
+			ui.StyleHeaderCell(tview.NewTableCell(headerText).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(100).
-				SetSelectable(true),
+				SetSelectable(true)),
 		)
 
 		// Map column name to position
@@ -288,7 +286,13 @@ func (p *podPanel) DrawBody(data any) {
 	sortCol, sortAsc := p.GetSortParams()
 	model.SortPodModelsBy(pods, sortCol, sortAsc)
 
-	colorKeys := ui.ColorKeys{0: "olivedrab", 50: "yellow", 90: "red"}
+	colorKeys := ui.DefaultColorKeys()
+	pal := ui.ActivePalette()
+	mono := ui.IsMonochrome()
+	valTag := ""
+	if !mono {
+		valTag = "[" + ui.TagFg(pal.DataSecondary) + "]"
+	}
 	var cpuRatio, memRatio ui.Ratio
 	var cpuGraph, memGraph string
 	var cpuMetrics, memMetrics string
@@ -372,16 +376,17 @@ func (p *podPanel) DrawBody(data any) {
 				)
 
 			case "STATUS":
-				// Status column: green for healthy, status color for unhealthy
-				statusColor := ui.GetTcellColor(ui.GetStatusColor(pod.Status, "pod"))
+				maxWidth := 11
+				if mono {
+					maxWidth = 13
+				}
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
+					ui.StyleStatusCell(&tview.TableCell{
 						Text:     pod.Status,
-						Color:    statusColor,
 						Align:    tview.AlignLeft,
-						MaxWidth: 11,
-					},
+						MaxWidth: maxWidth,
+					}, pod.Status, "pod"),
 				)
 
 			case "RST":
@@ -453,35 +458,45 @@ func (p *podPanel) DrawBody(data any) {
 				if hasUsageMetrics && hasAllocatable {
 					cpuRatio = ui.GetRatio(float64(pod.PodUsageCpuQty.MilliValue()), float64(pod.NodeAllocatableCpuQty.MilliValue()))
 					cpuPercentage := float64(cpuRatio) * 100
-					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
+					cpuPctTag := ""
+					if !mono {
+						cpuPctTag = "[" + ui.GetResourcePercentageColor(cpuPercentage) + "]"
+					}
 					// Push current value to sparkline (smooth sliding)
 					cpuSparkline.Push(float64(cpuRatio))
 					cpuGraph = cpuSparkline.RenderText()
 					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %5dm [%s]%5.1f%%[white] %s",
-						cpuGraph, pod.PodUsageCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage, cpuTrend,
+						"%s[%s%s] %5dm %s%5.1f%%%s %s",
+						valTag, cpuGraph, valTag, pod.PodUsageCpuQty.MilliValue(), cpuPctTag, cpuPercentage, valTag, cpuTrend,
 					)
 				} else if hasRequestMetrics && hasAllocatable {
 					cpuRatio = ui.GetRatio(float64(pod.PodRequestedCpuQty.MilliValue()), float64(pod.NodeAllocatableCpuQty.MilliValue()))
 					cpuPercentage := float64(cpuRatio) * 100
-					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
+					cpuPctTag := ""
+					if !mono {
+						cpuPctTag = "[" + ui.GetResourcePercentageColor(cpuPercentage) + "]"
+					}
 					// Push current value to sparkline (smooth sliding)
 					cpuSparkline.Push(float64(cpuRatio))
 					cpuGraph = cpuSparkline.RenderText()
 					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %5dm [%s]%5.1f%%[white] %s",
-						cpuGraph, pod.PodRequestedCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage, cpuTrend,
+						"%s[%s%s] %5dm %s%5.1f%%%s %s",
+						valTag, cpuGraph, valTag, pod.PodRequestedCpuQty.MilliValue(), cpuPctTag, cpuPercentage, valTag, cpuTrend,
 					)
 				} else {
 					// Zero or unavailable: push zero to sparkline
 					cpuSparkline.Push(0)
 					cpuGraph = cpuSparkline.RenderText()
 					cpuTrend := cpuSparkline.TrendIndicator(0) // 0% when no data
+					cpuPctTag := ""
+					if !mono {
+						cpuPctTag = "[" + ui.GetResourcePercentageColor(0) + "]"
+					}
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %5dm [green]%5.1f%%[white] %s",
-						cpuGraph, 0, 0.0, cpuTrend,
+						"%s[%s%s] %5dm %s%5.1f%%%s %s",
+						valTag, cpuGraph, valTag, 0, cpuPctTag, 0.0, valTag, cpuTrend,
 					)
 				}
 
@@ -508,39 +523,49 @@ func (p *podPanel) DrawBody(data any) {
 				if hasUsageMetrics && hasAllocatable {
 					memRatio = ui.GetRatio(float64(pod.PodUsageMemQty.Value()), float64(pod.NodeAllocatableMemQty.Value()))
 					memPercentage := float64(memRatio) * 100
-					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
+					memPctTag := ""
+					if !mono {
+						memPctTag = "[" + ui.GetResourcePercentageColor(memPercentage) + "]"
+					}
 					// Push current value to sparkline (smooth sliding)
 					memSparkline.Push(float64(memRatio))
 					memGraph = memSparkline.RenderText()
 					memTrend := memSparkline.TrendIndicator(memPercentage)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s [%s]%5.1f%%[white] %s",
-						memGraph,
+						"%s[%s%s] %s %s%5.1f%%%s %s",
+						valTag, memGraph, valTag,
 						ui.FormatMemory(pod.PodUsageMemQty),
-						memPercentageColor, memPercentage, memTrend,
+						memPctTag, memPercentage, valTag, memTrend,
 					)
 				} else if hasRequestMetrics && hasAllocatable {
 					memRatio = ui.GetRatio(float64(pod.PodRequestedMemQty.Value()), float64(pod.NodeAllocatableMemQty.Value()))
 					memPercentage := float64(memRatio) * 100
-					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
+					memPctTag := ""
+					if !mono {
+						memPctTag = "[" + ui.GetResourcePercentageColor(memPercentage) + "]"
+					}
 					// Push current value to sparkline (smooth sliding)
 					memSparkline.Push(float64(memRatio))
 					memGraph = memSparkline.RenderText()
 					memTrend := memSparkline.TrendIndicator(memPercentage)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s [%s]%5.1f%%[white] %s",
-						memGraph,
+						"%s[%s%s] %s %s%5.1f%%%s %s",
+						valTag, memGraph, valTag,
 						ui.FormatMemory(pod.PodRequestedMemQty),
-						memPercentageColor, memPercentage, memTrend,
+						memPctTag, memPercentage, valTag, memTrend,
 					)
 				} else {
 					// Zero or unavailable: push zero to sparkline
 					memSparkline.Push(0)
 					memGraph = memSparkline.RenderText()
 					memTrend := memSparkline.TrendIndicator(0) // 0% when no data
+					memPctTag := ""
+					if !mono {
+						memPctTag = "[" + ui.GetResourcePercentageColor(0) + "]"
+					}
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s [green]%5.1f%%[white] %s",
-						memGraph, "   0Mi", 0.0, memTrend,
+						"%s[%s%s] %s %s%5.1f%%%s %s",
+						valTag, memGraph, valTag, "   0Mi", memPctTag, 0.0, valTag, memTrend,
 					)
 				}
 
@@ -558,6 +583,7 @@ func (p *podPanel) DrawBody(data any) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:     renderStallCell(pod.PSI, pod.NodePSIKernelSupported),
+						Color:    rowColor,
 						Align:    tview.AlignLeft,
 						MaxWidth: 12,
 					},
@@ -568,6 +594,7 @@ func (p *podPanel) DrawBody(data any) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:     ui.FormatThrottleCell(pod.CPUThrottledPct),
+						Color:    rowColor,
 						Align:    tview.AlignLeft,
 						MaxWidth: 10,
 					},
@@ -647,7 +674,7 @@ func (p *podPanel) HandleEscape() bool {
 func (p *podPanel) updateTitle(totalRows int) {
 	var disconnectedSuffix string
 	if p.app != nil && p.app.IsAPIDisconnected() {
-		disconnectedSuffix = " [red][DISCONNECTED - Press R to reconnect][-]"
+		disconnectedSuffix = " " + ui.ErrorMarkup("[DISCONNECTED - Press R to reconnect]")
 	}
 	p.root.SetTitle(p.tableCtrl.FormatTitleWithScroll("Pods", ui.Icons.Package, totalRows, disconnectedSuffix))
 }

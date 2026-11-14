@@ -4,21 +4,10 @@ import (
 	"fmt"
 
 	"github.com/vladimirvivien/ktop/metrics"
+	"github.com/vladimirvivien/ktop/ui"
 )
 
 // renderStallCell returns the rendered text for a STALL column cell.
-//
-// The dominant axis is the largest of the three "waiting" percentages
-// (CPU/MEM/IO). Values below 0.01% render as a gray dot. Color thresholds:
-//
-//	   < 2%   green   — healthy
-//	2 – 10%   yellow  — minor pressure
-//	10 – 25%  orange  — meaningful pressure
-//	  >= 25%  red     — severe pressure
-//
-// When kernelSupported is false (node Linux kernel < 4.20), the cell is
-// prefixed with "⚠ " in yellow regardless of the value, because PSI data
-// from those nodes is not reliable.
 func renderStallCell(psi metrics.PSIMetrics, kernelSupported bool) string {
 	cpu, mem, io := psi.CPUStallPct, psi.MemStallPct, psi.IOStallPct
 
@@ -33,10 +22,32 @@ func renderStallCell(psi metrics.PSIMetrics, kernelSupported bool) string {
 		label = "IO"
 	}
 
+	p := ui.ActivePalette()
+	mono := ui.IsMonochrome()
+
 	var core string
+	if mono {
+		switch {
+		case max < 0.01:
+			core = "·"
+		case max < 1.0:
+			core = fmt.Sprintf("%s %.2f%%", label, max)
+		case max < 10.0:
+			core = fmt.Sprintf("%s %.1f%%", label, max)
+		case max >= 25.0:
+			core = ui.ErrorMarkup(fmt.Sprintf("%s %.0f%%", label, max))
+		default:
+			core = fmt.Sprintf("%s %.0f%%", label, max)
+		}
+		if !kernelSupported {
+			return "[::b]⚠ [::-]" + core
+		}
+		return core
+	}
+
 	switch {
 	case max < 0.01:
-		core = "[gray]·[-]"
+		core = fmt.Sprintf("[%s]·[-]", ui.TagFg(p.StatusMuted))
 	case max < 1.0:
 		// Two decimals so 0.24% doesn't collide with 0.04% visually.
 		core = fmt.Sprintf("[%s]%s %.2f%%[-]", stallColor(max), label, max)
@@ -47,20 +58,11 @@ func renderStallCell(psi metrics.PSIMetrics, kernelSupported bool) string {
 	}
 
 	if !kernelSupported {
-		return "[yellow]⚠ [-]" + core
+		return fmt.Sprintf("[%s]⚠ [-]%s", ui.TagFg(p.StatusWarning), core)
 	}
 	return core
 }
 
 func stallColor(pct float64) string {
-	switch {
-	case pct < 2:
-		return "green"
-	case pct < 10:
-		return "yellow"
-	case pct < 25:
-		return "orange"
-	default:
-		return "red"
-	}
+	return ui.StallColor(pct)
 }

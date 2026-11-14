@@ -121,6 +121,42 @@ func (tc *TableController) FormatColumnHeader(col string) string {
 	key, exists := tc.columnToKey[col]
 	var formatted string
 
+	if IsMonochrome() {
+		if exists {
+			keyPos := -1
+			colUpper := strings.ToUpper(col)
+			keyUpper := strings.ToUpper(string(key))
+			for i, ch := range colUpper {
+				if string(ch) == keyUpper {
+					keyPos = i
+					break
+				}
+			}
+
+			if keyPos >= 0 && keyPos < len(col) {
+				before := col[:keyPos]
+				highlighted := string(col[keyPos])
+				after := ""
+				if keyPos+1 < len(col) {
+					after = col[keyPos+1:]
+				}
+				formatted = fmt.Sprintf("%s[::bu]%s[::-]%s", before, highlighted, after)
+			} else {
+				formatted = fmt.Sprintf("[::bu]%c[::-]%s", col[0], col[1:])
+			}
+		} else {
+			formatted = fmt.Sprintf("[::bu]%c[::-]%s", col[0], col[1:])
+		}
+		if col == tc.sortColumn {
+			if tc.sortAsc {
+				formatted += " ▲"
+			} else {
+				formatted += " ▼"
+			}
+		}
+		return formatted
+	}
+
 	if exists {
 		keyPos := -1
 		colUpper := strings.ToUpper(col)

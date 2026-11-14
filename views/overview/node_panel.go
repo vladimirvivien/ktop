@@ -131,7 +131,7 @@ func (p *nodePanel) Layout(_ any) {
 		p.list.SetBorders(false)
 		p.list.SetFocusFunc(func() {
 			p.list.SetSelectable(true, false)
-			p.list.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorLightGray).Foreground(tcell.ColorBlack))
+			p.list.SetSelectedStyle(ui.SelectedRowStyle())
 			p.list.Select(1, 0) // Select row 1 (first data row), column 0
 		})
 		p.list.SetBlurFunc(func() {
@@ -211,13 +211,11 @@ func (p *nodePanel) DrawHeader(data any) {
 
 	// Reserve index 0 for the legend column
 	p.list.SetCell(0, 0,
-		tview.NewTableCell("").
-			SetTextColor(tcell.ColorWhite).
+		ui.StyleHeaderCell(tview.NewTableCell("").
 			SetAlign(tview.AlignCenter).
-			SetBackgroundColor(tcell.ColorDarkCyan).
 			SetMaxWidth(1).
 			SetExpansion(0).
-			SetSelectable(true),
+			SetSelectable(true)),
 	)
 
 	p.listCols = cols
@@ -230,12 +228,10 @@ func (p *nodePanel) DrawHeader(data any) {
 		headerText := p.formatColumnHeader(col)
 
 		p.list.SetCell(0, pos,
-			tview.NewTableCell(headerText).
-				SetTextColor(tcell.ColorWhite).
+			ui.StyleHeaderCell(tview.NewTableCell(headerText).
 				SetAlign(tview.AlignLeft).
-				SetBackgroundColor(tcell.ColorDarkCyan).
 				SetExpansion(100).
-				SetSelectable(true),
+				SetSelectable(true)),
 		)
 
 		// Map column name to its position
@@ -304,7 +300,13 @@ func (p *nodePanel) DrawBody(data any) {
 	var cpuRatio, memRatio ui.Ratio
 	var cpuGraph, memGraph string
 	var cpuMetrics, memMetrics string
-	colorKeys := ui.ColorKeys{0: "olivedrab", 50: "yellow", 90: "red"}
+	colorKeys := ui.DefaultColorKeys()
+	pal := ui.ActivePalette()
+	mono := ui.IsMonochrome()
+	valTag := ""
+	if !mono {
+		valTag = "[" + ui.TagFg(pal.DataSecondary) + "]"
+	}
 
 	// Apply filter and track counts
 	p.filter.TotalRows = len(nodes)
@@ -341,11 +343,15 @@ func (p *nodePanel) DrawBody(data any) {
 			controlLegend = ui.Icons.TrafficLight
 		}
 
+		legendColor := pal.Accent
+		if mono {
+			legendColor = tcell.ColorDefault
+		}
 		p.list.SetCell(
 			rowIdx, 0,
 			&tview.TableCell{
 				Text:          controlLegend,
-				Color:         tcell.ColorOrangeRed,
+				Color:         legendColor,
 				Align:         tview.AlignCenter,
 				NotSelectable: true,
 			},
@@ -360,47 +366,62 @@ func (p *nodePanel) DrawBody(data any) {
 
 			switch colName {
 			case "NAME":
-				// Gray color for cordoned (unschedulable) nodes
 				nameColor := rowColor
+				nameAttrs := tcell.AttrNone
 				if node.Unschedulable {
-					nameColor = tcell.ColorGray
+					if mono {
+						nameColor = tcell.ColorDefault
+						nameAttrs = tcell.AttrDim
+					} else {
+						nameColor = pal.StatusMuted
+					}
 				}
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:     node.Name,
-						Color:    nameColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 20,
+						Text:       node.Name,
+						Color:      nameColor,
+						Attributes: nameAttrs,
+						Align:      tview.AlignLeft,
+						MaxWidth:   20,
 					},
 				)
 
 			case "STATUS":
-				// Status column: green for healthy, status color for unhealthy
-				statusColor := ui.GetTcellColor(ui.GetStatusColor(node.Status, "node"))
+				maxWidth := 8
+				if mono {
+					maxWidth = 10
+				}
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
+					ui.StyleStatusCell(&tview.TableCell{
 						Text:     node.Status,
-						Color:    statusColor,
 						Align:    tview.AlignLeft,
-						MaxWidth: 8,
-					},
+						MaxWidth: maxWidth,
+					}, node.Status, "node"),
 				)
 
 			case "RST":
-				// Restarts: green if 0, yellow if >0
-				rstColor := tcell.ColorGreen
+				rstColor := pal.StatusOK
+				rstAttrs := tcell.AttrNone
 				if node.Restarts > 0 {
-					rstColor = tcell.ColorYellow
+					if mono {
+						rstAttrs = tcell.AttrBold
+					} else {
+						rstColor = pal.StatusWarning
+					}
+				}
+				if mono {
+					rstColor = tcell.ColorDefault
 				}
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:     fmt.Sprintf("%d", node.Restarts),
-						Color:    rstColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 5,
+						Text:       fmt.Sprintf("%d", node.Restarts),
+						Color:      rstColor,
+						Attributes: rstAttrs,
+						Align:      tview.AlignLeft,
+						MaxWidth:   5,
 					},
 				)
 
@@ -427,38 +448,55 @@ func (p *nodePanel) DrawBody(data any) {
 				)
 
 			case "TAINTS":
-				// Yellow if taints > 0, green otherwise
-				taintsColor := tcell.ColorGreen
+				taintsColor := pal.StatusOK
+				taintsAttrs := tcell.AttrNone
 				if node.TaintCount > 0 {
-					taintsColor = tcell.ColorYellow
+					if mono {
+						taintsAttrs = tcell.AttrBold
+					} else {
+						taintsColor = pal.StatusWarning
+					}
+				}
+				if mono {
+					taintsColor = tcell.ColorDefault
 				}
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:     fmt.Sprintf("%d", node.TaintCount),
-						Color:    taintsColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 4,
+						Text:       fmt.Sprintf("%d", node.TaintCount),
+						Color:      taintsColor,
+						Attributes: taintsAttrs,
+						Align:      tview.AlignLeft,
+						MaxWidth:   4,
 					},
 				)
 
 			case "PRESSURE":
-				// Red if any pressure, green if none
 				var pressureText string
-				pressureColor := tcell.ColorGreen
+				pressureColor := pal.StatusOK
+				pressureAttrs := tcell.AttrNone
 				if len(node.Pressures) == 0 {
 					pressureText = "none"
 				} else {
 					pressureText = strings.Join(node.Pressures, "/")
-					pressureColor = tcell.ColorRed
+					if mono {
+						pressureText = "! " + pressureText
+						pressureAttrs = tcell.AttrUnderline | tcell.AttrBold
+					} else {
+						pressureColor = pal.StatusError
+					}
+				}
+				if mono {
+					pressureColor = tcell.ColorDefault
 				}
 				p.list.SetCell(
 					rowIdx, colIdx,
 					&tview.TableCell{
-						Text:     pressureText,
-						Color:    pressureColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 12,
+						Text:       pressureText,
+						Color:      pressureColor,
+						Attributes: pressureAttrs,
+						Align:      tview.AlignLeft,
+						MaxWidth:   12,
 					},
 				)
 
@@ -495,24 +533,30 @@ func (p *nodePanel) DrawBody(data any) {
 				if metricsDisabled || node.UsageCpuQty == nil {
 					cpuRatio = ui.GetRatio(float64(node.RequestedPodCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
 					cpuPercentage := float64(cpuRatio) * 100
-					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
+					cpuPctTag := ""
+					if !mono {
+						cpuPctTag = "[" + ui.GetResourcePercentageColor(cpuPercentage) + "]"
+					}
 					cpuSparkline.Push(float64(cpuRatio))
 					cpuGraph = cpuSparkline.RenderText()
 					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %5dm [%s]%5.1f%%[white] %s",
-						cpuGraph, node.RequestedPodCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage, cpuTrend,
+						"%s[%s%s] %5dm %s%5.1f%%%s %s",
+						valTag, cpuGraph, valTag, node.RequestedPodCpuQty.MilliValue(), cpuPctTag, cpuPercentage, valTag, cpuTrend,
 					)
 				} else {
 					cpuRatio = ui.GetRatio(float64(node.UsageCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
 					cpuPercentage := float64(cpuRatio) * 100
-					cpuPercentageColor := ui.GetResourcePercentageColor(cpuPercentage)
+					cpuPctTag := ""
+					if !mono {
+						cpuPctTag = "[" + ui.GetResourcePercentageColor(cpuPercentage) + "]"
+					}
 					cpuSparkline.Push(float64(cpuRatio))
 					cpuGraph = cpuSparkline.RenderText()
 					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
 					cpuMetrics = fmt.Sprintf(
-						"[white][%s[white]] %5dm [%s]%5.1f%%[white] %s",
-						cpuGraph, node.UsageCpuQty.MilliValue(), cpuPercentageColor, cpuPercentage, cpuTrend,
+						"%s[%s%s] %5dm %s%5.1f%%%s %s",
+						valTag, cpuGraph, valTag, node.UsageCpuQty.MilliValue(), cpuPctTag, cpuPercentage, valTag, cpuTrend,
 					)
 				}
 
@@ -534,24 +578,30 @@ func (p *nodePanel) DrawBody(data any) {
 				if metricsDisabled || node.UsageMemQty == nil {
 					memRatio = ui.GetRatio(float64(node.RequestedPodMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
 					memPercentage := float64(memRatio) * 100
-					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
+					memPctTag := ""
+					if !mono {
+						memPctTag = "[" + ui.GetResourcePercentageColor(memPercentage) + "]"
+					}
 					memSparkline.Push(float64(memRatio))
 					memGraph = memSparkline.RenderText()
 					memTrend := memSparkline.TrendIndicator(memPercentage)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s [%s]%5.1f%%[white] %s",
-						memGraph, ui.FormatMemory(node.RequestedPodMemQty), memPercentageColor, memPercentage, memTrend,
+						"%s[%s%s] %s %s%5.1f%%%s %s",
+						valTag, memGraph, valTag, ui.FormatMemory(node.RequestedPodMemQty), memPctTag, memPercentage, valTag, memTrend,
 					)
 				} else {
 					memRatio = ui.GetRatio(float64(node.UsageMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
 					memPercentage := float64(memRatio) * 100
-					memPercentageColor := ui.GetResourcePercentageColor(memPercentage)
+					memPctTag := ""
+					if !mono {
+						memPctTag = "[" + ui.GetResourcePercentageColor(memPercentage) + "]"
+					}
 					memSparkline.Push(float64(memRatio))
 					memGraph = memSparkline.RenderText()
 					memTrend := memSparkline.TrendIndicator(memPercentage)
 					memMetrics = fmt.Sprintf(
-						"[white][%s[white]] %s [%s]%5.1f%%[white] %s",
-						memGraph, ui.FormatMemory(node.UsageMemQty), memPercentageColor, memPercentage, memTrend,
+						"%s[%s%s] %s %s%5.1f%%%s %s",
+						valTag, memGraph, valTag, ui.FormatMemory(node.UsageMemQty), memPctTag, memPercentage, valTag, memTrend,
 					)
 				}
 
@@ -569,6 +619,7 @@ func (p *nodePanel) DrawBody(data any) {
 					rowIdx, colIdx,
 					&tview.TableCell{
 						Text:     renderStallCell(node.PSI, node.PSIKernelSupported),
+						Color:    rowColor,
 						Align:    tview.AlignLeft,
 						MaxWidth: 12,
 					},
@@ -654,7 +705,7 @@ func (p *nodePanel) HandleEscape() bool {
 func (p *nodePanel) updateTitle(totalRows int) {
 	var disconnectedSuffix string
 	if p.app != nil && p.app.IsAPIDisconnected() {
-		disconnectedSuffix = " [red][DISCONNECTED - Press R to reconnect][-]"
+		disconnectedSuffix = " " + ui.ErrorMarkup("[DISCONNECTED - Press R to reconnect]")
 	}
 	p.root.SetTitle(p.tableCtrl.FormatTitleWithScroll("Nodes", ui.Icons.Factory, totalRows, disconnectedSuffix))
 }

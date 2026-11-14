@@ -41,54 +41,98 @@ type FocusablePanel interface {
 	SetFocused(focused bool)
 }
 
-// SetBoxFocused applies focus styling to a tview.Box (or any type that embeds it)
-// Focused: yellow border color (double-border effect via styling)
-// Unfocused: white border color
+// SetBoxFocused applies focus styling to a tview.Box (or any type that embeds it).
 func SetBoxFocused(box *tview.Box, focused bool) {
 	if box == nil {
 		return
 	}
+	if IsMonochrome() {
+		box.SetBorderColor(tcell.ColorDefault)
+		box.SetTitleColor(tcell.ColorDefault)
+		if focused {
+			box.SetBorderAttributes(tcell.AttrBold)
+		} else {
+			box.SetBorderAttributes(tcell.AttrNone)
+		}
+		return
+	}
+	p := ActivePalette()
+	box.SetBorderAttributes(tcell.AttrNone)
 	if focused {
-		box.SetBorderColor(GetTcellColor(Theme.FocusBorderColor))
+		box.SetBorderColor(p.BorderFocused)
+		box.SetTitleColor(p.TitleFocused)
 	} else {
-		box.SetBorderColor(GetTcellColor(Theme.UnfocusBorderColor))
+		box.SetBorderColor(p.BorderNormal)
+		box.SetTitleColor(p.TitleNormal)
 	}
 }
 
-// SetFlexFocused applies focus styling to a tview.Flex container
-// Uses border color change for focus indication
-// Note: Double-border via SetDrawFunc was removed as it overwrites the panel title
+// SetFlexFocused applies focus styling to a tview.Flex container.
 func SetFlexFocused(flex *tview.Flex, focused bool) {
 	if flex == nil {
 		return
 	}
+	if IsMonochrome() {
+		flex.SetBorderColor(tcell.ColorDefault)
+		flex.SetTitleColor(tcell.ColorDefault)
+		if focused {
+			flex.SetBorderAttributes(tcell.AttrBold)
+		} else {
+			flex.SetBorderAttributes(tcell.AttrNone)
+		}
+		return
+	}
+	p := ActivePalette()
+	flex.SetBorderAttributes(tcell.AttrNone)
 	if focused {
-		flex.SetBorderColor(GetTcellColor(Theme.FocusBorderColor))
+		flex.SetBorderColor(p.BorderFocused)
+		flex.SetTitleColor(p.TitleFocused)
 	} else {
-		flex.SetBorderColor(GetTcellColor(Theme.UnfocusBorderColor))
+		flex.SetBorderColor(p.BorderNormal)
+		flex.SetTitleColor(p.TitleNormal)
 	}
 }
 
-// SetTableFocused applies focus styling to a tview.Table
+// SetTableFocused applies focus styling to a tview.Table.
 func SetTableFocused(table *tview.Table, focused bool) {
 	if table == nil {
 		return
 	}
+	if IsMonochrome() {
+		table.SetBorderColor(tcell.ColorDefault)
+		table.SetTitleColor(tcell.ColorDefault)
+		if focused {
+			table.SetBorderAttributes(tcell.AttrBold)
+		} else {
+			table.SetBorderAttributes(tcell.AttrNone)
+		}
+		return
+	}
+	p := ActivePalette()
+	table.SetBorderAttributes(tcell.AttrNone)
 	if focused {
-		table.SetBorderColor(GetTcellColor(Theme.FocusBorderColor))
+		table.SetBorderColor(p.BorderFocused)
+		table.SetTitleColor(p.TitleFocused)
 	} else {
-		table.SetBorderColor(GetTcellColor(Theme.UnfocusBorderColor))
+		table.SetBorderColor(p.BorderNormal)
+		table.SetTitleColor(p.TitleNormal)
 	}
 }
 
-// FocusBorderColor returns the tcell color for focused panels
+// FocusBorderColor returns the tcell color for focused panels.
 func FocusBorderColor() tcell.Color {
-	return GetTcellColor(Theme.FocusBorderColor)
+	if IsMonochrome() {
+		return tcell.ColorDefault
+	}
+	return ActivePalette().BorderFocused
 }
 
-// UnfocusBorderColor returns the tcell color for unfocused panels
+// UnfocusBorderColor returns the tcell color for unfocused panels.
 func UnfocusBorderColor() tcell.Color {
-	return GetTcellColor(Theme.UnfocusBorderColor)
+	if IsMonochrome() {
+		return tcell.ColorDefault
+	}
+	return ActivePalette().BorderNormal
 }
 
 // Double-border Unicode box-drawing characters

@@ -56,34 +56,78 @@ func (f *FilterState) Cancel() {
 // icon: the panel icon
 // Returns formatted title string
 func (f *FilterState) FormatTitle(baseTitle, icon string) string {
+	if IsMonochrome() {
+		if f.Editing {
+			if f.Text == "" {
+				return fmt.Sprintf(" %s %s [::b][Filter: ▌][::-] (%d/%d) ",
+					icon, baseTitle, f.MatchRows, f.TotalRows)
+			}
+			return fmt.Sprintf(" %s %s [::b][Filter: %s▌][::-] (%d/%d) ",
+				icon, baseTitle, f.Text, f.MatchRows, f.TotalRows)
+		}
+		if f.Active {
+			return fmt.Sprintf(" %s %s [::r][/%s][::-] (%d/%d) ",
+				icon, baseTitle, f.Text, f.MatchRows, f.TotalRows)
+		}
+		return fmt.Sprintf(" %s %s (%d) ", icon, baseTitle, f.TotalRows)
+	}
+
+	p := ActivePalette()
+	editColor := TagFg(p.DataPrimary)
+	activeColor := TagFg(p.GaugeLow)
+
 	if f.Editing {
 		if f.Text == "" {
-			return fmt.Sprintf(" %s %s [yellow][Filter: ▌][-] (%d/%d) ",
-				icon, baseTitle, f.MatchRows, f.TotalRows)
+			return fmt.Sprintf(" %s %s [%s][Filter: ▌][-] (%d/%d) ",
+				icon, baseTitle, editColor, f.MatchRows, f.TotalRows)
 		}
-		return fmt.Sprintf(" %s %s [yellow][Filter: %s▌][-] (%d/%d) ",
-			icon, baseTitle, f.Text, f.MatchRows, f.TotalRows)
+		return fmt.Sprintf(" %s %s [%s][Filter: %s▌][-] (%d/%d) ",
+			icon, baseTitle, editColor, f.Text, f.MatchRows, f.TotalRows)
 	}
 	if f.Active {
-		return fmt.Sprintf(" %s %s [green][/%s][-] (%d/%d) ",
-			icon, baseTitle, f.Text, f.MatchRows, f.TotalRows)
+		return fmt.Sprintf(" %s %s [%s][/%s][-] (%d/%d) ",
+			icon, baseTitle, activeColor, f.Text, f.MatchRows, f.TotalRows)
 	}
 	return fmt.Sprintf(" %s %s (%d) ", icon, baseTitle, f.TotalRows)
 }
 
 // FormatTitleWithScroll formats a panel title with filter state and scroll indicators
 func (f *FilterState) FormatTitleWithScroll(baseTitle, icon string, firstVisible, lastVisible, totalRows int, scrollIndicator, disconnectedSuffix string) string {
+	if IsMonochrome() {
+		if f.Editing {
+			if f.Text == "" {
+				return fmt.Sprintf(" %s %s [::b][Filter: ▌][::-] (%d/%d)%s%s ",
+					icon, baseTitle, f.MatchRows, f.TotalRows, scrollIndicator, disconnectedSuffix)
+			}
+			return fmt.Sprintf(" %s %s [::b][Filter: %s▌][::-] (%d/%d)%s%s ",
+				icon, baseTitle, f.Text, f.MatchRows, f.TotalRows, scrollIndicator, disconnectedSuffix)
+		}
+		if f.Active && f.Text != "" {
+			return fmt.Sprintf(" %s %s [::r][/%s][::-] (%d/%d)%s%s ",
+				icon, baseTitle, f.Text, f.MatchRows, f.TotalRows, scrollIndicator, disconnectedSuffix)
+		}
+		if totalRows == 0 || scrollIndicator == "" {
+			return fmt.Sprintf(" %s %s (%d)%s ", icon, baseTitle, totalRows, disconnectedSuffix)
+		}
+		return fmt.Sprintf(" %s %s (%d-%d/%d)%s%s ",
+			icon, baseTitle, firstVisible, lastVisible, totalRows, scrollIndicator, disconnectedSuffix)
+	}
+
+	p := ActivePalette()
+	editColor := TagFg(p.DataPrimary)
+	activeColor := TagFg(p.GaugeLow)
+
 	if f.Editing {
 		if f.Text == "" {
-			return fmt.Sprintf(" %s %s [yellow][Filter: ▌][-] (%d/%d)%s%s ",
-				icon, baseTitle, f.MatchRows, f.TotalRows, scrollIndicator, disconnectedSuffix)
+			return fmt.Sprintf(" %s %s [%s][Filter: ▌][-] (%d/%d)%s%s ",
+				icon, baseTitle, editColor, f.MatchRows, f.TotalRows, scrollIndicator, disconnectedSuffix)
 		}
-		return fmt.Sprintf(" %s %s [yellow][Filter: %s▌][-] (%d/%d)%s%s ",
-			icon, baseTitle, f.Text, f.MatchRows, f.TotalRows, scrollIndicator, disconnectedSuffix)
+		return fmt.Sprintf(" %s %s [%s][Filter: %s▌][-] (%d/%d)%s%s ",
+			icon, baseTitle, editColor, f.Text, f.MatchRows, f.TotalRows, scrollIndicator, disconnectedSuffix)
 	}
 	if f.Active && f.Text != "" {
-		return fmt.Sprintf(" %s %s [green][/%s][-] (%d/%d)%s%s ",
-			icon, baseTitle, f.Text, f.MatchRows, f.TotalRows, scrollIndicator, disconnectedSuffix)
+		return fmt.Sprintf(" %s %s [%s][/%s][-] (%d/%d)%s%s ",
+			icon, baseTitle, activeColor, f.Text, f.MatchRows, f.TotalRows, scrollIndicator, disconnectedSuffix)
 	}
 
 	// No filter - use standard format (original title)

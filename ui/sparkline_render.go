@@ -68,12 +68,17 @@ func NewSparklineRenderer(data []float64, width, height int) *SparklineRenderer 
 	if height < 1 {
 		height = 1
 	}
+	p := ActivePalette()
 	return &SparklineRenderer{
-		Data:       data,
-		Width:      width,
-		Height:     height,
-		Colors:     ColorKeys{0: "green", 50: "yellow", 80: "red"},
-		EmptyColor: "darkgray",
+		Data:   data,
+		Width:  width,
+		Height: height,
+		Colors: ColorKeys{
+			0:  Theme.GraphLow,
+			50: Theme.GraphMedium,
+			80: Theme.GraphHigh,
+		},
+		EmptyColor: TagFg(p.BarEmpty),
 		Style:      SparkStyleBar,
 	}
 }
@@ -225,8 +230,9 @@ func gridToBraille(grid [][]bool, charRow, charCol int) rune {
 
 // colorForPosition determines the color for a character position based on data value
 func (s *SparklineRenderer) colorForPosition(data []float64, charCol int, colorKeys []int) string {
+	defaultColor := Theme.DataSecondary
 	if len(data) == 0 || len(s.Colors) == 0 {
-		return "white"
+		return defaultColor
 	}
 
 	// Get the data value at approximately this character position
@@ -235,14 +241,14 @@ func (s *SparklineRenderer) colorForPosition(data []float64, charCol int, colorK
 		dataIdx = len(data) - 1
 	}
 	if dataIdx < 0 {
-		return "white"
+		return defaultColor
 	}
 
 	// Convert normalized value (0-1) to percentage (0-100)
 	percent := int(data[dataIdx] * 100)
 
 	// Find the appropriate color
-	color := "white"
+	color := defaultColor
 	for _, k := range colorKeys {
 		if percent >= k {
 			color = s.Colors[k]
@@ -283,6 +289,7 @@ func (s *SparklineRenderer) Render() string {
 
 	// Get sorted color keys
 	colorKeys := s.Colors.Keys()
+	mono := IsMonochrome()
 
 	// Convert to string with colors
 	var result strings.Builder
@@ -293,17 +300,19 @@ func (s *SparklineRenderer) Render() string {
 
 			// Check if this character has any dots
 			if char == 0x2800 {
-				// Empty braille character
-				result.WriteString("[")
-				result.WriteString(s.EmptyColor)
-				result.WriteString("]")
+				if !mono {
+					result.WriteString("[")
+					result.WriteString(s.EmptyColor)
+					result.WriteString("]")
+				}
 				result.WriteRune(char)
 			} else {
-				// Determine color based on data value at this position
-				color := s.colorForPosition(data, charCol, colorKeys)
-				result.WriteString("[")
-				result.WriteString(color)
-				result.WriteString("]")
+				if !mono {
+					color := s.colorForPosition(data, charCol, colorKeys)
+					result.WriteString("[")
+					result.WriteString(color)
+					result.WriteString("]")
+				}
 				result.WriteRune(char)
 			}
 		}
@@ -361,7 +370,16 @@ func (s *SparklineRenderer) TrendIndicator(percentage float64) string {
 		return ""
 	}
 
-	// Determine color: red if percentage >= 80%, white otherwise
+	if IsMonochrome() {
+		if trendUp {
+			if percentage >= Theme.TrendHighThreshold*100 {
+				return "[::bu]" + Icons.TrendUp + "[::-]"
+			}
+			return Icons.TrendUp
+		}
+		return Icons.TrendDown
+	}
+
 	color := Theme.TrendNormalColor
 	if percentage >= Theme.TrendHighThreshold*100 {
 		color = Theme.TrendHighColor
@@ -502,6 +520,9 @@ func sparkGraphFromHistory(width int, history *metrics.ResourceHistory, colors C
 	colorKeys := colors.Keys()
 
 	// Build the sparkline string
+	mono := IsMonochrome()
+	defaultColor := Theme.DataSecondary
+	emptyColor := TagFg(ActivePalette().SparklineEmpty)
 	var graph strings.Builder
 	for _, val := range resampled {
 		// Determine bar height (0-4 levels)
@@ -518,22 +539,24 @@ func sparkGraphFromHistory(width int, history *metrics.ResourceHistory, colors C
 			level = 4 // ⣿
 		}
 
-		// Determine color based on percentage value (not position)
-		percent := int(val * 100)
-		color := "white"
-		for _, k := range colorKeys {
-			if percent >= k {
-				color = colors[k]
+		if !mono {
+			percent := int(val * 100)
+			color := defaultColor
+			for _, k := range colorKeys {
+				if percent >= k {
+					color = colors[k]
+				}
 			}
-		}
 
-		// Zero values use gray color (matches NotReady status)
-		if level == 0 {
-			graph.WriteString("[gray]")
-		} else {
-			graph.WriteString("[")
-			graph.WriteString(color)
-			graph.WriteString("]")
+			if level == 0 {
+				graph.WriteString("[")
+				graph.WriteString(emptyColor)
+				graph.WriteString("]")
+			} else {
+				graph.WriteString("[")
+				graph.WriteString(color)
+				graph.WriteString("]")
+			}
 		}
 		graph.WriteRune(stackedBarChars[level])
 	}
@@ -574,10 +597,17 @@ func sparkGraphFromRatio(width int, ratio Ratio, colors ColorKeys) string {
 	}
 
 	var graph strings.Builder
+	mono := IsMonochrome()
+	emptyTag := TagFg(ActivePalette().BarEmpty)
+	defaultColor := Theme.DataSecondary
 
 	// Nothing to graph - show empty bar
 	if ratio == 0 {
-		graph.WriteString("[darkgray]")
+		if !mono {
+			graph.WriteString("[")
+			graph.WriteString(emptyTag)
+			graph.WriteString("]")
+		}
 		for j := 0; j < width; j++ {
 			graph.WriteString(Icons.BargraphEmpty)
 		}
@@ -613,7 +643,7 @@ func sparkGraphFromRatio(width int, ratio Ratio, colors ColorKeys) string {
 		positionPercent := int((float64(i) / float64(width)) * 100)
 
 		// Find the appropriate color for this position
-		segmentColor := "white"
+		segmentColor := defaultColor
 		if colors != nil && len(colors) > 0 {
 			for _, k := range colorKeys {
 				if positionPercent >= k {
@@ -625,7 +655,11 @@ func sparkGraphFromRatio(width int, ratio Ratio, colors ColorKeys) string {
 		// Select the appropriate braille character
 		var brailleChar string
 		if dotsInThisChar == 0 {
-			graph.WriteString("[darkgray]")
+			if !mono {
+				graph.WriteString("[")
+				graph.WriteString(emptyTag)
+				graph.WriteString("]")
+			}
 			graph.WriteString(Icons.BargraphEmpty)
 			continue
 		} else if dotsInThisChar == 8 {
@@ -634,9 +668,11 @@ func sparkGraphFromRatio(width int, ratio Ratio, colors ColorKeys) string {
 			brailleChar = Icons.BargraphPartials[dotsInThisChar-1]
 		}
 
-		graph.WriteString("[")
-		graph.WriteString(segmentColor)
-		graph.WriteString("]")
+		if !mono {
+			graph.WriteString("[")
+			graph.WriteString(segmentColor)
+			graph.WriteString("]")
+		}
 		graph.WriteString(brailleChar)
 	}
 
@@ -646,7 +682,11 @@ func sparkGraphFromRatio(width int, ratio Ratio, colors ColorKeys) string {
 // sparkGraphEmpty renders an empty sparkline graph
 func sparkGraphEmpty(width int) string {
 	var graph strings.Builder
-	graph.WriteString("[darkgray]")
+	if !IsMonochrome() {
+		graph.WriteString("[")
+		graph.WriteString(TagFg(ActivePalette().BarEmpty))
+		graph.WriteString("]")
+	}
 	for j := 0; j < width; j++ {
 		graph.WriteString(Icons.BargraphEmpty)
 	}

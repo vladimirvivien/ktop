@@ -32,14 +32,15 @@ func NewSparklineRow(prometheusMode bool) *SparklineRow {
 		colorKeys:      colorKeys,
 	}
 
-	r.cpuSparkline.SetBorder(true).SetBorderColor(tcell.ColorLightGray).SetTitleAlign(tview.AlignCenter)
-	r.memSparkline.SetBorder(true).SetBorderColor(tcell.ColorLightGray).SetTitleAlign(tview.AlignCenter)
+	borderColor := ActivePalette().BorderNormal
+	r.cpuSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignCenter)
+	r.memSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignCenter)
 
 	if prometheusMode {
 		r.netSparkline = NewSparkline().SetColorKeys(colorKeys)
 		r.diskSparkline = NewSparkline().SetColorKeys(colorKeys)
-		r.netSparkline.SetBorder(true).SetBorderColor(tcell.ColorLightGray).SetTitleAlign(tview.AlignCenter)
-		r.diskSparkline.SetBorder(true).SetBorderColor(tcell.ColorLightGray).SetTitleAlign(tview.AlignCenter)
+		r.netSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignCenter)
+		r.diskSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignCenter)
 	}
 
 	return r
@@ -52,10 +53,11 @@ func (r *SparklineRow) SetPrometheusMode(enabled bool) *SparklineRow {
 	}
 	r.prometheusMode = enabled
 	if enabled && r.netSparkline == nil {
+		borderColor := ActivePalette().BorderNormal
 		r.netSparkline = NewSparkline().SetColorKeys(r.colorKeys)
 		r.diskSparkline = NewSparkline().SetColorKeys(r.colorKeys)
-		r.netSparkline.SetBorder(true).SetBorderColor(tcell.ColorLightGray).SetTitleAlign(tview.AlignCenter)
-		r.diskSparkline.SetBorder(true).SetBorderColor(tcell.ColorLightGray).SetTitleAlign(tview.AlignCenter)
+		r.netSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignCenter)
+		r.diskSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignCenter)
 	}
 	return r
 }

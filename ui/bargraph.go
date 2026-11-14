@@ -51,10 +51,18 @@ func BarGraph(scale int, ratio Ratio, colors ColorKeys) string {
 	}
 
 	var graph strings.Builder
+	p := ActivePalette()
+	mono := IsMonochrome()
+	emptyColor := TagFg(p.BarEmpty)
+	defaultColor := TagFg(p.DataSecondary)
 
 	// nothing to graph - show empty bar
 	if ratio == 0 {
-		graph.WriteString("[darkgray]")
+		if !mono {
+			graph.WriteString("[")
+			graph.WriteString(emptyColor)
+			graph.WriteString("]")
+		}
 		for j := 0; j < scale; j++ {
 			graph.WriteString(Icons.BargraphEmpty)
 		}
@@ -93,7 +101,7 @@ func BarGraph(scale int, ratio Ratio, colors ColorKeys) string {
 		positionPercent := int((float64(i) / float64(scale)) * 100)
 
 		// Find the appropriate color for this position
-		segmentColor := colorNoKeys
+		segmentColor := defaultColor
 		if colors != nil && len(colors) > 0 {
 			for _, k := range colorKeys {
 				if positionPercent >= k {
@@ -105,8 +113,11 @@ func BarGraph(scale int, ratio Ratio, colors ColorKeys) string {
 		// Select the appropriate braille character
 		var brailleChar string
 		if dotsInThisChar == 0 {
-			// Empty - use darkgray for consistency
-			graph.WriteString("[darkgray]")
+			if !mono {
+				graph.WriteString("[")
+				graph.WriteString(emptyColor)
+				graph.WriteString("]")
+			}
 			graph.WriteString(Icons.BargraphEmpty)
 			continue
 		} else if dotsInThisChar == 8 {
@@ -117,10 +128,11 @@ func BarGraph(scale int, ratio Ratio, colors ColorKeys) string {
 			brailleChar = Icons.BargraphPartials[dotsInThisChar-1]
 		}
 
-		// Write this character with its color
-		graph.WriteString("[")
-		graph.WriteString(segmentColor)
-		graph.WriteString("]")
+		if !mono {
+			graph.WriteString("[")
+			graph.WriteString(segmentColor)
+			graph.WriteString("]")
+		}
 		graph.WriteString(brailleChar)
 	}
 

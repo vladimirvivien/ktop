@@ -41,10 +41,16 @@ func NewHelpModal(cfg HelpModalConfig) *HelpModal {
 		title = fmt.Sprintf(" Keyboard Shortcuts — %s ", cfg.CurrentPage)
 	}
 
+	instrText := "[::b]Esc[::-] / [::b]Enter[::-] / [::b]?[::-] / [::b]q[::-] Close   [::b]↑/↓[::-] Scroll"
+	if !IsMonochrome() {
+		keyTag := TagFg(ActivePalette().DataPrimary)
+		instrText = fmt.Sprintf("[%s]Esc[-] / [%s]Enter[-] / [%s]?[-] / [%s]q[-] Close   [%s]↑/↓[-] Scroll",
+			keyTag, keyTag, keyTag, keyTag, keyTag)
+	}
 	instructions := tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter).
-		SetText("[yellow]Esc[-] / [yellow]Enter[-] / [yellow]?[-] / [yellow]q[-] Close   [yellow]↑/↓[-] Scroll")
+		SetText(instrText)
 
 	box := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(m.textView, 0, 1, true).
@@ -52,6 +58,7 @@ func NewHelpModal(cfg HelpModalConfig) *HelpModal {
 	box.SetBorder(true).
 		SetTitle(title).
 		SetTitleAlign(tview.AlignCenter)
+	SetFlexFocused(box, true)
 
 	m.grid = tview.NewGrid().
 		SetColumns(0, 74, 0).
@@ -63,13 +70,41 @@ func NewHelpModal(cfg HelpModalConfig) *HelpModal {
 
 func (m *HelpModal) renderHelpContent(cfg HelpModalConfig) string {
 	var b strings.Builder
+	p := ActivePalette()
+	mono := IsMonochrome()
 
-	// Helper for context badges
-	badge := func(match bool, label string) string {
-		if match {
-			return fmt.Sprintf(" [lime](Active: %s)[-]", label)
+	key := func(k string) string {
+		if mono {
+			return "[::b]" + k + "[::-]"
 		}
-		return ""
+		return fmt.Sprintf("[%s]%s[-]", TagFg(p.Accent), k)
+	}
+	section := func(title string) string {
+		if mono {
+			return "[::bu]" + title + "[::-]"
+		}
+		return fmt.Sprintf("[%s]%s[-]", TagFg(p.DataPrimary), title)
+	}
+	muted := func(text string) string {
+		if mono {
+			return "[::d]" + text + "[::-]"
+		}
+		return fmt.Sprintf("[%s]%s[-]", TagFg(p.StatusMuted), text)
+	}
+	dot := func() string {
+		if mono {
+			return "● "
+		}
+		return fmt.Sprintf("[%s]●[-] ", TagFg(p.GaugeLow))
+	}
+	badge := func(match bool, label string) string {
+		if !match {
+			return ""
+		}
+		if mono {
+			return fmt.Sprintf(" [::b](Active: %s)[::-]", label)
+		}
+		return fmt.Sprintf(" [%s](Active: %s)[-]", TagFg(p.StatusOK), label)
 	}
 
 	isTableActive := cfg.FocusedPanel == "nodes" || cfg.FocusedPanel == "pods" || cfg.FocusedPanel == "containers"
@@ -78,48 +113,48 @@ func (m *HelpModal) renderHelpContent(cfg HelpModalConfig) string {
 	isDetailActive := cfg.CurrentPage == "Node Detail" || cfg.CurrentPage == "Pod Detail"
 
 	// Section 1: Navigation & General
-	b.WriteString("[yellow]GENERAL & NAVIGATION[-]\n")
-	b.WriteString("  [aqua]Tab[-] / [aqua]Shift+Tab[-]   Cycle focus (Header → Summary → Nodes → Pods)\n")
-	b.WriteString("  [aqua]Enter[-]           Open detail view for selected Node or Pod\n")
-	b.WriteString("  [aqua]y[-] / [aqua]Y[-]           Copy selected resource name to clipboard\n")
-	b.WriteString("  [aqua]?[-] / [aqua]F1[-]          Toggle this keyboard shortcuts help modal\n")
-	b.WriteString("  [aqua]Esc[-]             Clear filter / Back to previous view / Double-ESC quit\n\n")
+	b.WriteString(section("GENERAL & NAVIGATION") + "\n")
+	fmt.Fprintf(&b, "  %s / %s   Cycle focus (Header → Summary → Nodes → Pods)\n", key("Tab"), key("Shift+Tab"))
+	fmt.Fprintf(&b, "  %s           Open detail view for selected Node or Pod\n", key("Enter"))
+	fmt.Fprintf(&b, "  %s / %s           Copy selected resource name to clipboard\n", key("y"), key("Y"))
+	fmt.Fprintf(&b, "  %s / %s          Toggle this keyboard shortcuts help modal\n", key("?"), key("F1"))
+	fmt.Fprintf(&b, "  %s             Clear filter / Back to previous view / Double-ESC quit\n\n", key("Esc"))
 
 	// Section 2: Table Sorting
 	activeTableLabel := ""
 	if isTableActive {
 		activeTableLabel = strings.Title(cfg.FocusedPanel)
 	}
-	tableHeader := fmt.Sprintf("[yellow]TABLE SORTING[-] (Nodes / Pods / Containers)%s\n", badge(isTableActive, activeTableLabel))
+	tableHeader := fmt.Sprintf("%s (Nodes / Pods / Containers)%s\n", section("TABLE SORTING"), badge(isTableActive, activeTableLabel))
 	if isTableActive {
-		tableHeader = "[green]●[-] " + tableHeader
+		tableHeader = dot() + tableHeader
 	}
 	b.WriteString(tableHeader)
-	b.WriteString("  [aqua]n[-] Name     [aqua]c[-] CPU      [aqua]m[-] Memory    [aqua]r[-] Restarts\n")
-	b.WriteString("  [aqua]a[-] Age      [aqua]p[-] Pods/IP  [aqua]s[-] Status    [aqua]o[-] Containers\n")
-	b.WriteString("  [aqua]l[-] Ready/Role  [darkgray](Repeat sort key to toggle ascending/descending)[-]\n\n")
+	fmt.Fprintf(&b, "  %s Name     %s CPU      %s Memory    %s Restarts\n", key("n"), key("c"), key("m"), key("r"))
+	fmt.Fprintf(&b, "  %s Age      %s Pods/IP  %s Status    %s Containers\n", key("a"), key("p"), key("s"), key("o"))
+	fmt.Fprintf(&b, "  %s Ready/Role  %s\n\n", key("l"), muted("(Repeat sort key to toggle ascending/descending)"))
 
 	// Section 3: Filtering & Columns
-	filterHeader := fmt.Sprintf("[yellow]FILTERING & COLUMNS[-]%s\n", badge(isHeaderActive, "Namespace Header"))
+	filterHeader := fmt.Sprintf("%s%s\n", section("FILTERING & COLUMNS"), badge(isHeaderActive, "Namespace Header"))
 	if isHeaderActive {
-		filterHeader = "[green]●[-] " + filterHeader
+		filterHeader = dot() + filterHeader
 	}
 	b.WriteString(filterHeader)
-	b.WriteString("  [aqua]/[-]               Start text filter (or filter namespace in Header)\n")
-	b.WriteString("  [aqua]=[-]               Open column customization dialog\n")
-	b.WriteString("  [aqua]Enter[-]           Confirm filter text or column selection\n")
-	b.WriteString("  [aqua]Esc[-]             Cancel filter edit or clear active filter\n\n")
+	fmt.Fprintf(&b, "  %s               Start text filter (or filter namespace in Header)\n", key("/"))
+	fmt.Fprintf(&b, "  %s               Open column customization dialog\n", key("="))
+	fmt.Fprintf(&b, "  %s           Confirm filter text or column selection\n", key("Enter"))
+	fmt.Fprintf(&b, "  %s             Cancel filter edit or clear active filter\n\n", key("Esc"))
 
 	// Section 4: Detail Views & Logs
-	detailHeader := fmt.Sprintf("[yellow]DETAIL VIEWS & LOGS[-]%s\n", badge(isLogsActive || isDetailActive, cfg.CurrentPage))
+	detailHeader := fmt.Sprintf("%s%s\n", section("DETAIL VIEWS & LOGS"), badge(isLogsActive || isDetailActive, cfg.CurrentPage))
 	if isLogsActive || isDetailActive {
-		detailHeader = "[green]●[-] " + detailHeader
+		detailHeader = dot() + detailHeader
 	}
 	b.WriteString(detailHeader)
-	b.WriteString("  [aqua]Tab[-]             Switch sections (Events, Containers, Volumes, Logs)\n")
-	b.WriteString("  [aqua]s[-]               Container spec view / Stream logs toggle\n")
-	b.WriteString("  [aqua]t[-] Toggle time   [aqua]w[-] Wrap logs   [aqua]m[-] More logs   [aqua]x[-] Expand\n")
-	b.WriteString("  [aqua]g[-] / [aqua]G[-]       Jump to oldest / newest log line\n")
+	fmt.Fprintf(&b, "  %s             Switch sections (Events, Containers, Volumes, Logs)\n", key("Tab"))
+	fmt.Fprintf(&b, "  %s               Container spec view / Stream logs toggle\n", key("s"))
+	fmt.Fprintf(&b, "  %s Toggle time   %s Wrap logs   %s More logs   %s Expand\n", key("t"), key("w"), key("m"), key("x"))
+	fmt.Fprintf(&b, "  %s / %s       Jump to oldest / newest log line\n", key("g"), key("G"))
 
 	return b.String()
 }

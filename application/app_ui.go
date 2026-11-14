@@ -12,13 +12,6 @@ import (
 	"github.com/vladimirvivien/ktop/ui"
 )
 
-var (
-	buttonUnselectedBgColor = tcell.ColorPaleGreen
-	buttonUnselectedFgColor = tcell.ColorDarkBlue
-	buttonSelectedBgColor   = tcell.ColorBlue
-	buttonSelectedFgColor   = tcell.ColorWhite
-)
-
 type appPanel struct {
 	tviewApp        *tview.Application
 	title           string
@@ -92,17 +85,21 @@ func (p *appPanel) Layout(data any) {
 	}
 
 	// setup page and page buttons in footer
+	pal := ui.ActivePalette()
 	for i, page := range pages {
 		p.pages.AddPage(page.Title, page.Panel.GetRootView(), true, false)
-		p.footer.SetCell(0, i,
-			&tview.TableCell{
-				Text:            fmt.Sprintf("  %s (F%d)  ", page.Title, i+1),
-				Color:           buttonUnselectedFgColor,
-				Align:           tview.AlignCenter,
-				BackgroundColor: buttonUnselectedBgColor,
-				Expansion:       0,
-			},
-		)
+		cell := &tview.TableCell{
+			Text:      fmt.Sprintf("  %s (F%d)  ", page.Title, i+1),
+			Color:     pal.DataSecondary,
+			Align:     tview.AlignCenter,
+			Expansion: 0,
+		}
+		if ui.IsMonochrome() {
+			cell.SetTextColor(tcell.ColorDefault).SetBackgroundColor(tcell.ColorDefault)
+		} else {
+			cell.SetBackgroundColor(pal.CanvasBg)
+		}
+		p.footer.SetCell(0, i, cell)
 	}
 }
 
@@ -112,11 +109,19 @@ func (p *appPanel) DrawHeader(data any) {
 		panic(fmt.Sprintf("application.Drawheader got unexpected type %T", data))
 	}
 
+	pal := ui.ActivePalette()
+	leftColor := pal.DataPrimary
+	rightColor := pal.DataSecondary
+	if ui.IsMonochrome() {
+		leftColor = tcell.ColorDefault
+		rightColor = tcell.ColorDefault
+	}
+
 	// Header string already includes namespace filter state (handled by getNamespaceDisplay)
 	p.header.SetCell(
 		0, 0,
 		tview.NewTableCell(header).
-			SetTextColor(tcell.ColorYellow).
+			SetTextColor(leftColor).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(100),
 	)
@@ -124,7 +129,7 @@ func (p *appPanel) DrawHeader(data any) {
 	p.header.SetCell(
 		0, 1,
 		tview.NewTableCell("ktop: "+buildinfo.Version).
-			SetTextColor(tcell.ColorWhite).
+			SetTextColor(rightColor).
 			SetAlign(tview.AlignRight).
 			SetExpansion(100),
 	)
@@ -152,18 +157,29 @@ func (p *appPanel) GetChildrenViews() []tview.Primitive {
 }
 
 func (p *appPanel) switchToPage(title string) {
-
 	row := 0
 	cols := p.footer.GetColumnCount()
+	pal := ui.ActivePalette()
+	mono := ui.IsMonochrome()
 
 	for i := 0; i < cols; i++ {
 		cell := p.footer.GetCell(row, i)
 		if strings.HasPrefix(strings.TrimSpace(cell.Text), title) {
-			cell.SetTextColor(buttonSelectedFgColor)
-			cell.SetBackgroundColor(buttonSelectedBgColor)
+			if mono {
+				cell.SetTextColor(tcell.ColorDefault).
+					SetBackgroundColor(tcell.ColorDefault).
+					SetAttributes(tcell.AttrReverse | tcell.AttrBold)
+			} else {
+				cell.SetTextColor(pal.HeaderFg).SetBackgroundColor(pal.HeaderBg)
+			}
 		} else {
-			cell.SetTextColor(buttonUnselectedFgColor)
-			cell.SetBackgroundColor(buttonUnselectedBgColor)
+			if mono {
+				cell.SetTextColor(tcell.ColorDefault).
+					SetBackgroundColor(tcell.ColorDefault).
+					SetAttributes(tcell.AttrNone)
+			} else {
+				cell.SetTextColor(pal.DataSecondary).SetBackgroundColor(pal.CanvasBg)
+			}
 		}
 	}
 	p.pages.SwitchToPage(title)
@@ -355,11 +371,7 @@ func (p *appPanel) handleToastEsc() {
 // setHeaderFocused updates the header panel's visual focus state
 func (p *appPanel) setHeaderFocused(focused bool) {
 	p.headerFocused = focused
-	if focused {
-		p.header.SetBorderColor(ui.FocusBorderColor())
-	} else {
-		p.header.SetBorderColor(ui.UnfocusBorderColor())
-	}
+	ui.SetTableFocused(p.header, focused)
 }
 
 // isHeaderFocused returns whether the header has focus

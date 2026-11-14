@@ -44,17 +44,27 @@ func NewColumnSelectorModal(cfg ColumnSelectorConfig) *ColumnSelectorModal {
 
 	m.table = tview.NewTable()
 	m.table.SetSelectable(true, false)
-	m.table.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorDarkCyan).Foreground(tcell.ColorWhite).Bold(true))
+	if IsMonochrome() {
+		m.table.SetSelectedStyle(SelectedRowStyle())
+	} else {
+		p := ActivePalette()
+		m.table.SetSelectedStyle(tcell.StyleDefault.Background(p.HeaderBg).Foreground(p.HeaderFg).Bold(true))
+	}
 	m.table.SetBorder(false)
 
 	m.renderRows()
 
 	m.table.SetInputCapture(m.HandleInput)
 
+	instrText := "[::b]Space[::-] Toggle  [::b]Enter[::-] Apply  [::b]Esc[::-] Cancel"
+	if !IsMonochrome() {
+		keyTag := TagFg(ActivePalette().DataPrimary)
+		instrText = fmt.Sprintf("[%s]Space[-] Toggle  [%s]Enter[-] Apply  [%s]Esc[-] Cancel", keyTag, keyTag, keyTag)
+	}
 	instructions := tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter).
-		SetText("[yellow]Space[-] Toggle  [yellow]Enter[-] Apply  [yellow]Esc[-] Cancel")
+		SetText(instrText)
 
 	box := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(m.table, 0, 1, true).
@@ -62,6 +72,7 @@ func NewColumnSelectorModal(cfg ColumnSelectorConfig) *ColumnSelectorModal {
 	box.SetBorder(true).
 		SetTitle(fmt.Sprintf(" Configure Columns: %s ", cfg.Title)).
 		SetTitleAlign(tview.AlignCenter)
+	SetFlexFocused(box, true)
 
 	modalHeight := len(cfg.AllColumns) + 4
 	if modalHeight < 16 {
@@ -77,12 +88,27 @@ func NewColumnSelectorModal(cfg ColumnSelectorConfig) *ColumnSelectorModal {
 }
 
 func (m *ColumnSelectorModal) renderRows() {
+	p := ActivePalette()
+	mono := IsMonochrome()
+
 	for i, col := range m.allColumns {
 		check := "[ ]"
-		checkColor := tcell.ColorGray
+		checkColor := p.StatusMuted
+		colColor := p.DataPrimary
+		descColor := p.DataSecondary
+		attrs := tcell.AttrNone
+
 		if m.selected[col] {
 			check = tview.Escape("[X]")
-			checkColor = tcell.ColorGreen
+			checkColor = p.GaugeLow
+		}
+		if mono {
+			checkColor = tcell.ColorDefault
+			colColor = tcell.ColorDefault
+			descColor = tcell.ColorDefault
+			if m.selected[col] {
+				attrs = tcell.AttrBold
+			}
 		}
 
 		desc := ""
@@ -92,16 +118,17 @@ func (m *ColumnSelectorModal) renderRows() {
 
 		m.table.SetCell(i, 0, tview.NewTableCell(check).
 			SetTextColor(checkColor).
+			SetAttributes(attrs).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(true))
 
 		m.table.SetCell(i, 1, tview.NewTableCell(fmt.Sprintf(" %-9s", col)).
-			SetTextColor(tcell.ColorYellow).
+			SetTextColor(colColor).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(true))
 
 		m.table.SetCell(i, 2, tview.NewTableCell(desc).
-			SetTextColor(tcell.ColorWhite).
+			SetTextColor(descColor).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1).
 			SetSelectable(true))

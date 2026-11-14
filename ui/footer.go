@@ -59,12 +59,16 @@ func (f *Footer) render() {
 	for _, item := range items {
 		// Escape the key to prevent tview from interpreting brackets as color tags
 		escapedKey := tview.Escape(item.Key)
-		parts = append(parts, fmt.Sprintf("[yellow]%s[-] [white]%s[-]", escapedKey, item.Action))
+		parts = append(parts, FormatShortcut(escapedKey, item.Action))
 	}
 	f.view.SetText(strings.Join(parts, " • "))
 }
 
 // FormatShortcut formats a single shortcut for display (utility function)
 func FormatShortcut(key, action string) string {
-	return fmt.Sprintf("[yellow]%s[-] [white]%s[-]", key, action)
+	if IsMonochrome() {
+		return fmt.Sprintf("[::b]%s[::-] %s", key, action)
+	}
+	p := ActivePalette()
+	return fmt.Sprintf("[%s]%s[-] [%s]%s[-]", TagFg(p.DataPrimary), key, TagFg(p.DataSecondary), action)
 }

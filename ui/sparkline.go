@@ -159,10 +159,11 @@ func (s *Sparkline) Draw(screen tcell.Screen) {
 
 	// Render sparkline content - handle multi-line output
 	content := s.state.Render()
+	fg := ActivePalette().CanvasFg
 	lines := strings.Split(content, "\n")
 	for i, line := range lines {
 		if y+i < y+height { // Don't overflow container
-			tview.Print(screen, line, x, y+i, width, tview.AlignLeft, tcell.ColorDefault)
+			tview.Print(screen, line, x, y+i, width, tview.AlignLeft, fg)
 		}
 	}
 }

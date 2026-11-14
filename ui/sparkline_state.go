@@ -134,6 +134,7 @@ func (s *SparklineState) RenderBottomAligned(totalHeight int) string {
 // Uses simplified 2-color scheme from Theme: normal (< threshold) and high (>= threshold)
 func (s *SparklineState) renderSingleLine() string {
 	var graph strings.Builder
+	mono := IsMonochrome()
 
 	for _, val := range s.values {
 		var level int
@@ -149,23 +150,23 @@ func (s *SparklineState) renderSingleLine() string {
 			char = brailleBarChars[level]
 		}
 
-		// Simple 2-color scheme for single-line using Theme constants
-		var color string
-		if val >= Theme.SparklineThreshold {
-			color = Theme.SparklineHigh
-		} else {
-			color = Theme.SparklineNormal
-		}
+		if !mono {
+			var color string
+			if val >= Theme.SparklineThreshold {
+				color = Theme.SparklineHigh
+			} else {
+				color = Theme.SparklineNormal
+			}
 
-		// Zero values use empty color from Theme
-		if level == 0 {
-			graph.WriteString("[")
-			graph.WriteString(Theme.SparklineEmpty)
-			graph.WriteString("]")
-		} else {
-			graph.WriteString("[")
-			graph.WriteString(color)
-			graph.WriteString("]")
+			if level == 0 {
+				graph.WriteString("[")
+				graph.WriteString(Theme.SparklineEmpty)
+				graph.WriteString("]")
+			} else {
+				graph.WriteString("[")
+				graph.WriteString(color)
+				graph.WriteString("]")
+			}
 		}
 		graph.WriteRune(char)
 	}
@@ -181,6 +182,7 @@ func (s *SparklineState) renderMultiLine() string {
 	colorKeys := s.colors.Keys()
 	lines := make([]strings.Builder, s.height)
 	rowHeight := 1.0 / float64(s.height)
+	mono := IsMonochrome()
 
 	// Build each row from top (highest) to bottom (lowest)
 	for row := 0; row < s.height; row++ {
@@ -202,32 +204,33 @@ func (s *SparklineState) renderMultiLine() string {
 			}
 
 			if val >= rowUpper {
-				// Value exceeds this row's upper bound - draw full block
-				lines[row].WriteString("[")
-				lines[row].WriteString(color)
-				lines[row].WriteString("]")
+				if !mono {
+					lines[row].WriteString("[")
+					lines[row].WriteString(color)
+					lines[row].WriteString("]")
+				}
 				lines[row].WriteRune('█')
 			} else if val > rowLower {
-				// Value is within this row's range - draw partial block
-				// Calculate how much of this row is filled (0-1)
 				fraction := (val - rowLower) / rowHeight
-				// Map to block level (1-8), level 0 is baseline
 				level := int(fraction * 8)
 				if level > 8 {
 					level = 8
 				}
 				if level < 1 {
-					level = 1 // At least show minimal block if val > rowLower
+					level = 1
 				}
-				lines[row].WriteString("[")
-				lines[row].WriteString(color)
-				lines[row].WriteString("]")
+				if !mono {
+					lines[row].WriteString("[")
+					lines[row].WriteString(color)
+					lines[row].WriteString("]")
+				}
 				lines[row].WriteRune(blockBarChars[level])
 			} else if isBottomRow {
-				// On bottom row, show baseline for empty/zero values
-				lines[row].WriteString("[")
-				lines[row].WriteString(Theme.SparklineEmpty)
-				lines[row].WriteString("]")
+				if !mono {
+					lines[row].WriteString("[")
+					lines[row].WriteString(Theme.SparklineEmpty)
+					lines[row].WriteString("]")
+				}
 				lines[row].WriteRune('▁')
 			} else {
 				// Value doesn't reach this row - draw space
@@ -359,7 +362,16 @@ func (s *SparklineState) TrendIndicator(percentage float64) string {
 		return ""
 	}
 
-	// Determine color: red if percentage >= 80%, white otherwise
+	if IsMonochrome() {
+		if trendUp {
+			if percentage >= Theme.TrendHighThreshold*100 {
+				return "[::bu]" + Icons.TrendUp + "[::-]"
+			}
+			return Icons.TrendUp
+		}
+		return Icons.TrendDown
+	}
+
 	color := Theme.TrendNormalColor
 	if percentage >= Theme.TrendHighThreshold*100 {
 		color = Theme.TrendHighColor

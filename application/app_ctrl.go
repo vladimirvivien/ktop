@@ -702,53 +702,80 @@ func (app *Application) handleMetricsHealthChange(healthy bool, info metrics.Sou
 // buildHeaderString constructs the header text with current metrics status
 // namespaceDisplay is the namespace value to show (may include filter styling)
 func (app *Application) buildHeaderString(namespaceDisplay string) string {
-	var hdr strings.Builder
 	client := app.GetK8sClient()
-
-	// Format: Context: name | K8s: version | User: user | Namespace: value | Metrics: status
-	hdr.WriteString("[green]Context: [white]%s [green]| K8s: [white]%s [green]| User: [white]%s [green]| Namespace: [white]%s [green]| Metrics:")
-
-	// Check MetricsSource health
-	if app.metricsSource != nil && app.metricsSource.IsHealthy() {
-		sourceInfo := app.metricsSource.GetSourceInfo()
-		hdr.WriteString(fmt.Sprintf(" [white]%s", sourceInfo.Type))
-	} else {
-		hdr.WriteString(" [red]not connected")
-	}
-
-	// Truncate long values to prevent header overflow
 	context := ui.Truncate(client.ClusterName(), 25)
 	user := ui.Truncate(client.Username(), 20)
 	ns := ui.Truncate(namespaceDisplay, 16)
 
+	var metricsStr string
+	if app.metricsSource != nil && app.metricsSource.IsHealthy() {
+		sourceInfo := app.metricsSource.GetSourceInfo()
+		if ui.IsMonochrome() {
+			metricsStr = sourceInfo.Type
+		} else {
+			valTag := ui.TagFg(ui.ActivePalette().DataSecondary)
+			metricsStr = fmt.Sprintf("[%s]%s", valTag, sourceInfo.Type)
+		}
+	} else {
+		if ui.IsMonochrome() {
+			metricsStr = ui.ErrorMarkup("not connected")
+		} else {
+			errTag := ui.TagFg(ui.ActivePalette().StatusError)
+			metricsStr = fmt.Sprintf("[%s]not connected", errTag)
+		}
+	}
+
+	if ui.IsMonochrome() {
+		return fmt.Sprintf(
+			"Context: %s | K8s: %s | User: %s | Namespace: %s | Metrics: %s",
+			context, client.GetServerVersion(), user, ns, metricsStr,
+		)
+	}
+
+	p := ui.ActivePalette()
+	lblTag := ui.TagFg(p.GaugeLow)
+	valTag := ui.TagFg(p.DataSecondary)
 	return fmt.Sprintf(
-		hdr.String(),
-		context, client.GetServerVersion(), user, ns,
+		"[%s]Context: [%s]%s [%s]| K8s: [%s]%s [%s]| User: [%s]%s [%s]| Namespace: [%s]%s [%s]| Metrics: %s",
+		lblTag, valTag, context,
+		lblTag, valTag, client.GetServerVersion(),
+		lblTag, valTag, user,
+		lblTag, valTag, ns,
+		lblTag, metricsStr,
 	)
 }
 
 // getNamespaceDisplay returns the namespace display string based on filter state
 func (app *Application) getNamespaceDisplay() string {
+	mono := ui.IsMonochrome()
+	p := ui.ActivePalette()
+
 	// Check if filter is editing or active
 	if app.panel.isNamespaceFilterEditing() {
-		// Show filter input with cursor
 		filterText := app.panel.getNamespaceFilter()
-		if filterText == "" {
-			return "[yellow]▌[-]"
+		if mono {
+			return fmt.Sprintf("[::b]%s▌[::-]", filterText)
 		}
-		return fmt.Sprintf("[yellow]%s▌[-]", filterText)
+		keyTag := ui.TagFg(p.DataPrimary)
+		if filterText == "" {
+			return fmt.Sprintf("[%s]▌[-]", keyTag)
+		}
+		return fmt.Sprintf("[%s]%s▌[-]", keyTag, filterText)
 	}
 
 	// Check if filter is active (has confirmed filter text)
 	filterText := app.panel.getNamespaceFilter()
 	if filterText != "" {
-		return filterText // White to match header style
+		return filterText
 	}
 
 	// No filter - show actual namespace
 	namespace := app.k8sClient.Namespace()
 	if namespace == k8s.AllNamespaces {
-		return "[orange](all)[-]"
+		if mono {
+			return "(all)"
+		}
+		return fmt.Sprintf("[%s](all)[-]", ui.TagFg(p.GaugeElevated))
 	}
 	return namespace
 }

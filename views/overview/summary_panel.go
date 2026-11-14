@@ -144,7 +144,12 @@ func (p *clusterSummaryPanel) DrawBody(data any) {
 
 	// Update title with disconnected state if applicable
 	if p.app != nil && p.app.IsAPIDisconnected() {
-		p.root.SetTitle(fmt.Sprintf("%s [red][DISCONNECTED - Press R to reconnect]", p.GetTitle()))
+		if ui.IsMonochrome() {
+			p.root.SetTitle(fmt.Sprintf("%s %s", p.GetTitle(), ui.ErrorMarkup("[DISCONNECTED - Press R to reconnect]")))
+		} else {
+			errTag := ui.TagFg(ui.ActivePalette().StatusError)
+			p.root.SetTitle(fmt.Sprintf("%s [%s][DISCONNECTED - Press R to reconnect]", p.GetTitle(), errTag))
+		}
 	} else {
 		p.root.SetTitle(p.GetTitle())
 	}
@@ -164,25 +169,28 @@ func (p *clusterSummaryPanel) DrawBody(data any) {
 		p.sparklineRow.SetPrometheusMode(p.prometheusMode)
 
 		// === Stats row ===
-		// Color code Deploys ratio: >= 80% green, > 50% yellow, <= 50% red
-		deploysColor := "green"
+		pal := ui.ActivePalette()
+		mono := ui.IsMonochrome()
+
+		// Color code Deploys ratio: >= 80% ok, 50-80% warning, <= 50% error
+		deploysCol := pal.GaugeLow
 		if summary.DeploymentsTotal > 0 {
 			deploysRatio := float64(summary.DeploymentsReady) / float64(summary.DeploymentsTotal)
 			if deploysRatio <= 0.5 {
-				deploysColor = "red"
+				deploysCol = pal.GaugeHigh
 			} else if deploysRatio < 0.8 {
-				deploysColor = "yellow"
+				deploysCol = pal.GaugeMedium
 			}
 		}
 
-		// Color code Pods ratio: >= 80% green, > 50% yellow, <= 50% red
-		podsColor := "green"
+		// Color code Pods ratio: >= 80% ok, 50-80% warning, <= 50% error
+		podsCol := pal.GaugeLow
 		if summary.PodsAvailable > 0 {
 			podsRatio := float64(summary.PodsRunning) / float64(summary.PodsAvailable)
 			if podsRatio <= 0.5 {
-				podsColor = "red"
+				podsCol = pal.GaugeHigh
 			} else if podsRatio < 0.8 {
-				podsColor = "yellow"
+				podsCol = pal.GaugeMedium
 			}
 		}
 
@@ -196,19 +204,44 @@ func (p *clusterSummaryPanel) DrawBody(data any) {
 			pvcDisplay = fmt.Sprintf("%d (%s)", summary.PVCCount, ui.FormatMemory(summary.PVCsTotal))
 		}
 
-		// Stats format is the same for both modes
-		statsText := fmt.Sprintf(
-			"[yellow]Health: %s [yellow]│ Uptime: [white]%s [yellow]│ Nodes: [white]%d [yellow]│ NS: [white]%d [yellow]│ Deploys: [%s]%d/%d [yellow]│ Pods: [%s]%d/%d [yellow]│ Vols: [white]%d [yellow]│ PVs: [white]%s [yellow]│ PVCs: [white]%s",
-			ui.FormatHealthScore(summary.HealthScore),
-			duration.HumanDuration(time.Since(summary.Uptime.Time)),
-			summary.NodesReady,
-			summary.Namespaces,
-			deploysColor, summary.DeploymentsReady, summary.DeploymentsTotal,
-			podsColor, summary.PodsRunning, summary.PodsAvailable,
-			summary.VolumesInUse,
-			pvDisplay,
-			pvcDisplay,
-		)
+		var statsText string
+		if mono {
+			deploysStr := fmt.Sprintf("%d/%d", summary.DeploymentsReady, summary.DeploymentsTotal)
+			if deploysCol == pal.GaugeHigh && summary.DeploymentsTotal > 0 {
+				deploysStr = ui.ErrorMarkup(deploysStr)
+			}
+			podsStr := fmt.Sprintf("%d/%d", summary.PodsRunning, summary.PodsAvailable)
+			if podsCol == pal.GaugeHigh && summary.PodsAvailable > 0 {
+				podsStr = ui.ErrorMarkup(podsStr)
+			}
+			statsText = fmt.Sprintf(
+				"Health: %s │ Uptime: %s │ Nodes: %d │ NS: %d │ Deploys: %s │ Pods: %s │ Vols: %d │ PVs: %s │ PVCs: %s",
+				ui.FormatHealthScore(summary.HealthScore),
+				duration.HumanDuration(time.Since(summary.Uptime.Time)),
+				summary.NodesReady,
+				summary.Namespaces,
+				deploysStr,
+				podsStr,
+				summary.VolumesInUse,
+				pvDisplay,
+				pvcDisplay,
+			)
+		} else {
+			lblTag := ui.TagFg(pal.DataPrimary)
+			valTag := ui.TagFg(pal.DataSecondary)
+			statsText = fmt.Sprintf(
+				"[%s]Health: %s [%s]│ Uptime: [%s]%s [%s]│ Nodes: [%s]%d [%s]│ NS: [%s]%d [%s]│ Deploys: [%s]%d/%d [%s]│ Pods: [%s]%d/%d [%s]│ Vols: [%s]%d [%s]│ PVs: [%s]%s [%s]│ PVCs: [%s]%s",
+				lblTag, ui.FormatHealthScore(summary.HealthScore),
+				lblTag, valTag, duration.HumanDuration(time.Since(summary.Uptime.Time)),
+				lblTag, valTag, summary.NodesReady,
+				lblTag, valTag, summary.Namespaces,
+				lblTag, ui.TagFg(deploysCol), summary.DeploymentsReady, summary.DeploymentsTotal,
+				lblTag, ui.TagFg(podsCol), summary.PodsRunning, summary.PodsAvailable,
+				lblTag, valTag, summary.VolumesInUse,
+				lblTag, valTag, pvDisplay,
+				lblTag, valTag, pvcDisplay,
+			)
+		}
 		p.statsView.SetText(statsText)
 
 		// === CPU and MEM sparklines ===
@@ -310,38 +343,64 @@ func (p *clusterSummaryPanel) drawEnhancedStats(summary model.ClusterSummary) {
 		return
 	}
 
-	// Color-code health indicators
-	restartsColor := "green"
-	if summary.ContainerRestarts > 100 {
-		restartsColor = "red"
-	} else if summary.ContainerRestarts > 50 {
-		restartsColor = "yellow"
-	}
-
-	failuresColor := "green"
-	if summary.FailedPods > 0 {
-		failuresColor = "red"
-	}
-
-	evictedColor := "green"
-	if summary.EvictedPods > 0 {
-		evictedColor = "yellow"
-	}
-
-	pressureColor := "green"
-	if summary.NodePressureCount > 0 {
-		pressureColor = "red"
-	}
-
+	pal := ui.ActivePalette()
 	stallText := formatSummaryStall(summary)
 
+	if ui.IsMonochrome() {
+		failuresStr := fmt.Sprintf("%d", summary.FailedPods)
+		if summary.FailedPods > 0 {
+			failuresStr = ui.ErrorMarkup(failuresStr)
+		}
+		pressureStr := fmt.Sprintf("%d", summary.NodePressureCount)
+		if summary.NodePressureCount > 0 {
+			pressureStr = ui.ErrorMarkup(pressureStr)
+		}
+		restartsStr := fmt.Sprintf("%d", summary.ContainerRestarts)
+		if summary.ContainerRestarts > 100 {
+			restartsStr = ui.ErrorMarkup(restartsStr)
+		}
+		enhancedText := fmt.Sprintf(
+			"Restarts: %s │ Failures: %s │ Evicted: %d │ Pressure: %s │ Stall: %s",
+			restartsStr,
+			failuresStr,
+			summary.EvictedPods,
+			pressureStr,
+			stallText,
+		)
+		p.enhancedStats.SetText(enhancedText)
+		return
+	}
+
+	restartsCol := pal.GaugeLow
+	if summary.ContainerRestarts > 100 {
+		restartsCol = pal.GaugeHigh
+	} else if summary.ContainerRestarts > 50 {
+		restartsCol = pal.GaugeMedium
+	}
+
+	failuresCol := pal.GaugeLow
+	if summary.FailedPods > 0 {
+		failuresCol = pal.GaugeHigh
+	}
+
+	evictedCol := pal.GaugeLow
+	if summary.EvictedPods > 0 {
+		evictedCol = pal.GaugeMedium
+	}
+
+	pressureCol := pal.GaugeLow
+	if summary.NodePressureCount > 0 {
+		pressureCol = pal.GaugeHigh
+	}
+
+	lblTag := ui.TagFg(pal.DataPrimary)
 	enhancedText := fmt.Sprintf(
-		"[yellow]Restarts: [%s]%d[yellow] │ Failures: [%s]%d[yellow] │ Evicted: [%s]%d[yellow] │ Pressure: [%s]%d[yellow] │ Stall: %s",
-		restartsColor, summary.ContainerRestarts,
-		failuresColor, summary.FailedPods,
-		evictedColor, summary.EvictedPods,
-		pressureColor, summary.NodePressureCount,
-		stallText,
+		"[%s]Restarts: [%s]%d[%s] │ Failures: [%s]%d[%s] │ Evicted: [%s]%d[%s] │ Pressure: [%s]%d[%s] │ Stall: %s",
+		lblTag, ui.TagFg(restartsCol), summary.ContainerRestarts,
+		lblTag, ui.TagFg(failuresCol), summary.FailedPods,
+		lblTag, ui.TagFg(evictedCol), summary.EvictedPods,
+		lblTag, ui.TagFg(pressureCol), summary.NodePressureCount,
+		lblTag, stallText,
 	)
 	p.enhancedStats.SetText(enhancedText)
 }

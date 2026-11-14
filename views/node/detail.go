@@ -113,7 +113,7 @@ func (p *DetailPanel) Layout(_ any) {
 		p.infoHeaderPanel.SetBorder(true)
 		p.infoHeaderPanel.SetTitle(" Info ")
 		p.infoHeaderPanel.SetTitleAlign(tview.AlignLeft)
-		p.infoHeaderPanel.SetBorderColor(tcell.ColorLightGray)
+		ui.SetFlexFocused(p.infoHeaderPanel, false)
 
 		// Create sparkline panel and add sparkline row to it
 		p.sparklinePanel = tview.NewFlex().SetDirection(tview.FlexColumn)
@@ -124,7 +124,7 @@ func (p *DetailPanel) Layout(_ any) {
 		p.systemDetailPanel.SetBorder(true)
 		p.systemDetailPanel.SetTitle(" System Detail ")
 		p.systemDetailPanel.SetTitleAlign(tview.AlignLeft)
-		p.systemDetailPanel.SetBorderColor(tcell.ColorLightGray)
+		ui.SetFlexFocused(p.systemDetailPanel, false)
 
 		// Left column: System info table
 		p.leftDetailTable = tview.NewTable()
@@ -160,14 +160,14 @@ func (p *DetailPanel) Layout(_ any) {
 		p.podsPanel.SetBorder(true)
 		p.podsPanel.SetTitle(" Pods ")
 		p.podsPanel.SetTitleAlign(tview.AlignLeft)
-		p.podsPanel.SetBorderColor(tcell.ColorLightGray)
+		ui.SetFlexFocused(p.podsPanel, false)
 
 		p.podsTable = tview.NewTable()
 		p.podsTable.SetFixed(1, 0)              // Fixed header row
 		p.podsTable.SetSelectable(false, false) // Start unselectable, enable on focus
 		p.podsTable.SetBorder(false)
 		p.podsTable.SetBorders(false)
-		p.podsTable.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorLightGray).Foreground(tcell.ColorBlack))
+		p.podsTable.SetSelectedStyle(ui.SelectedRowStyle())
 
 		podColumnToKey := map[string]rune{
 			"NAMESPACE": 'n',
@@ -371,13 +371,22 @@ func (p *DetailPanel) drawInfoHeader() {
 		}
 	}
 
+	pal := ui.ActivePalette()
+	mono := ui.IsMonochrome()
+	keyOpen, valOpen, resetTag := "", "", ""
+	if !mono {
+		keyOpen = "[" + ui.TagFg(pal.StatusMuted) + "]"
+		valOpen = "[" + ui.TagFg(pal.DataSecondary) + "]"
+		resetTag = "[-]"
+	}
+
 	// Build info items (MachineID moved to System Detail section)
 	items := []string{
-		fmt.Sprintf("[gray]Status:[white] %s", node.Status),
-		fmt.Sprintf("[gray]Roles:[white] %s", strings.Join(node.Roles, ",")),
-		fmt.Sprintf("[gray]Age:[white] %s", node.TimeSinceStart),
-		fmt.Sprintf("[gray]IP:[white] %s", node.InternalIP),
-		fmt.Sprintf("[gray]Hostname:[white] %s", hostname),
+		fmt.Sprintf("%sStatus:%s %s%s", keyOpen, valOpen, node.Status, resetTag),
+		fmt.Sprintf("%sRoles:%s %s%s", keyOpen, valOpen, strings.Join(node.Roles, ","), resetTag),
+		fmt.Sprintf("%sAge:%s %s%s", keyOpen, valOpen, node.TimeSinceStart, resetTag),
+		fmt.Sprintf("%sIP:%s %s%s", keyOpen, valOpen, node.InternalIP, resetTag),
+		fmt.Sprintf("%sHostname:%s %s%s", keyOpen, valOpen, hostname, resetTag),
 		ui.FormatPSIInfo(node.PSI, node.PSIKernelSupported),
 	}
 
@@ -435,7 +444,6 @@ func (p *DetailPanel) drawSparklines() {
 	if node.AllocatableCpuQty != nil {
 		cpuTotal = ui.FormatCPU(node.AllocatableCpuQty)
 	}
-	cpuTitle := fmt.Sprintf(" CPU %s/%s ([%s]%.1f%% %s[-]) %s ", cpuUsed, cpuTotal, cpuPercentColor, cpuPercent, metricsLabel, cpuTrend)
 
 	memPercent := memRatio * 100
 	memPercentColor := ui.GetResourcePercentageColor(memPercent)
@@ -450,7 +458,15 @@ func (p *DetailPanel) drawSparklines() {
 	if node.AllocatableMemQty != nil {
 		memTotal = ui.FormatMemory(node.AllocatableMemQty)
 	}
-	memTitle := fmt.Sprintf(" MEM %s/%s ([%s]%.1f%% %s[-]) %s ", memUsed, memTotal, memPercentColor, memPercent, metricsLabel, memTrend)
+
+	var cpuColorOpen, memColorOpen, pctClose string
+	if !ui.IsMonochrome() {
+		cpuColorOpen = "[" + cpuPercentColor + "]"
+		memColorOpen = "[" + memPercentColor + "]"
+		pctClose = "[-]"
+	}
+	cpuTitle := fmt.Sprintf(" CPU %s/%s (%s%.1f%% %s%s) %s ", cpuUsed, cpuTotal, cpuColorOpen, cpuPercent, metricsLabel, pctClose, cpuTrend)
+	memTitle := fmt.Sprintf(" MEM %s/%s (%s%.1f%% %s%s) %s ", memUsed, memTotal, memColorOpen, memPercent, metricsLabel, pctClose, memTrend)
 
 	// Update sparkline row with new values and titles
 	p.sparklineRow.UpdateCPU(cpuRatio, cpuTitle)
@@ -499,10 +515,33 @@ func (p *DetailPanel) drawSystemDetailSection() {
 		return
 	}
 	node := p.data.NodeModel
+	pal := ui.ActivePalette()
+	mono := ui.IsMonochrome()
+	sectionColor := pal.Accent
+	mutedColor := pal.StatusMuted
+	okColor := pal.StatusOK
+	warnColor := pal.StatusWarning
+	errColor := pal.StatusError
+	var okOpen, errOpen, warnOpen, mutedOpen, closeTag string
+	sectionOpen := "[::b]"
+	if mono {
+		sectionColor = tcell.ColorDefault
+		mutedColor = tcell.ColorDefault
+		okColor = tcell.ColorDefault
+		warnColor = tcell.ColorDefault
+		errColor = tcell.ColorDefault
+	} else {
+		okOpen = "[" + ui.TagFg(pal.StatusOK) + "]"
+		errOpen = "[" + ui.TagFg(pal.StatusError) + "]"
+		warnOpen = "[" + ui.TagFg(pal.StatusWarning) + "]"
+		mutedOpen = "[" + ui.TagFg(pal.StatusMuted) + "]"
+		sectionOpen = "[" + ui.TagFg(pal.Accent) + "::b]"
+		closeTag = "[-]"
+	}
 
 	// === LEFT COLUMN: System Info ===
 	row := 0
-	p.leftDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]System[::-]").SetTextColor(tcell.ColorAqua).SetSelectable(false))
+	p.leftDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]System[::-]").SetTextColor(sectionColor).SetSelectable(false))
 	row++
 
 	// MachineID (truncate for display)
@@ -556,50 +595,69 @@ func (p *DetailPanel) drawSystemDetailSection() {
 
 	// === MIDDLE COLUMN: Conditions ===
 	row = 0
-	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]Conditions[::-]").SetTextColor(tcell.ColorAqua).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]Conditions[::-]").SetTextColor(sectionColor).SetSelectable(false))
 	row++
 
 	conditions := p.data.GetConditions()
 	for _, cond := range conditions {
-		statusColor := tcell.ColorGreen
+		statusColor := okColor
+		statusAttrs := tcell.AttrNone
+		statusText := cond.Status
 		if !cond.Healthy {
-			statusColor = tcell.ColorRed
+			statusColor = errColor
+			if mono {
+				statusText = "! " + statusText
+				statusAttrs = tcell.AttrUnderline | tcell.AttrBold
+			}
 		}
-		p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", cond.Type)).SetTextColor(tcell.ColorGray).SetSelectable(false))
-		p.middleDetailTable.SetCell(row, 1, tview.NewTableCell(cond.Status).SetTextColor(statusColor).SetSelectable(false))
+		p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", cond.Type)).SetTextColor(mutedColor).SetSelectable(false))
+		p.middleDetailTable.SetCell(row, 1, tview.NewTableCell(statusText).SetTextColor(statusColor).SetAttributes(statusAttrs).SetSelectable(false))
 		row++
 	}
 
 	// Cordoned status
-	cordonedValue := "[green]False[-]"
+	cordonedValue := okOpen + "False" + closeTag
 	if node.Unschedulable {
-		cordonedValue = "[red]True[-]"
+		if mono {
+			cordonedValue = ui.ErrorMarkup("True")
+		} else {
+			cordonedValue = errOpen + "True" + closeTag
+		}
 	}
-	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", "Cordoned")).SetTextColor(tcell.ColorGray).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", "Cordoned")).SetTextColor(mutedColor).SetSelectable(false))
 	p.middleDetailTable.SetCell(row, 1, tview.NewTableCell(cordonedValue).SetSelectable(false))
 	row++
 
 	// Taints
-	taintsValue := "[green]None[-]"
+	taintsValue := okOpen + "None" + closeTag
 	if node.TaintCount > 0 {
-		taintsValue = fmt.Sprintf("[yellow]%d[-]", node.TaintCount)
+		if mono {
+			taintsValue = fmt.Sprintf("[::b]%d[::-]", node.TaintCount)
+		} else {
+			taintsValue = fmt.Sprintf("%s%d%s", warnOpen, node.TaintCount, closeTag)
+		}
 	}
-	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", "Taints")).SetTextColor(tcell.ColorGray).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", "Taints")).SetTextColor(mutedColor).SetSelectable(false))
 	p.middleDetailTable.SetCell(row, 1, tview.NewTableCell(taintsValue).SetSelectable(false))
 	row++
 
 	// Pressures
-	pressureValue := "[green]None[-]"
+	pressureValue := okOpen + "None" + closeTag
 	if len(node.Pressures) > 0 {
-		pressureValue = "[red]" + strings.Join(node.Pressures, ", ") + "[-]"
+		joined := strings.Join(node.Pressures, ", ")
+		if mono {
+			pressureValue = ui.ErrorMarkup(joined)
+		} else {
+			pressureValue = errOpen + joined + closeTag
+		}
 	}
-	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", "Pressures")).SetTextColor(tcell.ColorGray).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", "Pressures")).SetTextColor(mutedColor).SetSelectable(false))
 	p.middleDetailTable.SetCell(row, 1, tview.NewTableCell(pressureValue).SetSelectable(false))
 	row++
 
 	// === EVENTS SUMMARY ===
 	row++
-	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]Events[::-]").SetTextColor(tcell.ColorAqua).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]Events[::-]").SetTextColor(sectionColor).SetSelectable(false))
 	row++
 
 	if p.data != nil && len(p.data.Events) > 0 {
@@ -623,9 +681,9 @@ func (p *DetailPanel) drawSystemDetailSection() {
 		row++
 
 		// Warning with color
-		warningColor := tcell.ColorGreen
+		warningColor := okColor
 		if warningCount > 0 {
-			warningColor = tcell.ColorYellow
+			warningColor = warnColor
 		}
 		ui.AddDetailRowColor(p.middleDetailTable, row, "Warning", fmt.Sprintf("%d", warningCount), warningColor)
 		row++
@@ -644,10 +702,10 @@ func (p *DetailPanel) drawSystemDetailSection() {
 	// === LABELS COLUMN (TextView with sorted keys) ===
 	labels := p.data.GetLabels()
 	var labelsBuilder strings.Builder
-	labelsBuilder.WriteString("[aqua::b]Labels[::-]\n")
+	labelsBuilder.WriteString(sectionOpen + "Labels[::-]\n")
 
 	if len(labels) == 0 {
-		labelsBuilder.WriteString("[gray]None[-]")
+		labelsBuilder.WriteString(mutedOpen + "None" + closeTag)
 	} else {
 		for _, k := range slices.Sorted(maps.Keys(labels)) {
 			v := labels[k]
@@ -655,7 +713,7 @@ func (p *DetailPanel) drawSystemDetailSection() {
 			if len(v) > 25 {
 				v = v[:22] + "..."
 			}
-			labelsBuilder.WriteString(fmt.Sprintf("[gray]%s:[-] %s\n", ui.TruncateKey(k), v))
+			labelsBuilder.WriteString(fmt.Sprintf("%s%s:%s %s\n", mutedOpen, ui.TruncateKey(k), closeTag, v))
 		}
 	}
 	p.labelsTextView.SetText(labelsBuilder.String())
@@ -663,10 +721,10 @@ func (p *DetailPanel) drawSystemDetailSection() {
 	// === ANNOTATIONS COLUMN (TextView with sorted keys) ===
 	annotations := p.data.GetAnnotations()
 	var annotationsBuilder strings.Builder
-	annotationsBuilder.WriteString("[aqua::b]Annotations[::-]\n")
+	annotationsBuilder.WriteString(sectionOpen + "Annotations[::-]\n")
 
 	if len(annotations) == 0 {
-		annotationsBuilder.WriteString("[gray]None[-]")
+		annotationsBuilder.WriteString(mutedOpen + "None" + closeTag)
 	} else {
 		for _, k := range slices.Sorted(maps.Keys(annotations)) {
 			v := annotations[k]
@@ -674,7 +732,7 @@ func (p *DetailPanel) drawSystemDetailSection() {
 			if len(v) > 25 {
 				v = v[:22] + "..."
 			}
-			annotationsBuilder.WriteString(fmt.Sprintf("[gray]%s:[-] %s\n", ui.TruncateKey(k), v))
+			annotationsBuilder.WriteString(fmt.Sprintf("%s%s:%s %s\n", mutedOpen, ui.TruncateKey(k), closeTag, v))
 		}
 	}
 	p.annotationsTextView.SetText(annotationsBuilder.String())
@@ -697,11 +755,9 @@ func (p *DetailPanel) drawPodsTable() {
 		if p.podsTableCtrl != nil {
 			headerText = p.podsTableCtrl.FormatColumnHeader(header)
 		}
-		cell := tview.NewTableCell(headerText).
-			SetTextColor(tcell.ColorWhite).
-			SetBackgroundColor(tcell.ColorDarkCyan).
+		cell := ui.StyleHeaderCell(tview.NewTableCell(headerText).
 			SetSelectable(false).
-			SetExpansion(1)
+			SetExpansion(1))
 		p.podsTable.SetCell(0, col, cell)
 	}
 
@@ -753,32 +809,51 @@ func (p *DetailPanel) drawPodsTable() {
 	}
 
 	// Draw pods
+	pal := ui.ActivePalette()
+	mono := ui.IsMonochrome()
+	cellColor := pal.DataSecondary
+	mutedColor := pal.StatusMuted
+	okColor := pal.StatusOK
+	warnColor := pal.StatusWarning
+	errColor := pal.StatusError
+	if mono {
+		cellColor = tcell.ColorDefault
+		mutedColor = tcell.ColorDefault
+		okColor = tcell.ColorDefault
+		warnColor = tcell.ColorDefault
+		errColor = tcell.ColorDefault
+	}
 	for row, pod := range p.filteredPods {
 		rowIdx := row + 1 // Offset for header
 
-		statusColor := ui.GetTcellColor(ui.GetStatusColor(pod.Status, "pod"))
 		readyStr := fmt.Sprintf("%d/%d", pod.ReadyContainers, pod.TotalContainers)
 
-		restartColor := tcell.ColorGreen
-		if pod.Restarts > 0 {
-			restartColor = tcell.ColorYellow
-		}
+		restartColor := okColor
+		restartAttrs := tcell.AttrNone
 		if pod.Restarts > 5 {
-			restartColor = tcell.ColorRed
+			restartColor = errColor
+			if mono {
+				restartAttrs = tcell.AttrUnderline | tcell.AttrBold
+			}
+		} else if pod.Restarts > 0 {
+			restartColor = warnColor
+			if mono {
+				restartAttrs = tcell.AttrBold
+			}
 		}
 
 		// CPU and Memory
 		cpuStr := ui.FormatCPU(pod.PodUsageCpuQty)
 		memStr := ui.FormatMemory(pod.PodUsageMemQty)
 
-		p.podsTable.SetCell(rowIdx, 0, tview.NewTableCell(pod.Namespace).SetTextColor(tcell.ColorWhite))
-		p.podsTable.SetCell(rowIdx, 1, tview.NewTableCell(pod.Name).SetTextColor(tcell.ColorWhite).SetMaxWidth(30))
-		p.podsTable.SetCell(rowIdx, 2, tview.NewTableCell(pod.Status).SetTextColor(statusColor))
-		p.podsTable.SetCell(rowIdx, 3, tview.NewTableCell(readyStr).SetTextColor(tcell.ColorWhite))
-		p.podsTable.SetCell(rowIdx, 4, tview.NewTableCell(fmt.Sprintf("%d", pod.Restarts)).SetTextColor(restartColor))
-		p.podsTable.SetCell(rowIdx, 5, tview.NewTableCell(cpuStr).SetTextColor(tcell.ColorWhite))
-		p.podsTable.SetCell(rowIdx, 6, tview.NewTableCell(memStr).SetTextColor(tcell.ColorWhite))
-		p.podsTable.SetCell(rowIdx, 7, tview.NewTableCell(pod.TimeSince).SetTextColor(tcell.ColorGray))
+		p.podsTable.SetCell(rowIdx, 0, tview.NewTableCell(pod.Namespace).SetTextColor(cellColor))
+		p.podsTable.SetCell(rowIdx, 1, tview.NewTableCell(pod.Name).SetTextColor(cellColor).SetMaxWidth(30))
+		p.podsTable.SetCell(rowIdx, 2, ui.StyleStatusCell(tview.NewTableCell(pod.Status), pod.Status, "pod"))
+		p.podsTable.SetCell(rowIdx, 3, tview.NewTableCell(readyStr).SetTextColor(cellColor))
+		p.podsTable.SetCell(rowIdx, 4, tview.NewTableCell(fmt.Sprintf("%d", pod.Restarts)).SetTextColor(restartColor).SetAttributes(restartAttrs))
+		p.podsTable.SetCell(rowIdx, 5, tview.NewTableCell(cpuStr).SetTextColor(cellColor))
+		p.podsTable.SetCell(rowIdx, 6, tview.NewTableCell(memStr).SetTextColor(cellColor))
+		p.podsTable.SetCell(rowIdx, 7, tview.NewTableCell(pod.TimeSince).SetTextColor(mutedColor))
 	}
 
 	// Restore selection (clamped to valid range)
@@ -870,11 +945,7 @@ func (p *DetailPanel) notifyFooterContextChange() {
 func (p *DetailPanel) updateFocusVisuals() {
 	// Update border colors for all focusable panels
 	for i, panel := range p.focusablePanels {
-		if i == p.focusedChildIdx {
-			panel.SetBorderColor(tcell.ColorDodgerBlue)
-		} else {
-			panel.SetBorderColor(tcell.ColorLightGray)
-		}
+		ui.SetFlexFocused(panel, i == p.focusedChildIdx)
 	}
 
 	// Only pods table is focusable now - always show selection

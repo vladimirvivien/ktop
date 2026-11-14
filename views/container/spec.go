@@ -78,7 +78,15 @@ func (p *SpecPanel) buildLayout() {
 	p.footer = tview.NewTextView()
 	p.footer.SetDynamicColors(true)
 	p.footer.SetTextAlign(tview.AlignCenter)
-	p.footer.SetText("[yellow]↑↓/j/k[white] scroll  [yellow]PgUp/PgDn[white] page  [yellow]g/G[white] top/bottom  [yellow]ESC[white] back")
+	if ui.IsMonochrome() {
+		p.footer.SetText("[::b]↑↓/j/k[::-] scroll  [::b]PgUp/PgDn[::-] page  [::b]g/G[::-] top/bottom  [::b]ESC[::-] back")
+	} else {
+		pal := ui.ActivePalette()
+		keyTag := ui.TagFg(pal.DataPrimary)
+		textTag := ui.TagFg(pal.DataSecondary)
+		p.footer.SetText(fmt.Sprintf("[%s]↑↓/j/k[%s] scroll  [%s]PgUp/PgDn[%s] page  [%s]g/G[%s] top/bottom  [%s]ESC[%s] back[-]",
+			keyTag, textTag, keyTag, textTag, keyTag, textTag, keyTag, textTag))
+	}
 
 	// Assemble layout
 	p.root.Clear()
@@ -87,19 +95,19 @@ func (p *SpecPanel) buildLayout() {
 
 	p.root.SetBorder(true)
 	p.root.SetTitleAlign(tview.AlignLeft)
-	p.root.SetBorderColor(tcell.ColorLightGray)
+	ui.SetFlexFocused(p.root, false)
 }
 
 func (p *SpecPanel) renderSpec() {
 	if p.containerSpec == nil {
-		p.specView.SetText("[red]No container spec available[-]")
+		p.specView.SetText(ui.ErrorMarkup("No container spec available"))
 		return
 	}
 
 	// Marshal container spec to YAML
 	yamlBytes, err := yaml.Marshal(p.containerSpec)
 	if err != nil {
-		p.specView.SetText(fmt.Sprintf("[red]Error rendering spec: %v[-]", err))
+		p.specView.SetText(ui.ErrorMarkup(fmt.Sprintf("Error rendering spec: %v", err)))
 		return
 	}
 
@@ -114,6 +122,15 @@ func (p *SpecPanel) renderSpec() {
 // highlightYAML adds tview color codes to YAML content
 func highlightYAML(content string) string {
 	var result strings.Builder
+	mono := ui.IsMonochrome()
+	var mutedOpen, accentOpen, valOpen, closeTag string
+	if !mono {
+		pal := ui.ActivePalette()
+		mutedOpen = "[" + ui.TagFg(pal.StatusMuted) + "]"
+		accentOpen = "[" + ui.TagFg(pal.Accent) + "]"
+		valOpen = "[" + ui.TagFg(pal.DataSecondary) + "]"
+		closeTag = "[-]"
+	}
 
 	for _, line := range strings.Split(content, "\n") {
 		trimmed := strings.TrimSpace(line)
@@ -124,11 +141,12 @@ func highlightYAML(content string) string {
 			continue
 		}
 
-		// Comments in gray
+		// Comments in muted color
 		if strings.HasPrefix(trimmed, "#") {
-			result.WriteString("[gray]")
+			result.WriteString(mutedOpen)
 			result.WriteString(line)
-			result.WriteString("[-]\n")
+			result.WriteString(closeTag)
+			result.WriteString("\n")
 			continue
 		}
 
@@ -143,16 +161,21 @@ func highlightYAML(content string) string {
 				key := rest[:idx]
 				value := rest[idx:]
 				result.WriteString(indent)
-				result.WriteString("[white]- [aqua]")
+				result.WriteString(valOpen)
+				result.WriteString("- ")
+				result.WriteString(accentOpen)
 				result.WriteString(key)
-				result.WriteString("[white]")
+				result.WriteString(valOpen)
 				result.WriteString(value)
-				result.WriteString("[-]\n")
+				result.WriteString(closeTag)
+				result.WriteString("\n")
 			} else {
 				result.WriteString(indent)
-				result.WriteString("[white]- ")
+				result.WriteString(valOpen)
+				result.WriteString("- ")
 				result.WriteString(rest)
-				result.WriteString("[-]\n")
+				result.WriteString(closeTag)
+				result.WriteString("\n")
 			}
 			continue
 		}
@@ -168,11 +191,12 @@ func highlightYAML(content string) string {
 			value := keyValue[colonIdx:]
 
 			result.WriteString(indent)
-			result.WriteString("[aqua]")
+			result.WriteString(accentOpen)
 			result.WriteString(key)
-			result.WriteString("[white]")
+			result.WriteString(valOpen)
 			result.WriteString(value)
-			result.WriteString("[-]\n")
+			result.WriteString(closeTag)
+			result.WriteString("\n")
 			continue
 		}
 

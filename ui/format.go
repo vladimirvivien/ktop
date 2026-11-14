@@ -88,16 +88,23 @@ func TruncateKey(key string) string {
 	return key
 }
 
-// AddDetailRow adds a key-value row with default white text to a detail table
+// AddDetailRow adds a key-value row with default secondary text color to a detail table.
 func AddDetailRow(table *tview.Table, row int, key, value string) {
-	AddDetailRowColor(table, row, key, value, tcell.ColorWhite)
+	AddDetailRowColor(table, row, key, value, ActivePalette().DataSecondary)
 }
 
-// AddDetailRowColor adds a key-value row with custom value color to a detail table
+// AddDetailRowColor adds a key-value row with custom value color to a detail table.
 func AddDetailRowColor(table *tview.Table, row int, key, value string, color tcell.Color) {
+	p := ActivePalette()
+	keyColor := p.StatusMuted
+	valColor := color
+	if IsMonochrome() {
+		keyColor = tcell.ColorDefault
+		valColor = tcell.ColorDefault
+	}
 	paddedKey := fmt.Sprintf("%-10s", key)
-	table.SetCell(row, 0, tview.NewTableCell(paddedKey).SetTextColor(tcell.ColorGray).SetSelectable(false))
-	table.SetCell(row, 1, tview.NewTableCell(value).SetTextColor(color).SetSelectable(false))
+	table.SetCell(row, 0, tview.NewTableCell(paddedKey).SetTextColor(keyColor).SetSelectable(false))
+	table.SetCell(row, 1, tview.NewTableCell(value).SetTextColor(valColor).SetSelectable(false))
 }
 
 // AdaptiveRateMax updates a running peak rate and returns an effective maximum
@@ -174,16 +181,36 @@ func Truncate(s string, max int) string {
 	return s[:max-3] + "..."
 }
 
-// FormatPSIInfo formats PSI pressure stall metrics for display in detail view info bars
+// FormatPSIInfo formats PSI pressure stall metrics for display in detail view info bars.
 func FormatPSIInfo(psi metrics.PSIMetrics, kernelSupported bool) string {
+	p := ActivePalette()
+	mono := IsMonochrome()
+
 	if !kernelSupported {
-		return "[gray]PSI:[yellow] ⚠ N/A[-]"
+		if mono {
+			return "PSI: [::b]! N/A[::-]"
+		}
+		return fmt.Sprintf("[%s]PSI:[%s] ⚠ N/A[-]", TagFg(p.StatusMuted), TagFg(p.StatusWarning))
 	}
 
 	formatVal := func(pct float64) string {
+		if mono {
+			switch {
+			case pct < 0.01:
+				return "0%"
+			case pct < 1.0:
+				return fmt.Sprintf("%.2f%%", pct)
+			case pct < 10.0:
+				return fmt.Sprintf("%.1f%%", pct)
+			case pct >= 25.0:
+				return ErrorMarkup(fmt.Sprintf("%.0f%%", pct))
+			default:
+				return fmt.Sprintf("%.0f%%", pct)
+			}
+		}
 		switch {
 		case pct < 0.01:
-			return "[gray]0%[-]"
+			return fmt.Sprintf("[%s]0%%[-]", TagFg(p.StatusMuted))
 		case pct < 1.0:
 			return fmt.Sprintf("[%s]%.2f%%[-]", StallColor(pct), pct)
 		case pct < 10.0:
@@ -193,32 +220,59 @@ func FormatPSIInfo(psi metrics.PSIMetrics, kernelSupported bool) string {
 		}
 	}
 
-	return fmt.Sprintf("[gray]PSI:[white] CPU %s [white]MEM %s [white]IO %s",
-		formatVal(psi.CPUStallPct),
-		formatVal(psi.MemStallPct),
-		formatVal(psi.IOStallPct),
+	if mono {
+		return fmt.Sprintf("PSI: CPU %s MEM %s IO %s",
+			formatVal(psi.CPUStallPct),
+			formatVal(psi.MemStallPct),
+			formatVal(psi.IOStallPct),
+		)
+	}
+
+	valTag := TagFg(p.DataSecondary)
+	return fmt.Sprintf("[%s]PSI:[%s] CPU %s [%s]MEM %s [%s]IO %s",
+		TagFg(p.StatusMuted),
+		valTag, formatVal(psi.CPUStallPct),
+		valTag, formatVal(psi.MemStallPct),
+		valTag, formatVal(psi.IOStallPct),
 	)
 }
 
-// StallColor returns the color name for a given stall percentage
+// StallColor returns the color tag for a given stall percentage.
 func StallColor(pct float64) string {
+	p := ActivePalette()
 	switch {
 	case pct < 2:
-		return "green"
+		return TagFg(p.GaugeLow)
 	case pct < 10:
-		return "yellow"
+		return TagFg(p.GaugeMedium)
 	case pct < 25:
-		return "orange"
+		return TagFg(p.GaugeElevated)
 	default:
-		return "red"
+		return TagFg(p.GaugeHigh)
 	}
 }
 
 // FormatThrottleCell formats a CFS CPU throttling percentage for table cells.
 func FormatThrottleCell(pct float64) string {
+	p := ActivePalette()
+	if IsMonochrome() {
+		switch {
+		case pct < 0.01:
+			return "·"
+		case pct < 1.0:
+			return fmt.Sprintf("%.2f%%", pct)
+		case pct < 10.0:
+			return fmt.Sprintf("%.1f%%", pct)
+		case pct >= 25.0:
+			return ErrorMarkup(fmt.Sprintf("%.0f%%", pct))
+		default:
+			return fmt.Sprintf("%.0f%%", pct)
+		}
+	}
+
 	switch {
 	case pct < 0.01:
-		return "[gray]·[-]"
+		return fmt.Sprintf("[%s]·[-]", TagFg(p.StatusMuted))
 	case pct < 1.0:
 		return fmt.Sprintf("[%s]%.2f%%[-]", StallColor(pct), pct)
 	case pct < 10.0:
@@ -231,14 +285,21 @@ func FormatThrottleCell(pct float64) string {
 // FormatHealthScore formats the 0-100 cluster health score percentage with
 // threshold color coding.
 func FormatHealthScore(score int) string {
-	color := "red"
+	p := ActivePalette()
+	if IsMonochrome() {
+		if score < 50 {
+			return ErrorMarkup(fmt.Sprintf("%d%%", score))
+		}
+		return fmt.Sprintf("%d%%", score)
+	}
+	c := p.GaugeHigh
 	switch {
 	case score >= 90:
-		color = "green"
+		c = p.GaugeLow
 	case score >= 70:
-		color = "yellow"
+		c = p.GaugeMedium
 	case score >= 50:
-		color = "orange"
+		c = p.GaugeElevated
 	}
-	return fmt.Sprintf("[%s]%d%%[-]", color, score)
+	return fmt.Sprintf("[%s]%d%%[-]", TagFg(c), score)
 }
