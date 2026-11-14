@@ -500,3 +500,44 @@ func validateScrapeTarget(target *ScrapeTarget) bool {
 		return false
 	}
 }
+
+func TestConvertMetricFamilyWithTimestamp_ClockSkewPreserved(t *testing.T) {
+	scraper := &KubernetesScraper{}
+	body := []byte(
+		"# TYPE container_cpu_usage_seconds_total counter\n" +
+			"container_cpu_usage_seconds_total{cpu=\"total\",id=\"/\",node=\"n1\"} 120.5 1700000000000\n" +
+			"container_cpu_usage_seconds_total{cpu=\"0\",id=\"/\",node=\"n1\"} 60.25 1700000030000\n",
+	)
+	families, err := scraper.parseMetricsBody(body)
+	if err != nil {
+		t.Fatalf("parseMetricsBody failed: %v", err)
+	}
+	maxUpstream := maxAllowedUpstreamTimestamp(families)
+	if maxUpstream != 1700000030000 {
+		t.Fatalf("maxAllowedUpstreamTimestamp = %d, want 1700000030000", maxUpstream)
+	}
+
+	// Simulate host wall clock +300s ahead of node clock.
+	scrapeTs := int64(1700000330000)
+	offset := scrapeTs - maxUpstream
+	mf := scraper.convertMetricFamilyWithTimestamp("container_cpu_usage_seconds_total", families["container_cpu_usage_seconds_total"], scrapeTs, offset)
+	if len(mf.TimeSeries) != 2 {
+		t.Fatalf("expected 2 time series, got %d", len(mf.TimeSeries))
+	}
+
+	s0, ok := mf.TimeSeries[0].Samples.Last()
+	if !ok {
+		t.Fatal("missing sample for series 0")
+	}
+	if s0.UpstreamTimestamp != 1700000000000 {
+		t.Errorf("series 0 UpstreamTimestamp = %d, want 1700000000000", s0.UpstreamTimestamp)
+	}
+	if s0.Timestamp != 1700000300000 {
+		t.Errorf("series 0 Timestamp = %d, want 1700000300000", s0.Timestamp)
+	}
+
+	s1, _ := mf.TimeSeries[1].Samples.Last()
+	if s1.Timestamp-s0.Timestamp != 30000 {
+		t.Errorf("expected 30000ms difference preserved across clock offset, got %d", s1.Timestamp-s0.Timestamp)
+	}
+}

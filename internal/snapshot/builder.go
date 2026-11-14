@@ -171,6 +171,8 @@ func summaryDataFromModel(s model.ClusterSummary) SummaryData {
 		RequestedMemoryBytes:   qtyBytes(s.RequestedPodMemTotal),
 		UsageCPUMillis:         qtyMillis(s.UsageNodeCpuTotal),
 		UsageMemoryBytes:       qtyBytes(s.UsageNodeMemTotal),
+		HasUsageCPU:            s.HasUsageCPU,
+		HasUsageMemory:         s.HasUsageMem,
 		ContainerCount:         s.ContainerCount,
 		ContainerRestarts:      s.ContainerRestarts,
 		FailedPods:             s.FailedPods,
@@ -219,6 +221,8 @@ func (s SummaryData) ToClusterSummary(c ClusterInfo) model.ClusterSummary {
 		RequestedPodMemTotal:    resource.NewQuantity(s.RequestedMemoryBytes, resource.DecimalSI),
 		UsageNodeCpuTotal:       resource.NewMilliQuantity(s.UsageCPUMillis, resource.DecimalSI),
 		UsageNodeMemTotal:       resource.NewQuantity(s.UsageMemoryBytes, resource.DecimalSI),
+		HasUsageCPU:             s.HasUsageCPU,
+		HasUsageMem:             s.HasUsageMemory,
 		MetricsSourceType:       c.MetricsSource,
 		ContainerCount:          s.ContainerCount,
 		ContainerRestarts:       s.ContainerRestarts,
@@ -268,6 +272,8 @@ func nodeDataFromModel(n model.NodeModel) NodeData {
 		AllocatableStorageBytes: qtyBytes(n.AllocatableStorageQty),
 		UsageCPUMillis:          qtyMillis(n.UsageCpuQty),
 		UsageMemoryBytes:        qtyBytes(n.UsageMemQty),
+		HasUsageCPU:             n.UsageCpuQty != nil,
+		HasUsageMemory:          n.UsageMemQty != nil,
 		PSI:                     psiDataFromMetrics(n.PSI),
 		PSIKernelSupported:      n.PSIKernelSupported,
 	}
@@ -275,6 +281,13 @@ func nodeDataFromModel(n model.NodeModel) NodeData {
 
 // ToNodeModel converts NodeData back to model.NodeModel for view rendering.
 func (n NodeData) ToNodeModel() model.NodeModel {
+	var usageCPU, usageMem *resource.Quantity
+	if n.HasUsageCPU || n.UsageCPUMillis > 0 {
+		usageCPU = resource.NewMilliQuantity(n.UsageCPUMillis, resource.DecimalSI)
+	}
+	if n.HasUsageMemory || n.UsageMemoryBytes > 0 {
+		usageMem = resource.NewQuantity(n.UsageMemoryBytes, resource.DecimalSI)
+	}
 	return model.NodeModel{
 		Name:                    n.Name,
 		Roles:                   append([]string(nil), n.Roles...),
@@ -304,8 +317,8 @@ func (n NodeData) ToNodeModel() model.NodeModel {
 		AllocatableCpuQty:       resource.NewMilliQuantity(n.AllocatableCPUMillis, resource.DecimalSI),
 		AllocatableMemQty:       resource.NewQuantity(n.AllocatableMemoryBytes, resource.DecimalSI),
 		AllocatableStorageQty:   resource.NewQuantity(n.AllocatableStorageBytes, resource.DecimalSI),
-		UsageCpuQty:             resource.NewMilliQuantity(n.UsageCPUMillis, resource.DecimalSI),
-		UsageMemQty:             resource.NewQuantity(n.UsageMemoryBytes, resource.DecimalSI),
+		UsageCpuQty:             usageCPU,
+		UsageMemQty:             usageMem,
 		PSI:                     n.PSI.toMetrics(),
 		PSIKernelSupported:      n.PSIKernelSupported,
 	}

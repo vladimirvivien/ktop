@@ -64,6 +64,15 @@ type NodeModel struct {
 
 func NewNodeModel(node *coreV1.Node, metrics *v1beta1.NodeMetrics) *NodeModel {
 	roles := GetNodeControlRoles(node)
+	var usageCPU, usageMem *resource.Quantity
+	if metrics != nil {
+		if _, ok := metrics.Usage[coreV1.ResourceCPU]; ok {
+			usageCPU = metrics.Usage.Cpu()
+		}
+		if _, ok := metrics.Usage[coreV1.ResourceMemory]; ok {
+			usageMem = metrics.Usage.Memory()
+		}
+	}
 	return &NodeModel{
 		Name:           node.Name,
 		Roles:          roles,
@@ -93,8 +102,8 @@ func NewNodeModel(node *coreV1.Node, metrics *v1beta1.NodeMetrics) *NodeModel {
 		AllocatableMemQty:     node.Status.Allocatable.Memory(),
 		AllocatableStorageQty: node.Status.Allocatable.StorageEphemeral(),
 
-		UsageCpuQty: metrics.Usage.Cpu(),
-		UsageMemQty: metrics.Usage.Memory(),
+		UsageCpuQty: usageCPU,
+		UsageMemQty: usageMem,
 
 		PSIKernelSupported: psi.KernelVersionOK(node.Status.NodeInfo.KernelVersion),
 	}

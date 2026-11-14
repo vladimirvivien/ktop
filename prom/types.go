@@ -54,8 +54,9 @@ var DefaultMetricAllowlist = map[string]bool{
 
 // MetricSample represents a single metric data point
 type MetricSample struct {
-	Timestamp int64
-	Value     float64
+	Timestamp         int64
+	UpstreamTimestamp int64
+	Value             float64
 }
 
 // TimeSeries represents a time series with labels and samples.

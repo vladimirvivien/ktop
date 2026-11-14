@@ -517,83 +517,9 @@ func (p *MainPanel) showNodeDetail(nodeName string) {
 	// If we set this after network calls, refreshNodeView might update with old node data
 	p.viewState.SetNodeDetail(nodeName)
 
-	// Find the node model in cached data
-	var nodeModel *model.NodeModel
-	for i := range p.cachedNodeModels {
-		if p.cachedNodeModels[i].Name == nodeName {
-			// Copy the model to avoid pointer to slice element issues
-			nm := p.cachedNodeModels[i]
-			nodeModel = &nm
-			break
-		}
-	}
-
-	if nodeModel == nil {
+	detailData := p.buildNodeDetailData(context.Background(), nodeName, p.cachedNodeModels)
+	if detailData == nil {
 		return // Node not found
-	}
-
-	// Find pods on this node
-	var podsOnNode []*model.PodModel
-	for i := range p.cachedPodModels {
-		if p.cachedPodModels[i].Node == nodeName {
-			pm := p.cachedPodModels[i]
-			podsOnNode = append(podsOnNode, &pm)
-		}
-	}
-
-	// Create detail data
-	detailData := &model.NodeDetailData{
-		NodeModel:  nodeModel,
-		PodsOnNode: podsOnNode,
-	}
-
-	ctx := context.Background()
-
-	// Fetch metrics history for sparklines (if available)
-	if p.metricsSource != nil && p.metricsSource.SupportsHistory() {
-		historyDuration := 5 * time.Minute
-		sparklineWidth := 15 // Number of data points for sparkline
-
-		// Fetch CPU history
-		cpuHistory, err := p.metricsSource.GetNodeHistory(ctx, nodeName, metrics.HistoryQuery{
-			Resource:  metrics.ResourceCPU,
-			Duration:  historyDuration,
-			MaxPoints: sparklineWidth,
-		})
-
-		// Fetch Memory history
-		memHistory, err2 := p.metricsSource.GetNodeHistory(ctx, nodeName, metrics.HistoryQuery{
-			Resource:  metrics.ResourceMemory,
-			Duration:  historyDuration,
-			MaxPoints: sparklineWidth,
-		})
-
-		// Convert to MetricSample format for the detail view
-		if err == nil && cpuHistory != nil && err2 == nil && memHistory != nil {
-			// Get allocatable values for calculating ratios
-			allocCPU := int64(1) // Default to avoid division by zero
-			allocMem := int64(1)
-			if nodeModel.AllocatableCpuQty != nil {
-				allocCPU = nodeModel.AllocatableCpuQty.MilliValue()
-			}
-			if nodeModel.AllocatableMemQty != nil {
-				allocMem = nodeModel.AllocatableMemQty.Value()
-			}
-
-			// Merge CPU and memory history into MetricSamples
-			detailData.MetricsHistory = mergeHistoryToSamples(cpuHistory, memHistory, allocCPU, allocMem)
-		}
-	}
-
-	// Fetch the raw Node object for conditions, labels, etc.
-	ctrl := p.app.GetK8sClient().Controller()
-	if node, err := ctrl.GetNode(ctx, nodeName); err == nil {
-		detailData.Node = node
-	}
-
-	// Fetch events for this node
-	if events, err := ctrl.GetEventsForNode(ctx, nodeName); err == nil {
-		detailData.Events = events
 	}
 
 	// Update and show the detail panel
@@ -611,98 +537,9 @@ func (p *MainPanel) showPodDetail(namespace, podName string) {
 	// If we set this after network calls, refreshPodView might update with old pod data
 	p.viewState.SetPodDetail(namespace, podName)
 
-	// Find the pod model in cached data
-	// CRITICAL: Copy the value instead of storing pointer to slice element
-	// Pointers to slice elements become unstable when the slice is replaced during refresh
-	var podModel *model.PodModel
-	for i := range p.cachedPodModels {
-		if p.cachedPodModels[i].Namespace == namespace && p.cachedPodModels[i].Name == podName {
-			pm := p.cachedPodModels[i] // Copy the value
-			podModel = &pm             // Pointer to local copy
-			break
-		}
-	}
-
-	if podModel == nil {
+	detailData := p.buildPodDetailData(context.Background(), namespace+"/"+podName, p.cachedPodModels)
+	if detailData == nil {
 		return // Pod not found
-	}
-
-	// Create detail data
-	detailData := &model.PodDetailData{
-		PodModel: podModel,
-	}
-
-	ctx := context.Background()
-
-	// Fetch metrics history for sparklines (if available)
-	if p.metricsSource != nil && p.metricsSource.SupportsHistory() {
-		historyDuration := 5 * time.Minute
-		sparklineWidth := 15 // Number of data points for sparkline
-
-		// Fetch CPU history
-		cpuHistory, err := p.metricsSource.GetPodHistory(ctx, namespace, podName, metrics.HistoryQuery{
-			Resource:  metrics.ResourceCPU,
-			Duration:  historyDuration,
-			MaxPoints: sparklineWidth,
-		})
-
-		// Fetch Memory history
-		memHistory, err2 := p.metricsSource.GetPodHistory(ctx, namespace, podName, metrics.HistoryQuery{
-			Resource:  metrics.ResourceMemory,
-			Duration:  historyDuration,
-			MaxPoints: sparklineWidth,
-		})
-
-		// Convert to MetricSample format for the detail view
-		if err == nil && cpuHistory != nil && err2 == nil && memHistory != nil {
-			// Use node allocatable as denominator to match real-time sparkline calculation
-			// This ensures history bars and current bars use the same scale
-			allocCPU := int64(1000)    // 1 core default
-			allocMem := int64(1 << 30) // 1 GB default
-			if podModel.NodeAllocatableCpuQty != nil && podModel.NodeAllocatableCpuQty.MilliValue() > 0 {
-				allocCPU = podModel.NodeAllocatableCpuQty.MilliValue()
-			}
-			if podModel.NodeAllocatableMemQty != nil && podModel.NodeAllocatableMemQty.Value() > 0 {
-				allocMem = podModel.NodeAllocatableMemQty.Value()
-			}
-
-			// Store as pod-level aggregate (single entry in map)
-			samples := mergeHistoryToSamples(cpuHistory, memHistory, allocCPU, allocMem)
-			if len(samples) > 0 {
-				detailData.MetricsHistory = map[string][]model.MetricSample{
-					"pod": samples,
-				}
-			}
-		}
-	}
-
-	// Fetch the full Pod object for detailed info
-	ctrl := p.app.GetK8sClient().Controller()
-	if pod, err := ctrl.GetPod(ctx, namespace, podName); err == nil {
-		detailData.Pod = pod
-	}
-
-	// Fetch events for this pod
-	if events, err := ctrl.GetEventsForPod(ctx, namespace, podName); err == nil {
-		detailData.Events = events
-	}
-
-	// Fetch container metrics for the containers table
-	if p.metricsSource != nil {
-		if podMetrics, err := p.metricsSource.GetPodMetrics(ctx, namespace, podName); err == nil && podMetrics != nil {
-			detailData.ContainerMetrics = make(map[string]model.ContainerUsage)
-			for _, cm := range podMetrics.Containers {
-				usage := model.ContainerUsage{}
-				if cm.CPUUsage != nil {
-					usage.CPUUsage = fmt.Sprintf("%dm", cm.CPUUsage.MilliValue())
-				}
-				if cm.MemoryUsage != nil {
-					usage.MemoryUsage = ui.FormatMemory(cm.MemoryUsage)
-				}
-				usage.CPUThrottledPct = cm.CPUThrottled
-				detailData.ContainerMetrics[cm.Name] = usage
-			}
-		}
 	}
 
 	// Update and show the detail panel
@@ -980,13 +817,18 @@ func (p *MainPanel) buildNodeDetailData(ctx context.Context, nodeName string, no
 	if p.metricsSource != nil {
 		detailData.MetricsSourceType = p.metricsSource.GetSourceInfo().Type
 
-		// Fetch per-node network/disk rates for sparklines (Prometheus only)
+		// Fetch per-node network/disk rates and fresh CPU/memory usage for sparklines (Prometheus only)
 		// GetNodeMetrics uses label filter {node: nodeName} to get only this node's metrics
 		if nodeMetrics, err := p.metricsSource.GetNodeMetrics(ctx, nodeName); err == nil && nodeMetrics != nil {
 			detailData.NetworkRxRate = nodeMetrics.NetworkRxRate
 			detailData.NetworkTxRate = nodeMetrics.NetworkTxRate
 			detailData.DiskReadRate = nodeMetrics.DiskReadRate
 			detailData.DiskWriteRate = nodeMetrics.DiskWriteRate
+			nodeModel.UsageCpuQty = nodeMetrics.CPUUsage
+			if nodeMetrics.MemoryUsage != nil {
+				nodeModel.UsageMemQty = nodeMetrics.MemoryUsage
+			}
+			nodeModel.PSI = nodeMetrics.PSI
 		}
 	}
 
@@ -1022,14 +864,16 @@ func (p *MainPanel) buildNodeDetailData(ctx context.Context, nodeName string, no
 	}
 
 	// Fetch the raw Node object for conditions, labels, etc.
-	ctrl := p.app.GetK8sClient().Controller()
-	if node, err := ctrl.GetNode(ctx, nodeName); err == nil {
-		detailData.Node = node
-	}
+	if p.app != nil && p.app.GetK8sClient() != nil {
+		ctrl := p.app.GetK8sClient().Controller()
+		if node, err := ctrl.GetNode(ctx, nodeName); err == nil {
+			detailData.Node = node
+		}
 
-	// Fetch events for this node
-	if events, err := ctrl.GetEventsForNode(ctx, nodeName); err == nil {
-		detailData.Events = events
+		// Fetch events for this node
+		if events, err := ctrl.GetEventsForNode(ctx, nodeName); err == nil {
+			detailData.Events = events
+		}
 	}
 
 	return detailData
@@ -1121,14 +965,16 @@ func (p *MainPanel) buildPodDetailData(ctx context.Context, podKey string, podMo
 	}
 
 	// Fetch the full Pod object for detailed info
-	ctrl := p.app.GetK8sClient().Controller()
-	if pod, err := ctrl.GetPod(ctx, namespace, podName); err == nil {
-		detailData.Pod = pod
-	}
+	if p.app != nil && p.app.GetK8sClient() != nil {
+		ctrl := p.app.GetK8sClient().Controller()
+		if pod, err := ctrl.GetPod(ctx, namespace, podName); err == nil {
+			detailData.Pod = pod
+		}
 
-	// Fetch events for this pod
-	if events, err := ctrl.GetEventsForPod(ctx, namespace, podName); err == nil {
-		detailData.Events = events
+		// Fetch events for this pod
+		if events, err := ctrl.GetEventsForPod(ctx, namespace, podName); err == nil {
+			detailData.Events = events
+		}
 	}
 
 	// Fetch container metrics for the containers table

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -236,61 +237,108 @@ func (p *PromMetricsSource) calculateCPURate(metricName string, labelMatchers ma
 	return p.calculateCPURateWithFilter(metricName, labelMatchers, window, nil)
 }
 
-// calculateCPURateWithFilter calculates CPU rate with optional series filter function
-func (p *PromMetricsSource) calculateCPURateWithFilter(metricName string, labelMatchers map[string]string, window time.Duration, filterFn func(seriesKey string) bool) (float64, error) {
-	now := time.Now()
-	start := now.Add(-window)
+const extendedRateLookback = 3 * time.Minute
+const maxSeriesSampleAgeMs = int64(90 * 1000)
 
-	// Use QueryRangePerSeries to get samples grouped by series
-	// This prevents mixing samples from different containers
-	seriesSamples, err := p.store.QueryRangePerSeries(metricName, labelMatchers, start, now)
+// selectNodeCPUSeries returns a series filter for container_cpu_usage_seconds_total
+// at node scope (id="/"). If any series reports cpu="total" or omits the cpu
+// label, only those aggregate series are selected to prevent double-counting
+// with per-core cpu="0".. series. If only per-core series exist (e.g., cgroups
+// v1), all series are selected so their rates sum across cores.
+func selectNodeCPUSeries(seriesMap map[string][]*prom.MetricSample) func(string) bool {
+	hasAggregate := false
+	for seriesKey := range seriesMap {
+		cpuVal, hasCPU := seriesLabelValue(seriesKey, "cpu")
+		if !hasCPU || cpuVal == "total" {
+			hasAggregate = true
+			break
+		}
+	}
+	if !hasAggregate {
+		return nil
+	}
+	return func(seriesKey string) bool {
+		cpuVal, hasCPU := seriesLabelValue(seriesKey, "cpu")
+		return !hasCPU || cpuVal == "total"
+	}
+}
+
+// querySeriesForRate queries per-series samples over window and falls back to an
+// extended lookback for series that have fewer than 2 samples in window due to
+// dynamic cAdvisor housekeeping intervals exceeding window (up to 60s).
+func querySeriesForRate(store prom.MetricsStore, metricName string, labelMatchers map[string]string, window time.Duration, filterFn func(string) bool) (map[string][]*prom.MetricSample, error) {
+	now := time.Now()
+	seriesSamples, err := store.QueryRangePerSeries(metricName, labelMatchers, now.Add(-window), now)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
+	if window >= extendedRateLookback {
+		return seriesSamples, nil
+	}
+
+	needsExtended := len(seriesSamples) == 0
+	if !needsExtended {
+		for k, samples := range seriesSamples {
+			if filterFn != nil && !filterFn(k) {
+				continue
+			}
+			if len(samples) < 2 {
+				needsExtended = true
+				break
+			}
+		}
+	}
+	if !needsExtended {
+		return seriesSamples, nil
+	}
+
+	extSeries, extErr := store.QueryRangePerSeries(metricName, labelMatchers, now.Add(-extendedRateLookback), now)
+	if extErr != nil || len(extSeries) == 0 {
+		return seriesSamples, nil
+	}
+
+	cutoffMs := now.UnixMilli() - maxSeriesSampleAgeMs
+	if seriesSamples == nil {
+		seriesSamples = make(map[string][]*prom.MetricSample)
+	}
+	for k, ext := range extSeries {
+		if filterFn != nil && !filterFn(k) {
+			continue
+		}
+		if len(seriesSamples[k]) >= 2 {
+			continue
+		}
+		if len(ext) >= 2 && ext[len(ext)-1].Timestamp >= cutoffMs {
+			seriesSamples[k] = ext[len(ext)-2:]
+		}
+	}
+	return seriesSamples, nil
+}
+
+// sumSeriesRates calculates counter rate for each matching series and sums them.
+func sumSeriesRates(seriesSamples map[string][]*prom.MetricSample, filterFn func(string) bool) (float64, error) {
 	if len(seriesSamples) == 0 {
 		return 0, fmt.Errorf("no matching series found for rate calculation")
 	}
 
-	// Calculate rate for each series and sum them
 	var totalRate float64
 	validSeriesCount := 0
 
 	for seriesKey, samples := range seriesSamples {
-		// Apply filter if provided
 		if filterFn != nil && !filterFn(seriesKey) {
 			continue
 		}
-
 		if len(samples) < 2 {
-			// Skip series with insufficient samples
 			continue
 		}
 
-		// Calculate rate from first and last sample within this series
-		firstSample := samples[0]
-		lastSample := samples[len(samples)-1]
-
-		deltaValue := lastSample.Value - firstSample.Value
-		deltaTimeMs := lastSample.Timestamp - firstSample.Timestamp
-		deltaTimeSeconds := float64(deltaTimeMs) / 1000.0 // Convert milliseconds to seconds
-
+		deltaValue, deltaTimeSeconds := counterDelta(samples)
 		if deltaTimeSeconds <= 0 {
-			// Skip series with invalid time delta
 			continue
 		}
 
-		// Handle counter resets (value went down)
-		if deltaValue < 0 {
-			// Counter reset detected - use last value as the rate approximation
-			// This is a simplified approach; a more accurate method would detect
-			// the reset point and calculate rate from there
-			deltaValue = lastSample.Value
-		}
-
-		// Rate in CPU cores for this series
-		seriesRate := deltaValue / deltaTimeSeconds
-		totalRate += seriesRate
+		totalRate += deltaValue / deltaTimeSeconds
 		validSeriesCount++
 	}
 
@@ -299,6 +347,15 @@ func (p *PromMetricsSource) calculateCPURateWithFilter(metricName string, labelM
 	}
 
 	return totalRate, nil
+}
+
+// calculateCPURateWithFilter calculates CPU rate with optional series filter function
+func (p *PromMetricsSource) calculateCPURateWithFilter(metricName string, labelMatchers map[string]string, window time.Duration, filterFn func(seriesKey string) bool) (float64, error) {
+	seriesSamples, err := querySeriesForRate(p.store, metricName, labelMatchers, window, filterFn)
+	if err != nil {
+		return 0, err
+	}
+	return sumSeriesRates(seriesSamples, filterFn)
 }
 
 // seriesLabelValue extracts the exact value of labelName from a Prometheus series key
@@ -392,10 +449,7 @@ func isPSIWorkloadContainer(seriesKey string) bool {
 // 50%-stalled container and one idle container is not 25% stalled, it has a
 // 50%-stalled container. Use MAX, not SUM or MEAN.
 func (p *PromMetricsSource) calculatePSIMaxRate(metricName string, labelMatchers map[string]string, window time.Duration, filterFn func(seriesKey string) bool) (float64, error) {
-	now := time.Now()
-	start := now.Add(-window)
-
-	seriesSamples, err := p.store.QueryRangePerSeries(metricName, labelMatchers, start, now)
+	seriesSamples, err := querySeriesForRate(p.store, metricName, labelMatchers, window, filterFn)
 	if err != nil {
 		return 0, err
 	}
@@ -506,10 +560,12 @@ func (p *PromMetricsSource) GetNodeMetrics(ctx context.Context, nodeName string)
 	labelMatchers := map[string]string{"id": "/", "node": nodeName}
 
 	// Query CPU usage: container_cpu_usage_seconds_total (counter - needs rate calculation)
-	if cpuRate, err := p.calculateCPURate("container_cpu_usage_seconds_total", labelMatchers, 40*time.Second); err == nil {
-		// Convert CPU cores to millicores
-		// Use Ceil to avoid truncating sub-millicores to 0
-		nodeMetrics.CPUUsage = resource.NewMilliQuantity(int64(math.Ceil(cpuRate*1000)), resource.DecimalSI)
+	if cpuSeries, err := querySeriesForRate(p.store, "container_cpu_usage_seconds_total", labelMatchers, 40*time.Second, nil); err == nil {
+		if cpuRate, err := sumSeriesRates(cpuSeries, selectNodeCPUSeries(cpuSeries)); err == nil {
+			// Convert CPU cores to millicores
+			// Use Ceil to avoid truncating sub-millicores to 0
+			nodeMetrics.CPUUsage = resource.NewMilliQuantity(int64(math.Ceil(cpuRate*1000)), resource.DecimalSI)
+		}
 	}
 
 	// Query Memory usage: container_memory_working_set_bytes (gauge - use latest value)
@@ -768,7 +824,7 @@ func (p *PromMetricsSource) GetAllPodMetrics(ctx context.Context) ([]*metrics.Po
 	}
 
 	// 1. Single pass over CPU usage series
-	if cpuSeries, err := store.QueryRangePerSeries("container_cpu_usage_seconds_total", nil, rateStart, now); err == nil {
+	if cpuSeries, err := querySeriesForRate(store, "container_cpu_usage_seconds_total", nil, 40*time.Second, isWorkloadContainerCPUTotal); err == nil {
 		for seriesKey, samples := range cpuSeries {
 			ns, ok1 := seriesLabelValue(seriesKey, "namespace")
 			pod, ok2 := seriesLabelValue(seriesKey, "pod")
@@ -1156,6 +1212,138 @@ func (p *PromMetricsSource) setHealthyForTesting(healthy bool) {
 	}
 }
 
+type tsSample struct {
+	ts  int64
+	val float64
+}
+
+func seriesCounterMilliRates(samples []*prom.MetricSample) []tsSample {
+	if len(samples) < 2 {
+		return nil
+	}
+	pts := make([]tsSample, 0, len(samples)-1)
+	for i := 1; i < len(samples); i++ {
+		prev := samples[i-1]
+		curr := samples[i]
+		deltaTimeSeconds := float64(curr.Timestamp-prev.Timestamp) / 1000.0
+		if deltaTimeSeconds <= 0 {
+			continue
+		}
+		deltaValue := curr.Value - prev.Value
+		if deltaValue < 0 {
+			deltaValue = curr.Value
+		}
+		pts = append(pts, tsSample{
+			ts:  curr.Timestamp,
+			val: (deltaValue / deltaTimeSeconds) * 1000,
+		})
+	}
+	return pts
+}
+
+func seriesGaugePoints(samples []*prom.MetricSample) []tsSample {
+	if len(samples) == 0 {
+		return nil
+	}
+	pts := make([]tsSample, 0, len(samples))
+	for _, s := range samples {
+		pts = append(pts, tsSample{ts: s.Timestamp, val: s.Value})
+	}
+	return pts
+}
+
+// aggregateSeriesHistory combines per-series point slices chronologically.
+// For a single series it preserves timestamps directly; for multiple series
+// it sweeps sorted unique timestamps carrying forward each series' latest
+// sample within maxSeriesSampleAgeMs so staggered cAdvisor updates do not
+// produce transient dips.
+func aggregateSeriesHistory(perSeries [][]tsSample) []metrics.HistoryDataPoint {
+	if len(perSeries) == 0 {
+		return []metrics.HistoryDataPoint{}
+	}
+	if len(perSeries) == 1 {
+		out := make([]metrics.HistoryDataPoint, len(perSeries[0]))
+		for i, pt := range perSeries[0] {
+			out[i] = metrics.HistoryDataPoint{
+				Timestamp: time.UnixMilli(pt.ts),
+				Value:     pt.val,
+			}
+		}
+		return out
+	}
+
+	tsSet := make(map[int64]struct{})
+	for _, s := range perSeries {
+		for _, pt := range s {
+			tsSet[pt.ts] = struct{}{}
+		}
+	}
+	if len(tsSet) == 0 {
+		return []metrics.HistoryDataPoint{}
+	}
+
+	timestamps := make([]int64, 0, len(tsSet))
+	for ts := range tsSet {
+		timestamps = append(timestamps, ts)
+	}
+	sort.Slice(timestamps, func(i, j int) bool { return timestamps[i] < timestamps[j] })
+
+	cursors := make([]int, len(perSeries))
+	lastVal := make([]float64, len(perSeries))
+	lastTs := make([]int64, len(perSeries))
+	seen := make([]bool, len(perSeries))
+
+	out := make([]metrics.HistoryDataPoint, 0, len(timestamps))
+	for _, ts := range timestamps {
+		var sum float64
+		for i, s := range perSeries {
+			for cursors[i] < len(s) && s[cursors[i]].ts <= ts {
+				lastVal[i] = s[cursors[i]].val
+				lastTs[i] = s[cursors[i]].ts
+				seen[i] = true
+				cursors[i]++
+			}
+			if seen[i] && ts-lastTs[i] <= maxSeriesSampleAgeMs {
+				sum += lastVal[i]
+			}
+		}
+		out = append(out, metrics.HistoryDataPoint{
+			Timestamp: time.UnixMilli(ts),
+			Value:     sum,
+		})
+	}
+	return out
+}
+
+func finalizeHistory(resource metrics.ResourceType, points []metrics.HistoryDataPoint, maxPoints int) *metrics.ResourceHistory {
+	history := &metrics.ResourceHistory{
+		Resource:   resource,
+		DataPoints: points,
+		MinValue:   math.MaxFloat64,
+		MaxValue:   -math.MaxFloat64,
+	}
+
+	if maxPoints > 0 && len(history.DataPoints) > maxPoints {
+		history.DataPoints = downsampleDataPoints(history.DataPoints, maxPoints)
+	}
+
+	if len(history.DataPoints) == 0 {
+		history.MinValue = 0
+		history.MaxValue = 0
+		return history
+	}
+
+	for _, dp := range history.DataPoints {
+		if dp.Value < history.MinValue {
+			history.MinValue = dp.Value
+		}
+		if dp.Value > history.MaxValue {
+			history.MaxValue = dp.Value
+		}
+	}
+	return history
+}
+
 // GetNodeHistory retrieves historical data for a specific resource on a node.
 // For Prometheus, this queries the stored time series data.
 func (p *PromMetricsSource) GetNodeHistory(ctx context.Context, nodeName string, query metrics.HistoryQuery) (*metrics.ResourceHistory, error) {
@@ -1185,86 +1373,34 @@ func (p *PromMetricsSource) GetNodeHistory(ctx context.Context, nodeName string,
 	now := time.Now()
 	start := now.Add(-query.Duration)
 
-	samples, err := p.store.QueryRange(metricName, labelMatchers, start, now)
+	seriesSamples, err := p.store.QueryRangePerSeries(metricName, labelMatchers, start, now)
 	if err != nil {
 		return nil, err
 	}
 
-	history := &metrics.ResourceHistory{
-		Resource:   query.Resource,
-		DataPoints: make([]metrics.HistoryDataPoint, 0, len(samples)),
-		MinValue:   math.MaxFloat64,
-		MaxValue:   -math.MaxFloat64,
+	var cpuFilter func(string) bool
+	if query.Resource == metrics.ResourceCPU {
+		cpuFilter = selectNodeCPUSeries(seriesSamples)
 	}
 
-	// Convert samples to history data points
-	// For CPU counters, we need to calculate rates between consecutive points
-	if query.Resource == metrics.ResourceCPU && len(samples) >= 2 {
-		for i := 1; i < len(samples); i++ {
-			prev := samples[i-1]
-			curr := samples[i]
-
-			deltaValue := curr.Value - prev.Value
-			deltaTimeMs := curr.Timestamp - prev.Timestamp
-			deltaTimeSeconds := float64(deltaTimeMs) / 1000.0
-
-			if deltaTimeSeconds <= 0 {
+	perSeries := make([][]tsSample, 0, len(seriesSamples))
+	for seriesKey, samples := range seriesSamples {
+		if query.Resource == metrics.ResourceCPU {
+			if cpuFilter != nil && !cpuFilter(seriesKey) {
 				continue
 			}
-
-			// Handle counter reset
-			if deltaValue < 0 {
-				deltaValue = curr.Value
+			if pts := seriesCounterMilliRates(samples); len(pts) > 0 {
+				perSeries = append(perSeries, pts)
 			}
-
-			// Rate in millicores
-			rate := (deltaValue / deltaTimeSeconds) * 1000
-
-			dp := metrics.HistoryDataPoint{
-				Timestamp: time.UnixMilli(curr.Timestamp),
-				Value:     rate,
-			}
-
-			history.DataPoints = append(history.DataPoints, dp)
-
-			if rate < history.MinValue {
-				history.MinValue = rate
-			}
-			if rate > history.MaxValue {
-				history.MaxValue = rate
-			}
-		}
-	} else {
-		// For gauges (memory), use raw values
-		for _, sample := range samples {
-			dp := metrics.HistoryDataPoint{
-				Timestamp: time.UnixMilli(sample.Timestamp),
-				Value:     sample.Value,
-			}
-
-			history.DataPoints = append(history.DataPoints, dp)
-
-			if sample.Value < history.MinValue {
-				history.MinValue = sample.Value
-			}
-			if sample.Value > history.MaxValue {
-				history.MaxValue = sample.Value
+		} else {
+			if pts := seriesGaugePoints(samples); len(pts) > 0 {
+				perSeries = append(perSeries, pts)
 			}
 		}
 	}
 
-	// Apply MaxPoints limit if specified
-	if query.MaxPoints > 0 && len(history.DataPoints) > query.MaxPoints {
-		history.DataPoints = downsampleDataPoints(history.DataPoints, query.MaxPoints)
-	}
-
-	// Reset min/max if no data points
-	if len(history.DataPoints) == 0 {
-		history.MinValue = 0
-		history.MaxValue = 0
-	}
-
-	return history, nil
+	points := aggregateSeriesHistory(perSeries)
+	return finalizeHistory(query.Resource, points, query.MaxPoints), nil
 }
 
 // GetPodHistory retrieves historical data for a specific resource on a pod.
@@ -1305,17 +1441,6 @@ func (p *PromMetricsSource) GetPodHistory(ctx context.Context, namespace, podNam
 		return nil, err
 	}
 
-	history := &metrics.ResourceHistory{
-		Resource:   query.Resource,
-		DataPoints: make([]metrics.HistoryDataPoint, 0),
-		MinValue:   math.MaxFloat64,
-		MaxValue:   -math.MaxFloat64,
-	}
-
-	// For pods, we need to aggregate across containers at each timestamp
-	// Build a map of timestamp -> aggregated value
-	timestampValues := make(map[int64]float64)
-
 	// For memory, determine the right filter based on available data
 	// Some pods (static pods) only have aggregate metrics (container="")
 	memoryFilter := isWorkloadContainerMemory
@@ -1333,88 +1458,27 @@ func (p *PromMetricsSource) GetPodHistory(ctx context.Context, namespace, podNam
 		}
 	}
 
+	perSeries := make([][]tsSample, 0, len(seriesSamples))
 	for seriesKey, samples := range seriesSamples {
-		// Apply filter for CPU (only workload containers, cpu="total")
-		if query.Resource == metrics.ResourceCPU && !isWorkloadContainerCPUTotal(seriesKey) {
-			continue
-		}
-		// Apply filter for memory (using determined filter)
-		if query.Resource == metrics.ResourceMemory && !memoryFilter(seriesKey) {
-			continue
-		}
-
-		if query.Resource == metrics.ResourceCPU && len(samples) >= 2 {
-			// Calculate rates for CPU counter
-			for i := 1; i < len(samples); i++ {
-				prev := samples[i-1]
-				curr := samples[i]
-
-				deltaValue := curr.Value - prev.Value
-				deltaTimeMs := curr.Timestamp - prev.Timestamp
-				deltaTimeSeconds := float64(deltaTimeMs) / 1000.0
-
-				if deltaTimeSeconds <= 0 {
-					continue
-				}
-
-				if deltaValue < 0 {
-					deltaValue = curr.Value
-				}
-
-				rate := (deltaValue / deltaTimeSeconds) * 1000
-				timestampValues[curr.Timestamp] += rate
+		if query.Resource == metrics.ResourceCPU {
+			if !isWorkloadContainerCPUTotal(seriesKey) {
+				continue
+			}
+			if pts := seriesCounterMilliRates(samples); len(pts) > 0 {
+				perSeries = append(perSeries, pts)
 			}
 		} else {
-			// For memory gauges, sum across containers at each timestamp
-			for _, sample := range samples {
-				timestampValues[sample.Timestamp] += sample.Value
+			if !memoryFilter(seriesKey) {
+				continue
+			}
+			if pts := seriesGaugePoints(samples); len(pts) > 0 {
+				perSeries = append(perSeries, pts)
 			}
 		}
 	}
 
-	// Convert map to sorted slice
-	timestamps := make([]int64, 0, len(timestampValues))
-	for ts := range timestampValues {
-		timestamps = append(timestamps, ts)
-	}
-
-	// Sort timestamps
-	for i := 0; i < len(timestamps)-1; i++ {
-		for j := i + 1; j < len(timestamps); j++ {
-			if timestamps[i] > timestamps[j] {
-				timestamps[i], timestamps[j] = timestamps[j], timestamps[i]
-			}
-		}
-	}
-
-	for _, ts := range timestamps {
-		value := timestampValues[ts]
-		dp := metrics.HistoryDataPoint{
-			Timestamp: time.UnixMilli(ts),
-			Value:     value,
-		}
-		history.DataPoints = append(history.DataPoints, dp)
-
-		if value < history.MinValue {
-			history.MinValue = value
-		}
-		if value > history.MaxValue {
-			history.MaxValue = value
-		}
-	}
-
-	// Apply MaxPoints limit if specified
-	if query.MaxPoints > 0 && len(history.DataPoints) > query.MaxPoints {
-		history.DataPoints = downsampleDataPoints(history.DataPoints, query.MaxPoints)
-	}
-
-	// Reset min/max if no data points
-	if len(history.DataPoints) == 0 {
-		history.MinValue = 0
-		history.MaxValue = 0
-	}
-
-	return history, nil
+	points := aggregateSeriesHistory(perSeries)
+	return finalizeHistory(query.Resource, points, query.MaxPoints), nil
 }
 
 // SupportsHistory returns true since Prometheus has historical data

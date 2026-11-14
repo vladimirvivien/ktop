@@ -133,6 +133,19 @@ func (store *InMemoryStore) AddMetrics(metrics *ScrapedMetrics) error {
 
 			// Add new samples - ring buffer handles overflow automatically
 			ts.Samples.Range(func(_ int, sample MetricSample) bool {
+				if prev, ok := existingSeries.Samples.Last(); ok {
+					if sample.UpstreamTimestamp > 0 && sample.UpstreamTimestamp <= prev.UpstreamTimestamp {
+						// Unchanged cached sample from upstream housekeeping interval.
+						return true
+					}
+					if sample.UpstreamTimestamp > 0 && prev.UpstreamTimestamp > 0 {
+						// Re-anchor to previous stored sample using exact upstream elapsed delta
+						// so host/node clock shifts and scrape jitter do not distort rate denominators.
+						sample.Timestamp = prev.Timestamp + (sample.UpstreamTimestamp - prev.UpstreamTimestamp)
+					} else if sample.Timestamp < prev.Timestamp {
+						return true
+					}
+				}
 				// Track if we're overwriting (buffer was full)
 				wasFull := existingSeries.Samples.IsFull()
 				existingSeries.Samples.Add(sample)
@@ -264,8 +277,9 @@ func (store *InMemoryStore) QueryRange(metricName string, labelMatchers map[stri
 			if sample.Timestamp >= startMs && sample.Timestamp <= endMs {
 				// Create a copy to avoid mutations
 				sampleCopy := &MetricSample{
-					Timestamp: sample.Timestamp,
-					Value:     sample.Value,
+					Timestamp:         sample.Timestamp,
+					UpstreamTimestamp: sample.UpstreamTimestamp,
+					Value:             sample.Value,
 				}
 				allSamples = append(allSamples, sampleCopy)
 			}
@@ -307,8 +321,9 @@ func (store *InMemoryStore) QueryRangePerSeries(metricName string, labelMatchers
 		ts.Samples.Range(func(_ int, sample MetricSample) bool {
 			if sample.Timestamp >= startMs && sample.Timestamp <= endMs {
 				sampleCopy := &MetricSample{
-					Timestamp: sample.Timestamp,
-					Value:     sample.Value,
+					Timestamp:         sample.Timestamp,
+					UpstreamTimestamp: sample.UpstreamTimestamp,
+					Value:             sample.Value,
 				}
 				seriesSamples = append(seriesSamples, sampleCopy)
 			}

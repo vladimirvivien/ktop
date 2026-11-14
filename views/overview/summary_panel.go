@@ -162,8 +162,10 @@ func (p *clusterSummaryPanel) DrawBody(data any) {
 	case model.ClusterSummary:
 		var cpuRatio, memRatio ui.Ratio
 
-		// Check if usage metrics are actually available (non-zero)
-		hasUsageMetrics := summary.UsageNodeCpuTotal.MilliValue() > 0 || summary.UsageNodeMemTotal.MilliValue() > 0
+		// Evaluate CPU and Memory usage availability independently so available
+		// memory gauges do not force missing CPU rates to render as 0.0% used.
+		hasCPUUsage := summary.HasUsageCPU || (summary.UsageNodeCpuTotal != nil && summary.UsageNodeCpuTotal.MilliValue() > 0)
+		hasMemUsage := summary.HasUsageMem || (summary.UsageNodeMemTotal != nil && summary.UsageNodeMemTotal.MilliValue() > 0)
 
 		// Update prometheus mode on sparkline row
 		p.sparklineRow.SetPrometheusMode(p.prometheusMode)
@@ -249,28 +251,47 @@ func (p *clusterSummaryPanel) DrawBody(data any) {
 		var memValue, memTotal string
 		var cpuLabel, memLabel string
 
-		if !hasUsageMetrics {
-			// Fallback mode: show requested resources
-			cpuRatio = ui.GetRatio(float64(summary.RequestedPodCpuTotal.MilliValue()), float64(summary.AllocatableNodeCpuTotal.MilliValue()))
-			cpuValue = summary.RequestedPodCpuTotal.MilliValue()
+		if summary.AllocatableNodeCpuTotal != nil {
 			cpuTotal = summary.AllocatableNodeCpuTotal.MilliValue()
-			cpuLabel = "requested"
-
-			memRatio = ui.GetRatio(float64(summary.RequestedPodMemTotal.MilliValue()), float64(summary.AllocatableNodeMemTotal.MilliValue()))
-			memValue = ui.FormatMemory(summary.RequestedPodMemTotal)
-			memTotal = ui.FormatMemory(summary.AllocatableNodeMemTotal)
-			memLabel = "requested"
-		} else {
-			// Show actual usage
-			cpuRatio = ui.GetRatio(float64(summary.UsageNodeCpuTotal.MilliValue()), float64(summary.AllocatableNodeCpuTotal.MilliValue()))
-			cpuValue = summary.UsageNodeCpuTotal.MilliValue()
-			cpuTotal = summary.AllocatableNodeCpuTotal.MilliValue()
+		}
+		if hasCPUUsage {
+			if summary.UsageNodeCpuTotal != nil {
+				cpuValue = summary.UsageNodeCpuTotal.MilliValue()
+			}
 			cpuLabel = "used"
+		} else {
+			if summary.RequestedPodCpuTotal != nil {
+				cpuValue = summary.RequestedPodCpuTotal.MilliValue()
+			}
+			cpuLabel = "requested"
+		}
+		cpuRatio = ui.GetRatio(float64(cpuValue), float64(cpuTotal))
 
-			memRatio = ui.GetRatio(float64(summary.UsageNodeMemTotal.MilliValue()), float64(summary.AllocatableNodeMemTotal.MilliValue()))
+		memTotal = ui.FormatMemory(summary.AllocatableNodeMemTotal)
+		if hasMemUsage {
+			var memUsedMilli int64
+			if summary.UsageNodeMemTotal != nil {
+				memUsedMilli = summary.UsageNodeMemTotal.MilliValue()
+			}
+			var allocMemMilli int64
+			if summary.AllocatableNodeMemTotal != nil {
+				allocMemMilli = summary.AllocatableNodeMemTotal.MilliValue()
+			}
+			memRatio = ui.GetRatio(float64(memUsedMilli), float64(allocMemMilli))
 			memValue = ui.FormatMemory(summary.UsageNodeMemTotal)
-			memTotal = ui.FormatMemory(summary.AllocatableNodeMemTotal)
 			memLabel = "used"
+		} else {
+			var memReqMilli int64
+			if summary.RequestedPodMemTotal != nil {
+				memReqMilli = summary.RequestedPodMemTotal.MilliValue()
+			}
+			var allocMemMilli int64
+			if summary.AllocatableNodeMemTotal != nil {
+				allocMemMilli = summary.AllocatableNodeMemTotal.MilliValue()
+			}
+			memRatio = ui.GetRatio(float64(memReqMilli), float64(allocMemMilli))
+			memValue = ui.FormatMemory(summary.RequestedPodMemTotal)
+			memLabel = "requested"
 		}
 
 		// Build sparkline titles

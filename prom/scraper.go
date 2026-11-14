@@ -406,13 +406,23 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 		}, err
 	}
 
-	// Convert to our internal format, filtering to only allowed metrics
+	// Convert to our internal format, filtering to only allowed metrics.
+	// Anchor upstream sample timestamps into local host clock space using the
+	// freshest allowed sample timestamp in this payload so clock skew between
+	// the node and ktop host does not skew range queries.
+	scrapeTimestamp := time.Now().UnixMilli()
+	maxUpstreamTs := maxAllowedUpstreamTimestamp(families)
+	var clockOffsetMs int64
+	if maxUpstreamTs > 0 {
+		clockOffsetMs = scrapeTimestamp - maxUpstreamTs
+	}
+
 	metricFamilies := make(map[string]*MetricFamily)
 	for name, family := range families {
 		if !DefaultMetricAllowlist[name] {
 			continue
 		}
-		metricFamily := ks.convertMetricFamily(name, family)
+		metricFamily := ks.convertMetricFamilyWithTimestamp(name, family, scrapeTimestamp, clockOffsetMs)
 		metricFamilies[name] = metricFamily
 	}
 
@@ -431,8 +441,31 @@ func (ks *KubernetesScraper) parseMetricsBody(body []byte) (map[string]*dto.Metr
 	return parser.TextToMetricFamilies(bytes.NewReader(body))
 }
 
-// convertMetricFamily converts Prometheus DTO to our internal format
+// maxAllowedUpstreamTimestamp returns the maximum explicit sample timestamp
+// across allowed metric families, or 0 if no samples carry upstream timestamps.
+func maxAllowedUpstreamTimestamp(families map[string]*dto.MetricFamily) int64 {
+	var maxTs int64
+	for name, family := range families {
+		if !DefaultMetricAllowlist[name] || family == nil {
+			continue
+		}
+		for _, m := range family.Metric {
+			if ts := m.GetTimestampMs(); ts > maxTs {
+				maxTs = ts
+			}
+		}
+	}
+	return maxTs
+}
+
+// convertMetricFamily converts Prometheus DTO to our internal format.
 func (ks *KubernetesScraper) convertMetricFamily(name string, family *dto.MetricFamily) *MetricFamily {
+	return ks.convertMetricFamilyWithTimestamp(name, family, time.Now().UnixMilli(), 0)
+}
+
+// convertMetricFamilyWithTimestamp converts Prometheus DTO to our internal format,
+// preserving upstream metric timestamps anchored by clockOffsetMs when present.
+func (ks *KubernetesScraper) convertMetricFamilyWithTimestamp(name string, family *dto.MetricFamily, scrapeTimestamp, clockOffsetMs int64) *MetricFamily {
 	metricFamily := &MetricFamily{
 		Name:        name,
 		Type:        family.GetType(),
@@ -440,8 +473,6 @@ func (ks *KubernetesScraper) convertMetricFamily(name string, family *dto.Metric
 		LastUpdated: time.Now(),
 		TimeSeries:  make([]*TimeSeries, 0),
 	}
-
-	timestamp := time.Now().UnixMilli()
 
 	for _, metric := range family.Metric {
 		// Build labels
@@ -480,11 +511,18 @@ func (ks *KubernetesScraper) convertMetricFamily(name string, family *dto.Metric
 			}
 		}
 
+		sampleTimestamp := scrapeTimestamp
+		upstreamTimestamp := metric.GetTimestampMs()
+		if upstreamTimestamp > 0 {
+			sampleTimestamp = upstreamTimestamp + clockOffsetMs
+		}
+
 		// Create time series with ring buffer
 		samples := NewRingBuffer[MetricSample](1) // Initial capacity of 1
 		samples.Add(MetricSample{
-			Timestamp: timestamp,
-			Value:     value,
+			Timestamp:         sampleTimestamp,
+			UpstreamTimestamp: upstreamTimestamp,
+			Value:             value,
 		})
 		timeSeries := &TimeSeries{
 			Labels:  lbls,

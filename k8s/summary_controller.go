@@ -92,9 +92,11 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 		nodeMetricsByNode[node.Name] = nodeMetrics
 		if nodeMetrics.MemoryUsage != nil {
 			summary.UsageNodeMemTotal.Add(*nodeMetrics.MemoryUsage)
+			summary.HasUsageMem = true
 		}
 		if nodeMetrics.CPUUsage != nil {
 			summary.UsageNodeCpuTotal.Add(*nodeMetrics.CPUUsage)
+			summary.HasUsageCPU = true
 		}
 	}
 

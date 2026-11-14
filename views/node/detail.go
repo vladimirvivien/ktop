@@ -424,11 +424,16 @@ func (p *DetailPanel) drawSparklines() {
 		memRatio = float64(node.RequestedPodMemQty.Value()) / float64(node.AllocatableMemQty.Value())
 	}
 
-	// Build titles with metrics values
-	// Label is "used" for prometheus/metrics-server (actual usage), "requests" for none mode
-	metricsLabel := "used"
-	if !prometheusMode && p.data.MetricsSourceType != metrics.SourceTypeMetricsServer {
-		metricsLabel = "requests"
+	// Label each resource "used" only when an active metrics source supplied
+	// actual usage; otherwise label request fallback honestly as "requests".
+	hasMetricsSource := prometheusMode || p.data.MetricsSourceType == metrics.SourceTypeMetricsServer
+	cpuMetricsLabel := "requests"
+	if hasMetricsSource && node.UsageCpuQty != nil {
+		cpuMetricsLabel = "used"
+	}
+	memMetricsLabel := "requests"
+	if hasMetricsSource && node.UsageMemQty != nil {
+		memMetricsLabel = "used"
 	}
 
 	cpuPercent := cpuRatio * 100
@@ -465,8 +470,8 @@ func (p *DetailPanel) drawSparklines() {
 		memColorOpen = "[" + memPercentColor + "]"
 		pctClose = "[-]"
 	}
-	cpuTitle := fmt.Sprintf(" CPU %s/%s (%s%.1f%% %s%s) %s ", cpuUsed, cpuTotal, cpuColorOpen, cpuPercent, metricsLabel, pctClose, cpuTrend)
-	memTitle := fmt.Sprintf(" MEM %s/%s (%s%.1f%% %s%s) %s ", memUsed, memTotal, memColorOpen, memPercent, metricsLabel, pctClose, memTrend)
+	cpuTitle := fmt.Sprintf(" CPU %s/%s (%s%.1f%% %s%s) %s ", cpuUsed, cpuTotal, cpuColorOpen, cpuPercent, cpuMetricsLabel, pctClose, cpuTrend)
+	memTitle := fmt.Sprintf(" MEM %s/%s (%s%.1f%% %s%s) %s ", memUsed, memTotal, memColorOpen, memPercent, memMetricsLabel, pctClose, memTrend)
 
 	// Update sparkline row with new values and titles
 	p.sparklineRow.UpdateCPU(cpuRatio, cpuTitle)

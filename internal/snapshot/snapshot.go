@@ -57,6 +57,8 @@ type SummaryData struct {
 	RequestedMemoryBytes    int64     `json:"requested_memory_bytes"`
 	UsageCPUMillis          int64     `json:"usage_cpu_millis"`
 	UsageMemoryBytes        int64     `json:"usage_memory_bytes"`
+	HasUsageCPU             bool      `json:"has_usage_cpu,omitempty"`
+	HasUsageMemory          bool      `json:"has_usage_memory,omitempty"`
 	ContainerCount          int       `json:"container_count"`
 	ContainerRestarts       int       `json:"container_restarts"`
 	FailedPods              int       `json:"failed_pods"`
@@ -113,6 +115,8 @@ type NodeData struct {
 	AllocatableStorageBytes int64    `json:"allocatable_storage_bytes"`
 	UsageCPUMillis          int64    `json:"usage_cpu_millis"`
 	UsageMemoryBytes        int64    `json:"usage_memory_bytes"`
+	HasUsageCPU             bool     `json:"has_usage_cpu,omitempty"`
+	HasUsageMemory          bool     `json:"has_usage_memory,omitempty"`
 	PSI                     PSIData  `json:"psi"`
 	PSIKernelSupported      bool     `json:"psi_kernel_supported"`
 }

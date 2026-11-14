@@ -31,6 +31,8 @@ type ClusterSummary struct {
 	RequestedPodMemTotal    *resource.Quantity
 	UsageNodeCpuTotal       *resource.Quantity
 	UsageNodeMemTotal       *resource.Quantity
+	HasUsageCPU             bool
+	HasUsageMem             bool
 	PVCount                 int
 	PVsTotal                *resource.Quantity
 	PVCCount                int

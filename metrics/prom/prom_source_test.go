@@ -3,9 +3,13 @@ package prom
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
+	dto "github.com/prometheus/client_model/go"
+	"github.com/prometheus/prometheus/model/labels"
+	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/prom"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -966,5 +970,219 @@ func TestCFSThrottling_GetPodMetricsAndAllPodMetrics(t *testing.T) {
 	}
 	if len(all) != 1 || all[0].CPUThrottledPct != 25.0 {
 		t.Errorf("GetAllPodMetrics = %+v, want single pod with CPUThrottledPct=25.0", all)
+	}
+}
+
+func makePromSeries(lbls labels.Labels, samples ...prom.MetricSample) *prom.TimeSeries {
+	rb := prom.NewRingBuffer[prom.MetricSample](100)
+	for _, s := range samples {
+		rb.Add(s)
+	}
+	return &prom.TimeSeries{Labels: lbls, Samples: rb}
+}
+
+func TestPromSource_NodeCPU_Deduplicates60sHousekeepingAndFiltersTotal(t *testing.T) {
+	store := prom.NewInMemoryStore(prom.DefaultScrapeConfig())
+	now := time.Now()
+
+	// Root cgroup id="/" with cpu="total" + per-core cpu="0".."3".
+	// Simulate 60s cAdvisor housekeeping scraped every 5s:
+	// -155s (100.0), -95s (115.0), -35s (130.0) -> true rate = 0.25 cores = 250m.
+	// Per-core series also advance at 60s; selecting cpu="total" must avoid 2x double-counting
+	// and cached 5s repeats must neither drop to 0m nor spike 12x.
+	addSample := func(cpuLabel string, hostOffset time.Duration, upstreamMs int64, val float64) {
+		sm := &prom.ScrapedMetrics{
+			Component: prom.ComponentCAdvisor,
+			Families: map[string]*prom.MetricFamily{
+				"container_cpu_usage_seconds_total": {
+					Name: "container_cpu_usage_seconds_total",
+					Type: dto.MetricType_COUNTER,
+					TimeSeries: []*prom.TimeSeries{
+						makePromSeries(
+							labels.Labels{
+								{Name: "__name__", Value: "container_cpu_usage_seconds_total"},
+								{Name: "cpu", Value: cpuLabel},
+								{Name: "id", Value: "/"},
+								{Name: "node", Value: "worker-1"},
+							},
+							prom.MetricSample{
+								Timestamp:         now.Add(hostOffset).UnixMilli(),
+								UpstreamTimestamp: upstreamMs,
+								Value:             val,
+							},
+						),
+					},
+				},
+			},
+		}
+		if err := store.AddMetrics(sm); err != nil {
+			t.Fatalf("AddMetrics failed: %v", err)
+		}
+	}
+
+	const baseUpstream = int64(1700000000000)
+	// First housekeeping epoch at -155s
+	addSample("total", -155*time.Second, baseUpstream, 100.0)
+	addSample("0", -155*time.Second, baseUpstream, 50.0)
+	addSample("1", -155*time.Second, baseUpstream, 50.0)
+
+	// Intermediate 5s scrapes repeating cached upstream values
+	for step := 5; step < 60; step += 5 {
+		addSample("total", time.Duration(-155+step)*time.Second, baseUpstream, 100.0)
+	}
+
+	// Second housekeeping epoch at -95s (+15 CPU seconds over 60s = 250m)
+	addSample("total", -95*time.Second, baseUpstream+60000, 115.0)
+	addSample("0", -95*time.Second, baseUpstream+60000, 57.5)
+	addSample("1", -95*time.Second, baseUpstream+60000, 57.5)
+
+	// Repeat cached values up to -35s
+	for step := 5; step < 60; step += 5 {
+		addSample("total", time.Duration(-95+step)*time.Second, baseUpstream+60000, 115.0)
+	}
+
+	// Third housekeeping epoch at -35s (+15 CPU seconds over 60s = 250m)
+	addSample("total", -35*time.Second, baseUpstream+120000, 130.0)
+	addSample("0", -35*time.Second, baseUpstream+120000, 65.0)
+	addSample("1", -35*time.Second, baseUpstream+120000, 65.0)
+
+	// Tail 5s scrapes until now still cached at baseUpstream+120000
+	for step := 5; step <= 35; step += 5 {
+		addSample("total", time.Duration(-35+step)*time.Second, baseUpstream+120000, 130.0)
+	}
+
+	src, err := NewPromMetricsSource(&rest.Config{}, DefaultPromConfig())
+	if err != nil {
+		t.Fatalf("NewPromMetricsSource: %v", err)
+	}
+	src.store = store
+	src.setHealthyForTesting(true)
+
+	nm, err := src.GetNodeMetrics(context.Background(), "worker-1")
+	if err != nil {
+		t.Fatalf("GetNodeMetrics failed: %v", err)
+	}
+	if nm.CPUUsage == nil {
+		t.Fatalf("expected non-nil CPUUsage despite 60s housekeeping exceeding 40s window")
+	}
+	if nm.CPUUsage.MilliValue() != 250 {
+		t.Errorf("GetNodeMetrics CPUUsage = %dm, want 250m (no 0m dropout, no 12x spike, no 2x double-count)", nm.CPUUsage.MilliValue())
+	}
+
+	hist, err := src.GetNodeHistory(context.Background(), "worker-1", metrics.HistoryQuery{
+		Resource:  metrics.ResourceCPU,
+		Duration:  5 * time.Minute,
+		MaxPoints: 15,
+	})
+	if err != nil {
+		t.Fatalf("GetNodeHistory failed: %v", err)
+	}
+	if len(hist.DataPoints) != 2 {
+		t.Fatalf("expected 2 clean rate points in history, got %d (%+v)", len(hist.DataPoints), hist.DataPoints)
+	}
+	for i, dp := range hist.DataPoints {
+		if math.Abs(dp.Value-250.0) > 0.1 {
+			t.Errorf("history point %d = %.2fm, want 250.0m", i, dp.Value)
+		}
+	}
+}
+
+func TestPromSource_NodeCPU_SingleSampleHistoryAndPerCoreFallback(t *testing.T) {
+	store := prom.NewInMemoryStore(prom.DefaultScrapeConfig())
+	now := time.Now()
+
+	// Single-sample node CPU must not leak raw cumulative seconds into history.
+	smSingle := &prom.ScrapedMetrics{
+		Component: prom.ComponentCAdvisor,
+		Families: map[string]*prom.MetricFamily{
+			"container_cpu_usage_seconds_total": {
+				Name: "container_cpu_usage_seconds_total",
+				Type: dto.MetricType_COUNTER,
+				TimeSeries: []*prom.TimeSeries{
+					makePromSeries(
+						labels.Labels{
+							{Name: "__name__", Value: "container_cpu_usage_seconds_total"},
+							{Name: "cpu", Value: "total"},
+							{Name: "id", Value: "/"},
+							{Name: "node", Value: "single-sample-node"},
+						},
+						prom.MetricSample{Timestamp: now.Add(-5 * time.Second).UnixMilli(), Value: 98765.0},
+					),
+				},
+			},
+		},
+	}
+	if err := store.AddMetrics(smSingle); err != nil {
+		t.Fatalf("AddMetrics failed: %v", err)
+	}
+
+	src, _ := NewPromMetricsSource(&rest.Config{}, DefaultPromConfig())
+	src.store = store
+	src.setHealthyForTesting(true)
+
+	histSingle, err := src.GetNodeHistory(context.Background(), "single-sample-node", metrics.HistoryQuery{
+		Resource: metrics.ResourceCPU,
+		Duration: 5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("GetNodeHistory failed: %v", err)
+	}
+	if len(histSingle.DataPoints) != 0 {
+		t.Errorf("expected 0 CPU history points for single sample, got %+v", histSingle.DataPoints)
+	}
+
+	// cgroups v1 node exposing only per-CPU series (cpu00, cpu01) without cpu="total":
+	// rates must sum across cores (100m + 150m = 250m).
+	for _, core := range []struct {
+		lbl      string
+		v0, v1   float64
+		nodeName string
+	}{
+		{"cpu00", 10.0, 14.0, "cgroupsv1-node"}, // 4s / 40s = 100m
+		{"cpu01", 20.0, 26.0, "cgroupsv1-node"}, // 6s / 40s = 150m
+	} {
+		sm := &prom.ScrapedMetrics{
+			Component: prom.ComponentCAdvisor,
+			Families: map[string]*prom.MetricFamily{
+				"container_cpu_usage_seconds_total": {
+					Name: "container_cpu_usage_seconds_total",
+					Type: dto.MetricType_COUNTER,
+					TimeSeries: []*prom.TimeSeries{
+						makePromSeries(
+							labels.Labels{
+								{Name: "__name__", Value: "container_cpu_usage_seconds_total"},
+								{Name: "cpu", Value: core.lbl},
+								{Name: "id", Value: "/"},
+								{Name: "node", Value: core.nodeName},
+							},
+							prom.MetricSample{Timestamp: now.Add(-40 * time.Second).UnixMilli(), UpstreamTimestamp: 1000, Value: core.v0},
+							prom.MetricSample{Timestamp: now.UnixMilli(), UpstreamTimestamp: 41000, Value: core.v1},
+						),
+					},
+				},
+			},
+		}
+		if err := store.AddMetrics(sm); err != nil {
+			t.Fatalf("AddMetrics failed: %v", err)
+		}
+	}
+
+	nmV1, err := src.GetNodeMetrics(context.Background(), "cgroupsv1-node")
+	if err != nil {
+		t.Fatalf("GetNodeMetrics cgroupsv1 failed: %v", err)
+	}
+	if nmV1.CPUUsage == nil || nmV1.CPUUsage.MilliValue() != 250 {
+		t.Errorf("cgroupsv1 GetNodeMetrics CPUUsage = %v, want 250m", nmV1.CPUUsage)
+	}
+
+	histV1, err := src.GetNodeHistory(context.Background(), "cgroupsv1-node", metrics.HistoryQuery{
+		Resource: metrics.ResourceCPU,
+		Duration: 5 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("GetNodeHistory cgroupsv1 failed: %v", err)
+	}
+	if len(histV1.DataPoints) != 1 || math.Abs(histV1.DataPoints[0].Value-250.0) > 0.1 {
+		t.Errorf("cgroupsv1 GetNodeHistory DataPoints = %+v, want [250.0m]", histV1.DataPoints)
 	}
 }

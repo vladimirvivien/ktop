@@ -291,12 +291,6 @@ func (p *nodePanel) DrawBody(data any) {
 	sortCol, sortAsc := p.GetSortParams()
 	model.SortNodeModelsBy(nodes, sortCol, sortAsc)
 
-	// Check if usage metrics are available by looking at the actual data in the models
-	// Don't rely on AssertMetricsAvailable() as it's cached and unreliable
-	metricsDisabled := true
-	if len(nodes) > 0 && nodes[0].UsageMemQty != nil && nodes[0].UsageMemQty.Value() > 0 {
-		metricsDisabled = false
-	}
 	var cpuRatio, memRatio ui.Ratio
 	var cpuGraph, memGraph string
 	var cpuMetrics, memMetrics string
@@ -529,36 +523,28 @@ func (p *nodePanel) DrawBody(data any) {
 				// Get or create stateful sparkline for this node
 				cpuSparkline := p.getSparkline(p.cpuSparklines, node.Name, graphWidth, colorKeys)
 
-				// Calculate CPU metrics
-				if metricsDisabled || node.UsageCpuQty == nil {
-					cpuRatio = ui.GetRatio(float64(node.RequestedPodCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
-					cpuPercentage := float64(cpuRatio) * 100
-					cpuPctTag := ""
-					if !mono {
-						cpuPctTag = "[" + ui.GetResourcePercentageColor(cpuPercentage) + "]"
-					}
-					cpuSparkline.Push(float64(cpuRatio))
-					cpuGraph = cpuSparkline.RenderText()
-					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
-					cpuMetrics = fmt.Sprintf(
-						"%s[%s%s] %5dm %s%5.1f%%%s %s",
-						valTag, cpuGraph, valTag, node.RequestedPodCpuQty.MilliValue(), cpuPctTag, cpuPercentage, valTag, cpuTrend,
-					)
-				} else {
-					cpuRatio = ui.GetRatio(float64(node.UsageCpuQty.MilliValue()), float64(node.AllocatableCpuQty.MilliValue()))
-					cpuPercentage := float64(cpuRatio) * 100
-					cpuPctTag := ""
-					if !mono {
-						cpuPctTag = "[" + ui.GetResourcePercentageColor(cpuPercentage) + "]"
-					}
-					cpuSparkline.Push(float64(cpuRatio))
-					cpuGraph = cpuSparkline.RenderText()
-					cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
-					cpuMetrics = fmt.Sprintf(
-						"%s[%s%s] %5dm %s%5.1f%%%s %s",
-						valTag, cpuGraph, valTag, node.UsageCpuQty.MilliValue(), cpuPctTag, cpuPercentage, valTag, cpuTrend,
-					)
+				var cpuVal, allocCPU int64
+				if node.UsageCpuQty != nil {
+					cpuVal = node.UsageCpuQty.MilliValue()
+				} else if node.RequestedPodCpuQty != nil {
+					cpuVal = node.RequestedPodCpuQty.MilliValue()
 				}
+				if node.AllocatableCpuQty != nil {
+					allocCPU = node.AllocatableCpuQty.MilliValue()
+				}
+				cpuRatio = ui.GetRatio(float64(cpuVal), float64(allocCPU))
+				cpuPercentage := float64(cpuRatio) * 100
+				cpuPctTag := ""
+				if !mono {
+					cpuPctTag = "[" + ui.GetResourcePercentageColor(cpuPercentage) + "]"
+				}
+				cpuSparkline.Push(float64(cpuRatio))
+				cpuGraph = cpuSparkline.RenderText()
+				cpuTrend := cpuSparkline.TrendIndicator(cpuPercentage)
+				cpuMetrics = fmt.Sprintf(
+					"%s[%s%s] %5dm %s%5.1f%%%s %s",
+					valTag, cpuGraph, valTag, cpuVal, cpuPctTag, cpuPercentage, valTag, cpuTrend,
+				)
 
 				p.list.SetCell(
 					rowIdx, colIdx,
@@ -574,36 +560,30 @@ func (p *nodePanel) DrawBody(data any) {
 				// Get or create stateful sparkline for this node's memory
 				memSparkline := p.getSparkline(p.memSparklines, node.Name, graphWidth, colorKeys)
 
-				// Calculate memory metrics
-				if metricsDisabled || node.UsageMemQty == nil {
-					memRatio = ui.GetRatio(float64(node.RequestedPodMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
-					memPercentage := float64(memRatio) * 100
-					memPctTag := ""
-					if !mono {
-						memPctTag = "[" + ui.GetResourcePercentageColor(memPercentage) + "]"
-					}
-					memSparkline.Push(float64(memRatio))
-					memGraph = memSparkline.RenderText()
-					memTrend := memSparkline.TrendIndicator(memPercentage)
-					memMetrics = fmt.Sprintf(
-						"%s[%s%s] %s %s%5.1f%%%s %s",
-						valTag, memGraph, valTag, ui.FormatMemory(node.RequestedPodMemQty), memPctTag, memPercentage, valTag, memTrend,
-					)
-				} else {
-					memRatio = ui.GetRatio(float64(node.UsageMemQty.MilliValue()), float64(node.AllocatableMemQty.MilliValue()))
-					memPercentage := float64(memRatio) * 100
-					memPctTag := ""
-					if !mono {
-						memPctTag = "[" + ui.GetResourcePercentageColor(memPercentage) + "]"
-					}
-					memSparkline.Push(float64(memRatio))
-					memGraph = memSparkline.RenderText()
-					memTrend := memSparkline.TrendIndicator(memPercentage)
-					memMetrics = fmt.Sprintf(
-						"%s[%s%s] %s %s%5.1f%%%s %s",
-						valTag, memGraph, valTag, ui.FormatMemory(node.UsageMemQty), memPctTag, memPercentage, valTag, memTrend,
-					)
+				memQty := node.UsageMemQty
+				if memQty == nil {
+					memQty = node.RequestedPodMemQty
 				}
+				var memVal, allocMem int64
+				if memQty != nil {
+					memVal = memQty.MilliValue()
+				}
+				if node.AllocatableMemQty != nil {
+					allocMem = node.AllocatableMemQty.MilliValue()
+				}
+				memRatio = ui.GetRatio(float64(memVal), float64(allocMem))
+				memPercentage := float64(memRatio) * 100
+				memPctTag := ""
+				if !mono {
+					memPctTag = "[" + ui.GetResourcePercentageColor(memPercentage) + "]"
+				}
+				memSparkline.Push(float64(memRatio))
+				memGraph = memSparkline.RenderText()
+				memTrend := memSparkline.TrendIndicator(memPercentage)
+				memMetrics = fmt.Sprintf(
+					"%s[%s%s] %s %s%5.1f%%%s %s",
+					valTag, memGraph, valTag, ui.FormatMemory(memQty), memPctTag, memPercentage, valTag, memTrend,
+				)
 
 				p.list.SetCell(
 					rowIdx, colIdx,

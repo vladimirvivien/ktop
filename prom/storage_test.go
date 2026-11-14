@@ -502,3 +502,76 @@ func createTestCAdvisorMetrics() *ScrapedMetrics {
 		ScrapeDuration: 75 * time.Millisecond,
 	}
 }
+
+func TestAddMetrics_DeduplicatesAndReanchorsUpstreamTimestamps(t *testing.T) {
+	store := NewInMemoryStore(DefaultScrapeConfig())
+	now := time.Now()
+	t0 := now.Add(-60 * time.Second).UnixMilli()
+	lbls := labels.Labels{
+		{Name: "__name__", Value: "container_cpu_usage_seconds_total"},
+		{Name: "cpu", Value: "total"},
+		{Name: "id", Value: "/"},
+		{Name: "node", Value: "n1"},
+	}
+
+	ingest := func(ts, upstreamTs int64, val float64) {
+		sm := &ScrapedMetrics{
+			Component: ComponentCAdvisor,
+			Families: map[string]*MetricFamily{
+				"container_cpu_usage_seconds_total": {
+					Name: "container_cpu_usage_seconds_total",
+					Type: dto.MetricType_COUNTER,
+					TimeSeries: []*TimeSeries{
+						createTestTimeSeries(lbls, MetricSample{
+							Timestamp:         ts,
+							UpstreamTimestamp: upstreamTs,
+							Value:             val,
+						}),
+					},
+				},
+			},
+		}
+		if err := store.AddMetrics(sm); err != nil {
+			t.Fatalf("AddMetrics failed: %v", err)
+		}
+	}
+
+	// First scrape anchors at t0.
+	ingest(t0, 1000000, 100.0)
+	// Repeated 5s scrapes carrying the same cached cAdvisor upstream timestamp are skipped.
+	ingest(t0+5000, 1000000, 100.0)
+	ingest(t0+10000, 1000000, 100.0)
+	ingest(t0+35000, 1000000, 100.0)
+
+	got, err := store.QueryRangePerSeries("container_cpu_usage_seconds_total", map[string]string{"id": "/", "node": "n1"}, now.Add(-2*time.Minute), now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("QueryRangePerSeries failed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 series, got %d", len(got))
+	}
+	var samples []*MetricSample
+	for _, s := range got {
+		samples = s
+	}
+	if len(samples) != 1 {
+		t.Fatalf("expected duplicate cached samples to be deduplicated to 1 sample, got %d", len(samples))
+	}
+
+	// Next update 60s later on upstream clock even if host scrape timestamp drifted slightly (+61500ms).
+	ingest(t0+61500, 1060000, 118.0)
+
+	got, err = store.QueryRangePerSeries("container_cpu_usage_seconds_total", map[string]string{"id": "/", "node": "n1"}, now.Add(-2*time.Minute), now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("QueryRangePerSeries failed: %v", err)
+	}
+	for _, s := range got {
+		samples = s
+	}
+	if len(samples) != 2 {
+		t.Fatalf("expected 2 distinct samples after upstream advance, got %d", len(samples))
+	}
+	if delta := samples[1].Timestamp - samples[0].Timestamp; delta != 60000 {
+		t.Errorf("expected re-anchored delta 60000ms matching upstream elapsed time, got %dms", delta)
+	}
+}
