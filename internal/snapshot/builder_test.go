@@ -17,9 +17,11 @@ func TestSnapshotBuilder_BuildAndRoundTrip(t *testing.T) {
 			Ready:   true,
 		},
 		Summary: model.ClusterSummary{
-			HealthScore:       95,
+			HealthScore:       80,
 			NodesReady:        1,
 			NodesCount:        1,
+			OOMKillCount:      2,
+			CrashLoopPods:     1,
 			MetricsSourceType: "prometheus",
 			PSIBeta:           true,
 		},
@@ -85,7 +87,7 @@ func TestSnapshotBuilder_BuildAndRoundTrip(t *testing.T) {
 		t.Errorf("ToPodModel round-trip mismatch: %+v", pm)
 	}
 	sm := snap.Summary.ToClusterSummary(snap.Cluster)
-	if sm.HealthScore != 95 || !sm.PSIBeta {
+	if sm.HealthScore != 80 || !sm.PSIBeta || sm.OOMKillCount != 2 || sm.CrashLoopPods != 1 {
 		t.Errorf("ToClusterSummary round-trip mismatch: %+v", sm)
 	}
 }

@@ -68,6 +68,7 @@ type ClusterSummary struct {
 	FailedPods          int     // Pods in Failed state
 	EvictedPods         int     // Pods that were evicted
 	OOMKillCount        int     // OOM kills
+	CrashLoopPods       int     // Pods with containers in CrashLoopBackOff
 	NodePressureCount   int     // Nodes with memory/disk/PID pressure
 	CPUThrottledPercent float64 // Avg CPU throttling across containers
 
@@ -89,8 +90,8 @@ type ClusterSummary struct {
 }
 
 // CalculateHealthScore computes a composite 0-100 cluster health score from
-// node readiness, pod failures/OOMs, PSI saturation, node pressure, and metrics
-// availability.
+// node readiness, pod failures/OOMs/CrashLoopBackOffs, PSI saturation, node
+// pressure, and metrics availability.
 func CalculateHealthScore(summary ClusterSummary, hasMetrics bool) int {
 	score := 100
 
@@ -99,7 +100,7 @@ func CalculateHealthScore(summary ClusterSummary, hasMetrics bool) int {
 		score -= unready * 30
 	}
 
-	if summary.FailedPods > 0 || summary.OOMKillCount > 0 {
+	if summary.FailedPods > 0 || summary.OOMKillCount > 0 || summary.CrashLoopPods > 0 {
 		score -= 15
 	}
 

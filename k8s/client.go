@@ -121,6 +121,19 @@ func New(flags *genericclioptions.ConfigFlags) (*Client, error) {
 	return client, nil
 }
 
+// NewWithClient constructs a Client backed by the provided kubernetes.Interface,
+// intended for unit tests that supply a fake or mock clientset.
+func NewWithClient(kubeClient kubernetes.Interface, namespace, clusterContext string, serverVersion *version.Info) *Client {
+	client := &Client{
+		clusterVersion: serverVersion,
+		namespace:      namespace,
+		clusterContext: clusterContext,
+		kubeClient:     kubeClient,
+	}
+	client.controller = newController(client)
+	return client
+}
+
 func (k8s *Client) Namespace() string {
 	return k8s.namespace
 }
@@ -146,6 +159,9 @@ func (k8s *Client) Username() string {
 }
 
 func (k8s *Client) GetServerVersion() string {
+	if k8s.clusterVersion == nil {
+		return ""
+	}
 	return k8s.clusterVersion.String()
 }
 

@@ -3,6 +3,7 @@ package k8s
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -25,12 +26,12 @@ type Controller struct {
 	client        *Client
 	metricsSource metrics.MetricsSource // NEW: for cluster summary metrics
 
-	namespaceInformer   coreV1Informers.NamespaceInformer
-	nodeInformer        coreV1Informers.NodeInformer
-	podInformer         coreV1Informers.PodInformer
-	pvInformer          coreV1Informers.PersistentVolumeInformer
-	pvcInformer         coreV1Informers.PersistentVolumeClaimInformer
-	eventInformer       coreV1Informers.EventInformer
+	namespaceInformer coreV1Informers.NamespaceInformer
+	nodeInformer      coreV1Informers.NodeInformer
+	podInformer       coreV1Informers.PodInformer
+	pvInformer        coreV1Informers.PersistentVolumeInformer
+	pvcInformer       coreV1Informers.PersistentVolumeClaimInformer
+	eventInformer     coreV1Informers.EventInformer
 
 	jobInformer     batchV1Informers.JobInformer
 	cronJobInformer batchV1Informers.CronJobInformer
@@ -95,18 +96,7 @@ func (c *Controller) GetClient() *Client {
 	return c.client
 }
 
-func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
-	if ctx == nil {
-		return errors.New("context cannot be nil")
-	}
-
-	// initialize
-	// NOTE: Metrics informers are no longer initialized here.
-	// The application now uses MetricsSource interface for metrics collection,
-	// which handles metrics-server and prometheus sources transparently.
-	// The controller only manages core Kubernetes resource informers.
-
-	// initialize informer factories
+func (c *Controller) initInformers(resync time.Duration) (informers.SharedInformerFactory, []cache.InformerSynced, []cache.InformerSynced) {
 	var factory informers.SharedInformerFactory
 	if c.client.namespace == AllNamespaces {
 		factory = informers.NewSharedInformerFactory(c.client.kubeClient, resync)
@@ -114,11 +104,7 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 		factory = informers.NewSharedInformerFactoryWithOptions(c.client.kubeClient, resync, informers.WithNamespace(c.client.namespace))
 	}
 
-	// NOTE: the followings captures each informer
-	// and also calls Informer() method to register the cached type.
-	// Call to Informer() must happen before factory.Star() or it hangs.
-
-	// core/V1 informers
+	// Register every informer before calling factory.Start so caches sync.
 	coreInformers := factory.Core().V1()
 	c.namespaceInformer = coreInformers.Namespaces()
 	namespaceHasSynced := c.namespaceInformer.Informer().HasSynced
@@ -133,7 +119,6 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	c.eventInformer = coreInformers.Events()
 	eventHasSynced := c.eventInformer.Informer().HasSynced
 
-	// Apps/v1 Informers
 	appsInformers := factory.Apps().V1()
 	c.deploymentInformer = appsInformers.Deployments()
 	deploymentHasSynced := c.deploymentInformer.Informer().HasSynced
@@ -144,13 +129,38 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	c.statefulSetInformer = appsInformers.StatefulSets()
 	statefulsetHasSynced := c.statefulSetInformer.Informer().HasSynced
 
-	// Batch informers
 	batchInformers := factory.Batch().V1()
 	c.jobInformer = batchInformers.Jobs()
 	jobHasSynced := c.jobInformer.Informer().HasSynced
 	c.cronJobInformer = batchInformers.CronJobs()
 	cronJobHasSynced := c.cronJobInformer.Informer().HasSynced
 
+	if c.client.namespace == AllNamespaces {
+		coreSynced := []cache.InformerSynced{namespaceHasSynced, nodeHasSynced, podHasSynced}
+		extraSynced := []cache.InformerSynced{
+			pvHasSynced, pvcHasSynced, eventHasSynced,
+			deploymentHasSynced, daemonsetHasSynced, replicasetHasSynced,
+			statefulsetHasSynced, jobHasSynced, cronJobHasSynced,
+		}
+		return factory, coreSynced, extraSynced
+	}
+
+	coreSynced := []cache.InformerSynced{podHasSynced}
+	extraSynced := []cache.InformerSynced{
+		namespaceHasSynced, nodeHasSynced,
+		pvHasSynced, pvcHasSynced, eventHasSynced,
+		deploymentHasSynced, daemonsetHasSynced, replicasetHasSynced,
+		statefulsetHasSynced, jobHasSynced, cronJobHasSynced,
+	}
+	return factory, coreSynced, extraSynced
+}
+
+func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
+	if ctx == nil {
+		return errors.New("context cannot be nil")
+	}
+
+	factory, coreSynced, extraSynced := c.initInformers(resync)
 	factory.Start(ctx.Done())
 
 	// Wait for core resources to sync with a short timeout to prevent hanging
@@ -158,11 +168,15 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	syncCtx, syncCancel := context.WithTimeout(ctx, 2*time.Second)
 	defer syncCancel()
 
-	if ok := cache.WaitForCacheSync(syncCtx.Done(),
-		namespaceHasSynced,
-		nodeHasSynced,
-		podHasSynced,
-	); !ok {
+	// Preserve TUI startup sync expectations across namespace, node, and pod informers.
+	tuiCoreSynced := []cache.InformerSynced{
+		c.namespaceInformer.Informer().HasSynced,
+		c.nodeInformer.Informer().HasSynced,
+		c.podInformer.Informer().HasSynced,
+	}
+	_ = coreSynced
+
+	if ok := cache.WaitForCacheSync(syncCtx.Done(), tuiCoreSynced...); !ok {
 		// Timeout or error - continue anyway with graceful degradation
 		// UI will render with empty/partial data initially
 		slog.Warn("initial informer cache sync incomplete; continuing with partial data")
@@ -170,17 +184,7 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 
 	// defer waiting for non-core resources to sync
 	go func() {
-		ok := cache.WaitForCacheSync(ctx.Done(),
-			pvHasSynced,
-			pvcHasSynced,
-			eventHasSynced,
-			deploymentHasSynced,
-			daemonsetHasSynced,
-			replicasetHasSynced,
-			statefulsetHasSynced,
-			jobHasSynced,
-			cronJobHasSynced,
-		)
+		ok := cache.WaitForCacheSync(ctx.Done(), extraSynced...)
 		if !ok {
 			slog.Warn("some non-core informers failed to sync", "namespace", c.client.namespace)
 		}
@@ -199,6 +203,42 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 
 	// Start API health monitor - makes periodic live API calls to detect connection loss
 	c.startAPIHealthMonitor(ctx)
+
+	return nil
+}
+
+// StartInformers starts Kubernetes resource informers and waits for core
+// caches to synchronize within syncTimeout without launching UI refresh tickers.
+func (c *Controller) StartInformers(ctx context.Context, resync, syncTimeout time.Duration) error {
+	if ctx == nil {
+		return errors.New("context cannot be nil")
+	}
+	if syncTimeout <= 0 {
+		syncTimeout = 15 * time.Second
+	}
+
+	factory, coreSynced, extraSynced := c.initInformers(resync)
+	factory.Start(ctx.Done())
+
+	coreCtx, coreCancel := context.WithTimeout(ctx, syncTimeout)
+	defer coreCancel()
+
+	if ok := cache.WaitForCacheSync(coreCtx.Done(), coreSynced...); !ok {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return fmt.Errorf("informer cache sync timed out: %w", context.DeadlineExceeded)
+	}
+
+	extraTimeout := 1 * time.Second
+	if syncTimeout < extraTimeout {
+		extraTimeout = syncTimeout
+	}
+	extraCtx, extraCancel := context.WithTimeout(ctx, extraTimeout)
+	defer extraCancel()
+	if ok := cache.WaitForCacheSync(extraCtx.Done(), extraSynced...); !ok {
+		slog.Warn("some non-core informers failed to sync", "namespace", c.client.namespace)
+	}
 
 	return nil
 }

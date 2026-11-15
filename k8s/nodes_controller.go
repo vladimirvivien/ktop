@@ -82,6 +82,9 @@ func (c *Controller) GetNodeModels(ctx context.Context) (models []model.NodeMode
 }
 
 func (c *Controller) setupNodeHandler(ctx context.Context, handlerFunc RefreshNodesFunc) {
+	if handlerFunc == nil {
+		return
+	}
 	go func() {
 		c.refreshNodes(ctx, handlerFunc) // initial refresh
 		ticker := time.NewTicker(5 * time.Second)
@@ -111,6 +114,8 @@ func (c *Controller) refreshNodes(ctx context.Context, handlerFunc RefreshNodesF
 		return err
 	}
 	c.reportSuccess()
-	handlerFunc(ctx, models)
+	if handlerFunc != nil {
+		handlerFunc(ctx, models)
+	}
 	return nil
 }

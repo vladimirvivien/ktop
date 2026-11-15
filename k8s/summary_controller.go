@@ -12,6 +12,9 @@ import (
 )
 
 func (c *Controller) setupSummaryHandler(ctx context.Context, handlerFunc RefreshSummaryFunc) {
+	if handlerFunc == nil {
+		return
+	}
 	go func() {
 		c.refreshSummary(ctx, handlerFunc)
 		ticker := time.NewTicker(5 * time.Second)
@@ -35,6 +38,21 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 		return nil
 	}
 
+	summary, err := c.BuildClusterSummary(ctx)
+	if err != nil {
+		return err
+	}
+
+	if handlerFunc != nil {
+		handlerFunc(ctx, summary)
+	}
+	return nil
+}
+
+// BuildClusterSummary aggregates cluster-wide summary counts, resource totals,
+// metrics, and composite health score from synced informers and the configured
+// metrics source.
+func (c *Controller) BuildClusterSummary(ctx context.Context) (model.ClusterSummary, error) {
 	var summary model.ClusterSummary
 
 	// Set metrics source type for dynamic UI layout
@@ -47,13 +65,14 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	namespaces, err := c.GetNamespaceList(ctx)
 	if err != nil {
 		c.reportError(err)
-		return err
+		return summary, err
 	}
 	summary.Namespaces = len(namespaces)
 
 	nodes, err := c.GetNodeList(ctx)
 	if err != nil {
-		return err
+		c.reportError(err)
+		return summary, err
 	}
 	summary.Uptime = metav1.NewTime(time.Now())
 	summary.NodesCount = len(nodes)
@@ -103,7 +122,8 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	// extract pods summary
 	pods, err := c.GetPodList(ctx)
 	if err != nil {
-		return err
+		c.reportError(err)
+		return summary, err
 	}
 	summary.PodsAvailable = len(pods)
 	summary.RequestedPodMemTotal = resource.NewQuantity(0, resource.DecimalSI)
@@ -112,20 +132,39 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 		switch pod.Status.Phase {
 		case coreV1.PodRunning:
 			summary.PodsRunning++
-			// Count running containers and restarts
-			for _, cs := range pod.Status.ContainerStatuses {
-				if cs.State.Running != nil {
-					summary.ContainerCount++
-				}
-				summary.ContainerRestarts += int(cs.RestartCount)
-			}
 		case coreV1.PodFailed:
 			summary.FailedPods++
-			// Check if evicted
 			if pod.Status.Reason == "Evicted" {
 				summary.EvictedPods++
 			}
 		}
+
+		var hasCrashLoop bool
+		for _, cs := range pod.Status.InitContainerStatuses {
+			summary.ContainerRestarts += int(cs.RestartCount)
+			if isContainerOOMKilled(cs) {
+				summary.OOMKillCount++
+			}
+			if isContainerCrashLoop(cs) {
+				hasCrashLoop = true
+			}
+		}
+		for _, cs := range pod.Status.ContainerStatuses {
+			if pod.Status.Phase == coreV1.PodRunning && cs.State.Running != nil {
+				summary.ContainerCount++
+			}
+			summary.ContainerRestarts += int(cs.RestartCount)
+			if isContainerOOMKilled(cs) {
+				summary.OOMKillCount++
+			}
+			if isContainerCrashLoop(cs) {
+				hasCrashLoop = true
+			}
+		}
+		if hasCrashLoop {
+			summary.CrashLoopPods++
+		}
+
 		containerSummary := model.GetPodContainerSummary(pod)
 		summary.RequestedPodMemTotal.Add(*containerSummary.RequestedMemQty)
 		summary.RequestedPodCpuTotal.Add(*containerSummary.RequestedCpuQty)
@@ -134,7 +173,8 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	// deployments count
 	deps, err := c.GetDeploymentList(ctx)
 	if err != nil {
-		return err
+		c.reportError(err)
+		return summary, err
 	}
 	for _, dep := range deps {
 		summary.DeploymentsTotal += int(dep.Status.Replicas)
@@ -144,7 +184,8 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	// deamonset count
 	daemonsets, err := c.GetDaemonSetList(ctx)
 	if err != nil {
-		return err
+		c.reportError(err)
+		return summary, err
 	}
 	for _, set := range daemonsets {
 		summary.DaemonSetsDesired += int(set.Status.DesiredNumberScheduled)
@@ -154,7 +195,8 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	// replicasets count
 	replicasets, err := c.GetReplicaSetList(ctx)
 	if err != nil {
-		return err
+		c.reportError(err)
+		return summary, err
 	}
 	for _, replica := range replicasets {
 		summary.ReplicaSetsDesired += int(replica.Status.Replicas)
@@ -164,7 +206,8 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	// statefulsets count
 	statefulsets, err := c.GetStatefulSetList(ctx)
 	if err != nil {
-		return err
+		c.reportError(err)
+		return summary, err
 	}
 	for _, stateful := range statefulsets {
 		summary.StatefulSetsReady += int(stateful.Status.ReadyReplicas)
@@ -173,18 +216,21 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	// extract jobs summary
 	jobs, err := c.GetJobList(ctx)
 	if err != nil {
-		return err
+		c.reportError(err)
+		return summary, err
 	}
 	summary.JobsCount = len(jobs)
 	cronjobs, err := c.GetCronJobList(ctx)
 	if err != nil {
-		return err
+		c.reportError(err)
+		return summary, err
 	}
 	summary.CronJobsCount = len(cronjobs)
 
 	pvs, err := c.GetPVList(ctx)
 	if err != nil {
-		return err
+		c.reportError(err)
+		return summary, err
 	}
 	summary.PVCount = len(pvs)
 	summary.PVsTotal = resource.NewQuantity(0, resource.DecimalSI)
@@ -197,7 +243,7 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 	pvcs, err := c.GetPVCList(ctx)
 	if err != nil {
 		c.reportError(err)
-		return err
+		return summary, err
 	}
 	summary.PVCCount = len(pvcs)
 	summary.PVCsTotal = resource.NewQuantity(0, resource.DecimalSI)
@@ -214,13 +260,21 @@ func (c *Controller) refreshSummary(ctx context.Context, handlerFunc RefreshSumm
 		c.collectPrometheusEnhancedMetrics(&summary, nodes, nodeMetricsByNode)
 	}
 
-	hasMetrics := c.metricsSource != nil && len(nodeMetricsByNode) > 0
+	hasMetrics := c.metricsSource != nil && (len(nodeMetricsByNode) > 0 || (len(nodes) == 0 && c.metricsSource.IsHealthy()))
 	summary.HealthScore = model.CalculateHealthScore(summary, hasMetrics)
 
 	// Report success after all data is collected
 	c.reportSuccess()
-	handlerFunc(ctx, summary)
-	return nil
+	return summary, nil
+}
+
+func isContainerOOMKilled(cs coreV1.ContainerStatus) bool {
+	return (cs.State.Terminated != nil && cs.State.Terminated.Reason == "OOMKilled") ||
+		(cs.LastTerminationState.Terminated != nil && cs.LastTerminationState.Terminated.Reason == "OOMKilled")
+}
+
+func isContainerCrashLoop(cs coreV1.ContainerStatus) bool {
+	return cs.State.Waiting != nil && cs.State.Waiting.Reason == "CrashLoopBackOff"
 }
 
 // collectPrometheusEnhancedMetrics populates Prometheus-specific cluster summary fields
