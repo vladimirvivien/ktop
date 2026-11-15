@@ -148,6 +148,9 @@ const (
 // DrawDoubleBorder draws a double-line border around the given rectangle
 func DrawDoubleBorder(screen tcell.Screen, x, y, width, height int, color tcell.Color) {
 	style := tcell.StyleDefault.Foreground(color)
+	if !IsMonochrome() {
+		style = style.Background(ActivePalette().CanvasBg)
+	}
 
 	// Draw corners
 	screen.SetContent(x, y, DoubleBorderTopLeft, nil, style)

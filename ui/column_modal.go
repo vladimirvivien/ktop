@@ -44,12 +44,7 @@ func NewColumnSelectorModal(cfg ColumnSelectorConfig) *ColumnSelectorModal {
 
 	m.table = tview.NewTable()
 	m.table.SetSelectable(true, false)
-	if IsMonochrome() {
-		m.table.SetSelectedStyle(SelectedRowStyle())
-	} else {
-		p := ActivePalette()
-		m.table.SetSelectedStyle(tcell.StyleDefault.Background(p.HeaderBg).Foreground(p.HeaderFg).Bold(true))
-	}
+	StyleTable(m.table)
 	m.table.SetBorder(false)
 
 	m.renderRows()
@@ -116,18 +111,18 @@ func (m *ColumnSelectorModal) renderRows() {
 			desc = m.descriptions[col]
 		}
 
-		m.table.SetCell(i, 0, tview.NewTableCell(check).
+		m.table.SetCell(i, 0, NewDataCell(check).
 			SetTextColor(checkColor).
 			SetAttributes(attrs).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(true))
 
-		m.table.SetCell(i, 1, tview.NewTableCell(fmt.Sprintf(" %-9s", col)).
+		m.table.SetCell(i, 1, NewDataCell(fmt.Sprintf(" %-9s", col)).
 			SetTextColor(colColor).
 			SetAlign(tview.AlignLeft).
 			SetSelectable(true))
 
-		m.table.SetCell(i, 2, tview.NewTableCell(desc).
+		m.table.SetCell(i, 2, NewDataCell(desc).
 			SetTextColor(descColor).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(1).

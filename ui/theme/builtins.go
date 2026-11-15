@@ -71,7 +71,7 @@ func LightPalette() Palette {
 
 		HeaderBg:        tcell.NewHexColor(0x1f3a52),
 		HeaderFg:        tcell.NewHexColor(0xffffff),
-		HeaderHotkey:    tcell.NewHexColor(0xfbbf24),
+		HeaderHotkey:    tcell.NewHexColor(0x38bdf8),
 		HeaderSortArrow: tcell.NewHexColor(0x38bdf8),
 		RowSelectedBg:   tcell.NewHexColor(0xdbeafe),
 		RowSelectedFg:   tcell.NewHexColor(0x0f172a),
@@ -93,7 +93,7 @@ func LightPalette() Palette {
 		BarEmpty:        tcell.NewHexColor(0x9ca3af),
 
 		Accent:        tcell.NewHexColor(0x0f4c81),
-		DataPrimary:   tcell.NewHexColor(0x1e293b),
+		DataPrimary:   tcell.NewHexColor(0x0f4c81),
 		DataSecondary: tcell.NewHexColor(0x1a1a1a),
 
 		ToastInfoBg:    tcell.NewHexColor(0x1e3a8a),

@@ -17,20 +17,20 @@ import (
 type PodSelectedCallback func(namespace, podName string)
 
 type podPanel struct {
-	app         *application.Application
-	title       string
-	root        *tview.Flex
-	children    []tview.Primitive
-	listCols    []string
-	list        *tview.Table
-	laidout     bool
-	colMap      map[string]int   // Maps column name to position index
-	sortColumn  string           // Current sort column
-	sortAsc     bool             // Sort direction: true=ascending, false=descending
-	currentData []model.PodModel // Store current data for re-sorting
-	filter      *ui.FilterState  // Filter state for row filtering
-	namespaceFilter string       // Global namespace filter from header
-	tableCtrl   *ui.TableController
+	app             *application.Application
+	title           string
+	root            *tview.Flex
+	children        []tview.Primitive
+	listCols        []string
+	list            *tview.Table
+	laidout         bool
+	colMap          map[string]int   // Maps column name to position index
+	sortColumn      string           // Current sort column
+	sortAsc         bool             // Sort direction: true=ascending, false=descending
+	currentData     []model.PodModel // Store current data for re-sorting
+	filter          *ui.FilterState  // Filter state for row filtering
+	namespaceFilter string           // Global namespace filter from header
+	tableCtrl       *ui.TableController
 
 	// Stateful sparklines for smooth sliding animation
 	cpuSparklines map[string]*ui.Sparkline // key: "namespace/podname"
@@ -130,6 +130,7 @@ func (p *podPanel) Layout(_ any) {
 		p.list.SetFixed(1, 0)
 		p.list.SetBorder(false)
 		p.list.SetBorders(false)
+		ui.StyleTable(p.list)
 		p.list.SetFocusFunc(func() {
 			p.list.SetSelectable(true, false)
 			p.list.SetSelectedStyle(ui.SelectedRowStyle())
@@ -207,6 +208,7 @@ func (p *podPanel) DrawHeader(data any) {
 	}
 
 	p.tableCtrl.SetVisibleColumns(cols)
+	ui.StyleTable(p.list)
 	// Initialize the column map
 	p.colMap = make(map[string]int)
 	p.listCols = cols
@@ -220,7 +222,7 @@ func (p *podPanel) DrawHeader(data any) {
 			ui.StyleHeaderCell(tview.NewTableCell(headerText).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(100).
-				SetSelectable(true)),
+				SetSelectable(false)),
 		)
 
 		// Map column name to position
@@ -289,6 +291,7 @@ func (p *podPanel) DrawBody(data any) {
 	colorKeys := ui.DefaultColorKeys()
 	pal := ui.ActivePalette()
 	mono := ui.IsMonochrome()
+	ui.StyleTable(p.list)
 	valTag := ""
 	if !mono {
 		valTag = "[" + ui.TagFg(pal.DataSecondary) + "]"
@@ -345,34 +348,28 @@ func (p *podPanel) DrawBody(data any) {
 			case "NAMESPACE":
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     pod.Namespace,
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 14,
-					},
+					ui.NewDataCell(pod.Namespace).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(14),
 				)
 
 			case "POD":
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     pod.Name,
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 36,
-					},
+					ui.NewDataCell(pod.Name).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(36),
 				)
 
 			case "READY":
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     fmt.Sprintf("%d/%d", pod.ReadyContainers, pod.TotalContainers),
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 5,
-					},
+					ui.NewDataCell(fmt.Sprintf("%d/%d", pod.ReadyContainers, pod.TotalContainers)).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(5),
 				)
 
 			case "STATUS":
@@ -382,66 +379,54 @@ func (p *podPanel) DrawBody(data any) {
 				}
 				p.list.SetCell(
 					rowIdx, colIdx,
-					ui.StyleStatusCell(&tview.TableCell{
-						Text:     pod.Status,
-						Align:    tview.AlignLeft,
-						MaxWidth: maxWidth,
-					}, pod.Status, "pod"),
+					ui.StyleStatusCell(ui.NewDataCell(pod.Status).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(maxWidth), pod.Status, "pod"),
 				)
 
 			case "RST":
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     fmt.Sprintf("%d", pod.Restarts),
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 4,
-					},
+					ui.NewDataCell(fmt.Sprintf("%d", pod.Restarts)).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(4),
 				)
 
 			case "AGE":
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     pod.TimeSince,
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 5,
-					},
+					ui.NewDataCell(pod.TimeSince).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(5),
 				)
 
 			case "VOLS":
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     fmt.Sprintf("%d/%d", pod.Volumes, pod.VolMounts),
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 5,
-					},
+					ui.NewDataCell(fmt.Sprintf("%d/%d", pod.Volumes, pod.VolMounts)).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(5),
 				)
 
 			case "IP":
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     pod.IP,
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 15,
-					},
+					ui.NewDataCell(pod.IP).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(15),
 				)
 
 			case "NODE":
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     pod.Node,
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 16,
-					},
+					ui.NewDataCell(pod.Node).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(16),
 				)
 
 			case "CPU":
@@ -502,11 +487,9 @@ func (p *podPanel) DrawBody(data any) {
 
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:  cpuMetrics,
-						Color: rowColor,
-						Align: tview.AlignLeft,
-					},
+					ui.NewDataCell(cpuMetrics).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft),
 				)
 
 			case "MEMORY":
@@ -571,33 +554,27 @@ func (p *podPanel) DrawBody(data any) {
 
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:  memMetrics,
-						Color: rowColor,
-						Align: tview.AlignLeft,
-					},
+					ui.NewDataCell(memMetrics).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft),
 				)
 
 			case "STALL":
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     renderStallCell(pod.PSI, pod.NodePSIKernelSupported),
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 12,
-					},
+					ui.NewDataCell(renderStallCell(pod.PSI, pod.NodePSIKernelSupported)).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(12),
 				)
 
 			case "THROTTLE":
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     ui.FormatThrottleCell(pod.CPUThrottledPct),
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 10,
-					},
+					ui.NewDataCell(ui.FormatThrottleCell(pod.CPUThrottledPct)).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(10),
 				)
 			}
 		}

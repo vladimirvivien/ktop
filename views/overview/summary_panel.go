@@ -176,23 +176,29 @@ func (p *clusterSummaryPanel) DrawBody(data any) {
 
 		// Color code Deploys ratio: >= 80% ok, 50-80% warning, <= 50% error
 		deploysCol := pal.GaugeLow
+		deploysWarn, deploysCrit := false, false
 		if summary.DeploymentsTotal > 0 {
 			deploysRatio := float64(summary.DeploymentsReady) / float64(summary.DeploymentsTotal)
 			if deploysRatio <= 0.5 {
 				deploysCol = pal.GaugeHigh
+				deploysCrit = true
 			} else if deploysRatio < 0.8 {
 				deploysCol = pal.GaugeMedium
+				deploysWarn = true
 			}
 		}
 
 		// Color code Pods ratio: >= 80% ok, 50-80% warning, <= 50% error
 		podsCol := pal.GaugeLow
+		podsWarn, podsCrit := false, false
 		if summary.PodsAvailable > 0 {
 			podsRatio := float64(summary.PodsRunning) / float64(summary.PodsAvailable)
 			if podsRatio <= 0.5 {
 				podsCol = pal.GaugeHigh
+				podsCrit = true
 			} else if podsRatio < 0.8 {
 				podsCol = pal.GaugeMedium
+				podsWarn = true
 			}
 		}
 
@@ -209,12 +215,16 @@ func (p *clusterSummaryPanel) DrawBody(data any) {
 		var statsText string
 		if mono {
 			deploysStr := fmt.Sprintf("%d/%d", summary.DeploymentsReady, summary.DeploymentsTotal)
-			if deploysCol == pal.GaugeHigh && summary.DeploymentsTotal > 0 {
+			if deploysCrit {
 				deploysStr = ui.ErrorMarkup(deploysStr)
+			} else if deploysWarn {
+				deploysStr = fmt.Sprintf("[::b]%s[::-]", deploysStr)
 			}
 			podsStr := fmt.Sprintf("%d/%d", summary.PodsRunning, summary.PodsAvailable)
-			if podsCol == pal.GaugeHigh && summary.PodsAvailable > 0 {
+			if podsCrit {
 				podsStr = ui.ErrorMarkup(podsStr)
+			} else if podsWarn {
+				podsStr = fmt.Sprintf("[::b]%s[::-]", podsStr)
 			}
 			statsText = fmt.Sprintf(
 				"Health: %s │ Uptime: %s │ Nodes: %d │ NS: %d │ Deploys: %s │ Pods: %s │ Vols: %d │ PVs: %s │ PVCs: %s",
@@ -296,12 +306,20 @@ func (p *clusterSummaryPanel) DrawBody(data any) {
 
 		// Build sparkline titles
 		cpuTrend := p.sparklineRow.CPUTrend(float64(cpuRatio) * 100)
-		cpuTitle := fmt.Sprintf(" CPU %dm/%dm (%02.1f%% %s) %s ",
-			cpuValue, cpuTotal, cpuRatio*100, cpuLabel, cpuTrend)
+		cpuTitle := fmt.Sprintf(" CPU %dm/%dm (%02.1f%% %s)",
+			cpuValue, cpuTotal, cpuRatio*100, cpuLabel)
+		if cpuTrend != "" {
+			cpuTitle += " " + cpuTrend
+		}
+		cpuTitle += " "
 
 		memTrend := p.sparklineRow.MEMTrend(float64(memRatio) * 100)
-		memTitle := fmt.Sprintf(" MEM %s/%s (%02.1f%% %s) %s ",
-			memValue, memTotal, memRatio*100, memLabel, memTrend)
+		memTitle := fmt.Sprintf(" MEM %s/%s (%02.1f%% %s)",
+			memValue, memTotal, memRatio*100, memLabel)
+		if memTrend != "" {
+			memTitle += " " + memTrend
+		}
+		memTitle += " "
 
 		// Update sparkline row
 		p.sparklineRow.UpdateCPU(float64(cpuRatio), cpuTitle)

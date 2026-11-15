@@ -129,6 +129,7 @@ func (p *nodePanel) Layout(_ any) {
 		p.list.SetFixed(1, 0)
 		p.list.SetBorder(false)
 		p.list.SetBorders(false)
+		ui.StyleTable(p.list)
 		p.list.SetFocusFunc(func() {
 			p.list.SetSelectable(true, false)
 			p.list.SetSelectedStyle(ui.SelectedRowStyle())
@@ -205,6 +206,7 @@ func (p *nodePanel) DrawHeader(data any) {
 	}
 
 	p.tableCtrl.SetVisibleColumns(cols)
+	ui.StyleTable(p.list)
 
 	// Initialize a new column map
 	p.colMap = make(map[string]int)
@@ -215,7 +217,7 @@ func (p *nodePanel) DrawHeader(data any) {
 			SetAlign(tview.AlignCenter).
 			SetMaxWidth(1).
 			SetExpansion(0).
-			SetSelectable(true)),
+			SetSelectable(false)),
 	)
 
 	p.listCols = cols
@@ -231,7 +233,7 @@ func (p *nodePanel) DrawHeader(data any) {
 			ui.StyleHeaderCell(tview.NewTableCell(headerText).
 				SetAlign(tview.AlignLeft).
 				SetExpansion(100).
-				SetSelectable(true)),
+				SetSelectable(false)),
 		)
 
 		// Map column name to its position
@@ -297,6 +299,7 @@ func (p *nodePanel) DrawBody(data any) {
 	colorKeys := ui.DefaultColorKeys()
 	pal := ui.ActivePalette()
 	mono := ui.IsMonochrome()
+	ui.StyleTable(p.list)
 	valTag := ""
 	if !mono {
 		valTag = "[" + ui.TagFg(pal.DataSecondary) + "]"
@@ -343,12 +346,10 @@ func (p *nodePanel) DrawBody(data any) {
 		}
 		p.list.SetCell(
 			rowIdx, 0,
-			&tview.TableCell{
-				Text:          controlLegend,
-				Color:         legendColor,
-				Align:         tview.AlignCenter,
-				NotSelectable: true,
-			},
+			ui.NewDataCell(controlLegend).
+				SetTextColor(legendColor).
+				SetAlign(tview.AlignCenter).
+				SetSelectable(false),
 		)
 
 		// Render each column that is included in the filtered view
@@ -372,13 +373,11 @@ func (p *nodePanel) DrawBody(data any) {
 				}
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:       node.Name,
-						Color:      nameColor,
-						Attributes: nameAttrs,
-						Align:      tview.AlignLeft,
-						MaxWidth:   20,
-					},
+					ui.NewDataCell(node.Name).
+						SetTextColor(nameColor).
+						SetAttributes(nameAttrs).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(20),
 				)
 
 			case "STATUS":
@@ -388,11 +387,9 @@ func (p *nodePanel) DrawBody(data any) {
 				}
 				p.list.SetCell(
 					rowIdx, colIdx,
-					ui.StyleStatusCell(&tview.TableCell{
-						Text:     node.Status,
-						Align:    tview.AlignLeft,
-						MaxWidth: maxWidth,
-					}, node.Status, "node"),
+					ui.StyleStatusCell(ui.NewDataCell(node.Status).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(maxWidth), node.Status, "node"),
 				)
 
 			case "RST":
@@ -410,35 +407,29 @@ func (p *nodePanel) DrawBody(data any) {
 				}
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:       fmt.Sprintf("%d", node.Restarts),
-						Color:      rstColor,
-						Attributes: rstAttrs,
-						Align:      tview.AlignLeft,
-						MaxWidth:   5,
-					},
+					ui.NewDataCell(fmt.Sprintf("%d", node.Restarts)).
+						SetTextColor(rstColor).
+						SetAttributes(rstAttrs).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(5),
 				)
 
 			case "IP":
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     node.InternalIP,
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 15,
-					},
+					ui.NewDataCell(node.InternalIP).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(15),
 				)
 
 			case "PODS":
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     fmt.Sprintf("%d", node.PodsCount),
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 5,
-					},
+					ui.NewDataCell(fmt.Sprintf("%d", node.PodsCount)).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(5),
 				)
 
 			case "TAINTS":
@@ -456,13 +447,11 @@ func (p *nodePanel) DrawBody(data any) {
 				}
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:       fmt.Sprintf("%d", node.TaintCount),
-						Color:      taintsColor,
-						Attributes: taintsAttrs,
-						Align:      tview.AlignLeft,
-						MaxWidth:   4,
-					},
+					ui.NewDataCell(fmt.Sprintf("%d", node.TaintCount)).
+						SetTextColor(taintsColor).
+						SetAttributes(taintsAttrs).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(4),
 				)
 
 			case "PRESSURE":
@@ -485,37 +474,31 @@ func (p *nodePanel) DrawBody(data any) {
 				}
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:       pressureText,
-						Color:      pressureColor,
-						Attributes: pressureAttrs,
-						Align:      tview.AlignLeft,
-						MaxWidth:   12,
-					},
+					ui.NewDataCell(pressureText).
+						SetTextColor(pressureColor).
+						SetAttributes(pressureAttrs).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(12),
 				)
 
 			case "VOLS":
 				volsText := fmt.Sprintf("%d/%d", node.VolumesInUse, node.VolumesAttached)
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     volsText,
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 5,
-					},
+					ui.NewDataCell(volsText).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(5),
 				)
 
 			case "DISK":
 				diskText := fmt.Sprintf("%dGi", node.AllocatableStorageQty.ScaledValue(resource.Giga))
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     diskText,
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 7,
-					},
+					ui.NewDataCell(diskText).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(7),
 				)
 
 			case "CPU":
@@ -548,11 +531,9 @@ func (p *nodePanel) DrawBody(data any) {
 
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:  cpuMetrics,
-						Color: rowColor,
-						Align: tview.AlignLeft,
-					},
+					ui.NewDataCell(cpuMetrics).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft),
 				)
 
 			case "MEM":
@@ -587,22 +568,18 @@ func (p *nodePanel) DrawBody(data any) {
 
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:  memMetrics,
-						Color: rowColor,
-						Align: tview.AlignLeft,
-					},
+					ui.NewDataCell(memMetrics).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft),
 				)
 
 			case "STALL":
 				p.list.SetCell(
 					rowIdx, colIdx,
-					&tview.TableCell{
-						Text:     renderStallCell(node.PSI, node.PSIKernelSupported),
-						Color:    rowColor,
-						Align:    tview.AlignLeft,
-						MaxWidth: 12,
-					},
+					ui.NewDataCell(renderStallCell(node.PSI, node.PSIKernelSupported)).
+						SetTextColor(rowColor).
+						SetAlign(tview.AlignLeft).
+						SetMaxWidth(12),
 				)
 			}
 		}

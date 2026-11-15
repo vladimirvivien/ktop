@@ -159,7 +159,7 @@ func StyleHeaderCell(cell *tview.TableCell) *tview.TableCell {
 		return cell.
 			SetTextColor(tcell.ColorDefault).
 			SetBackgroundColor(tcell.ColorDefault).
-			SetAttributes(tcell.AttrReverse | tcell.AttrBold)
+			SetAttributes(tcell.AttrBold)
 	}
 	return cell.
 		SetTextColor(rt.Palette.HeaderFg).
@@ -173,25 +173,29 @@ func StyleStatusCell(cell *tview.TableCell, status, resourceType string) *tview.
 		return nil
 	}
 	rt := ActiveTheme()
-	statusColor := GetStatusColor(status, resourceType)
+	sev := GetStatusSeverity(status, resourceType)
 	if rt.IsMonochrome() {
-		cell.SetTextColor(tcell.ColorDefault)
-		switch statusColor {
-		case Theme.StatusError:
+		cell.SetTextColor(tcell.ColorDefault).
+			SetBackgroundColor(tcell.ColorDefault)
+		switch sev {
+		case StatusSeverityError:
 			if len(cell.Text) < 2 || cell.Text[:2] != "! " {
 				cell.SetText("! " + cell.Text)
 			}
 			cell.SetAttributes(tcell.AttrUnderline | tcell.AttrBold)
-		case Theme.StatusWarning:
+		case StatusSeverityWarning:
 			cell.SetAttributes(tcell.AttrBold)
-		case Theme.StatusUnknown:
+		case StatusSeverityUnknown:
 			cell.SetAttributes(tcell.AttrDim)
 		default:
 			cell.SetAttributes(tcell.AttrNone)
 		}
 		return cell
 	}
-	return cell.SetTextColor(GetTcellColor(statusColor))
+	return cell.
+		SetTextColor(GetTcellColor(GetStatusColor(status, resourceType))).
+		SetBackgroundColor(rt.Palette.CanvasBg).
+		SetAttributes(tcell.AttrNone)
 }
 
 // SelectedRowStyle returns the tcell.Style for highlighted table rows.
@@ -201,11 +205,39 @@ func SelectedRowStyle() tcell.Style {
 		return tcell.StyleDefault.
 			Foreground(tcell.ColorDefault).
 			Background(tcell.ColorDefault).
-			Reverse(true)
+			Reverse(true).
+			Bold(true)
 	}
 	return tcell.StyleDefault.
 		Foreground(rt.Palette.RowSelectedFg).
-		Background(rt.Palette.RowSelectedBg)
+		Background(rt.Palette.RowSelectedBg).
+		Bold(true)
+}
+
+// NewDataCell creates a table data cell styled with the active theme's foreground and canvas background.
+func NewDataCell(text string) *tview.TableCell {
+	if IsMonochrome() {
+		return tview.NewTableCell(text).
+			SetTextColor(tcell.ColorDefault).
+			SetBackgroundColor(tcell.ColorDefault)
+	}
+	p := ActivePalette()
+	return tview.NewTableCell(text).
+		SetTextColor(p.DataSecondary).
+		SetBackgroundColor(p.CanvasBg)
+}
+
+// StyleTable applies the active theme's canvas background and selected row style to a table.
+func StyleTable(table *tview.Table) {
+	if table == nil {
+		return
+	}
+	if IsMonochrome() {
+		table.SetBackgroundColor(tcell.ColorDefault)
+	} else {
+		table.SetBackgroundColor(ActivePalette().CanvasBg)
+	}
+	table.SetSelectedStyle(SelectedRowStyle())
 }
 
 // Theme contains all color and style constants for the ktop UI
@@ -370,42 +402,68 @@ func ResetTag(resetForeground, resetBackground, resetAttributes bool) string {
 	return "[" + fg + ":" + bg + ":" + attr + "]"
 }
 
-// GetStatusColor returns the appropriate color for a given status
-// resourceType can be "node" or "pod"
-func GetStatusColor(status string, resourceType string) string {
+// StatusSeverity classifies resource status into a theme-independent severity level.
+type StatusSeverity int
+
+const (
+	StatusSeverityUnknown StatusSeverity = iota
+	StatusSeverityOK
+	StatusSeverityInfo
+	StatusSeverityWarning
+	StatusSeverityError
+)
+
+// GetStatusSeverity returns the semantic severity for a resource status.
+// resourceType can be "node" or "pod".
+func GetStatusSeverity(status string, resourceType string) StatusSeverity {
 	if resourceType == "node" {
 		switch status {
 		case "Ready":
-			return Theme.StatusOK
+			return StatusSeverityOK
 		case "NotReady":
-			return Theme.StatusError
+			return StatusSeverityError
 		case "SchedulingDisabled":
-			return Theme.StatusWarning
+			return StatusSeverityWarning
 		case "Unknown":
-			return Theme.StatusUnknown
+			return StatusSeverityUnknown
 		default:
-			return Theme.StatusUnknown
+			return StatusSeverityUnknown
 		}
 	}
 
 	if resourceType == "pod" {
 		switch status {
 		case "Running":
-			return Theme.StatusOK
-		case "Completed":
-			return Theme.StatusInfo
+			return StatusSeverityOK
+		case "Completed", "ContainerCreating":
+			return StatusSeverityInfo
 		case "Pending", "Terminating":
-			return Theme.StatusWarning
-		case "ContainerCreating":
-			return Theme.StatusInfo
+			return StatusSeverityWarning
 		case "CrashLoopBackOff", "Error", "Failed", "ImagePullBackOff":
-			return Theme.StatusError
+			return StatusSeverityError
 		default:
-			return Theme.StatusUnknown
+			return StatusSeverityUnknown
 		}
 	}
 
-	return Theme.StatusUnknown
+	return StatusSeverityUnknown
+}
+
+// GetStatusColor returns the appropriate color for a given status
+// resourceType can be "node" or "pod"
+func GetStatusColor(status string, resourceType string) string {
+	switch GetStatusSeverity(status, resourceType) {
+	case StatusSeverityOK:
+		return Theme.StatusOK
+	case StatusSeverityInfo:
+		return Theme.StatusInfo
+	case StatusSeverityWarning:
+		return Theme.StatusWarning
+	case StatusSeverityError:
+		return Theme.StatusError
+	default:
+		return Theme.StatusUnknown
+	}
 }
 
 // GetStatusIcon returns the appropriate icon for a given status
@@ -532,9 +590,8 @@ func GetRowColorForStatus(status string, resourceType string) tcell.Color {
 	if IsMonochrome() {
 		return tcell.ColorDefault
 	}
-	statusColor := GetStatusColor(status, resourceType)
-	if statusColor == Theme.StatusOK {
+	if GetStatusSeverity(status, resourceType) == StatusSeverityOK {
 		return ActivePalette().DataPrimary
 	}
-	return GetTcellColor(statusColor)
+	return GetTcellColor(GetStatusColor(status, resourceType))
 }

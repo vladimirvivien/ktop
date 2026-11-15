@@ -188,9 +188,9 @@ func (tc *TableController) FormatColumnHeader(col string) string {
 
 	if col == tc.sortColumn {
 		if tc.sortAsc {
-			formatted += " ▲"
+			formatted += fmt.Sprintf(" [%s]▲[-]", Theme.HeaderSortIndicator)
 		} else {
-			formatted += " ▼"
+			formatted += fmt.Sprintf(" [%s]▼[-]", Theme.HeaderSortIndicator)
 		}
 	}
 

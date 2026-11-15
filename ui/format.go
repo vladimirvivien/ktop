@@ -103,8 +103,8 @@ func AddDetailRowColor(table *tview.Table, row int, key, value string, color tce
 		valColor = tcell.ColorDefault
 	}
 	paddedKey := fmt.Sprintf("%-10s", key)
-	table.SetCell(row, 0, tview.NewTableCell(paddedKey).SetTextColor(keyColor).SetSelectable(false))
-	table.SetCell(row, 1, tview.NewTableCell(value).SetTextColor(valColor).SetSelectable(false))
+	table.SetCell(row, 0, NewDataCell(paddedKey).SetTextColor(keyColor).SetSelectable(false))
+	table.SetCell(row, 1, NewDataCell(value).SetTextColor(valColor).SetSelectable(false))
 }
 
 // AdaptiveRateMax updates a running peak rate and returns an effective maximum
@@ -188,7 +188,7 @@ func FormatPSIInfo(psi metrics.PSIMetrics, kernelSupported bool) string {
 
 	if !kernelSupported {
 		if mono {
-			return "PSI: [::b]! N/A[::-]"
+			return "PSI: [::b]⚠ N/A[::-]"
 		}
 		return fmt.Sprintf("[%s]PSI:[%s] ⚠ N/A[-]", TagFg(p.StatusMuted), TagFg(p.StatusWarning))
 	}

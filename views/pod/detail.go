@@ -140,12 +140,14 @@ func (p *DetailPanel) Layout(_ any) {
 		p.leftDetailTable.SetBorder(false)
 		p.leftDetailTable.SetBorders(false)
 		p.leftDetailTable.SetSelectable(false, false)
+		ui.StyleTable(p.leftDetailTable)
 
 		// Middle column: Conditions table
 		p.middleDetailTable = tview.NewTable()
 		p.middleDetailTable.SetBorder(false)
 		p.middleDetailTable.SetBorders(false)
 		p.middleDetailTable.SetSelectable(false, false)
+		ui.StyleTable(p.middleDetailTable)
 
 		// Labels column: TextView (scrollable, sorted)
 		p.labelsTextView = tview.NewTextView()
@@ -195,7 +197,7 @@ func (p *DetailPanel) Layout(_ any) {
 		p.containersTable.SetSelectable(false, false) // Start unselectable, enable on focus
 		p.containersTable.SetBorder(false)
 		p.containersTable.SetBorders(false)
-		p.containersTable.SetSelectedStyle(ui.SelectedRowStyle())
+		ui.StyleTable(p.containersTable)
 
 		containerColToKey := map[string]rune{
 			"CONTAINER": 'o',
@@ -573,6 +575,8 @@ func (p *DetailPanel) drawSparklines() {
 func (p *DetailPanel) drawPodDetailSection() {
 	p.leftDetailTable.Clear()
 	p.middleDetailTable.Clear()
+	ui.StyleTable(p.leftDetailTable)
+	ui.StyleTable(p.middleDetailTable)
 	p.labelsTextView.Clear()
 	p.annotationsTextView.Clear()
 	p.resourcesTextView.Clear()
@@ -607,7 +611,7 @@ func (p *DetailPanel) drawPodDetailSection() {
 
 	// === LEFT COLUMN: Pod Info (all detail fields) ===
 	row := 0
-	p.leftDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]Pod Info[::-]").SetTextColor(sectionColor).SetSelectable(false))
+	p.leftDetailTable.SetCell(row, 0, ui.NewDataCell("[::b]Pod Info[::-]").SetTextColor(sectionColor).SetSelectable(false))
 	row++
 
 	if p.data.Pod != nil {
@@ -755,7 +759,7 @@ func (p *DetailPanel) drawPodDetailSection() {
 
 	// === CENTER COLUMN TOP: Conditions ===
 	row = 0
-	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]Conditions[::-]").SetTextColor(sectionColor).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 0, ui.NewDataCell("[::b]Conditions[::-]").SetTextColor(sectionColor).SetSelectable(false))
 	row++
 
 	conditions := p.data.GetConditions()
@@ -770,14 +774,14 @@ func (p *DetailPanel) drawPodDetailSection() {
 				statusAttrs = tcell.AttrUnderline | tcell.AttrBold
 			}
 		}
-		p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", cond.Type)).SetTextColor(mutedColor).SetSelectable(false))
-		p.middleDetailTable.SetCell(row, 1, tview.NewTableCell(statusText).SetTextColor(statusColor).SetAttributes(statusAttrs).SetSelectable(false))
+		p.middleDetailTable.SetCell(row, 0, ui.NewDataCell(fmt.Sprintf("%-18s", cond.Type)).SetTextColor(mutedColor).SetSelectable(false))
+		p.middleDetailTable.SetCell(row, 1, ui.NewDataCell(statusText).SetTextColor(statusColor).SetAttributes(statusAttrs).SetSelectable(false))
 		row++
 	}
 
 	// === EVENTS SUMMARY ===
 	row++
-	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]Events[::-]").SetTextColor(sectionColor).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 0, ui.NewDataCell("[::b]Events[::-]").SetTextColor(sectionColor).SetSelectable(false))
 	row++
 
 	if p.data != nil && len(p.data.Events) > 0 {
@@ -909,6 +913,7 @@ func (p *DetailPanel) drawContainersTable() {
 	selectedRow, selectedCol := p.containersTable.GetSelection()
 
 	p.containersTable.Clear()
+	ui.StyleTable(p.containersTable)
 
 	pal := ui.ActivePalette()
 	mono := ui.IsMonochrome()
@@ -1059,14 +1064,14 @@ func (p *DetailPanel) drawContainersTable() {
 			memColor = mutedColor
 		}
 
-		p.containersTable.SetCell(rowIdx, 0, tview.NewTableCell(container.Name).SetTextColor(cellColor))
-		p.containersTable.SetCell(rowIdx, 1, tview.NewTableCell(image).SetTextColor(mutedColor).SetExpansion(2).SetMaxWidth(40))
-		p.containersTable.SetCell(rowIdx, 2, tview.NewTableCell(stateText).SetTextColor(stateColor).SetAttributes(stateAttrs))
-		p.containersTable.SetCell(rowIdx, 3, tview.NewTableCell(readyStr).SetTextColor(readyColor).SetAttributes(readyAttrs))
-		p.containersTable.SetCell(rowIdx, 4, tview.NewTableCell(fmt.Sprintf("%d", container.RestartCount)).SetTextColor(restartColor).SetAttributes(restartAttrs))
-		p.containersTable.SetCell(rowIdx, 5, tview.NewTableCell(cpuStr).SetTextColor(cpuColor))
-		p.containersTable.SetCell(rowIdx, 6, tview.NewTableCell(memStr).SetTextColor(memColor))
-		p.containersTable.SetCell(rowIdx, 7, tview.NewTableCell(ui.FormatThrottleCell(container.CPUThrottledPct)).SetTextColor(cellColor))
+		p.containersTable.SetCell(rowIdx, 0, ui.NewDataCell(container.Name).SetTextColor(cellColor))
+		p.containersTable.SetCell(rowIdx, 1, ui.NewDataCell(image).SetTextColor(mutedColor).SetExpansion(2).SetMaxWidth(40))
+		p.containersTable.SetCell(rowIdx, 2, ui.NewDataCell(stateText).SetTextColor(stateColor).SetAttributes(stateAttrs))
+		p.containersTable.SetCell(rowIdx, 3, ui.NewDataCell(readyStr).SetTextColor(readyColor).SetAttributes(readyAttrs))
+		p.containersTable.SetCell(rowIdx, 4, ui.NewDataCell(fmt.Sprintf("%d", container.RestartCount)).SetTextColor(restartColor).SetAttributes(restartAttrs))
+		p.containersTable.SetCell(rowIdx, 5, ui.NewDataCell(cpuStr).SetTextColor(cpuColor))
+		p.containersTable.SetCell(rowIdx, 6, ui.NewDataCell(memStr).SetTextColor(memColor))
+		p.containersTable.SetCell(rowIdx, 7, ui.NewDataCell(ui.FormatThrottleCell(container.CPUThrottledPct)).SetTextColor(cellColor))
 	}
 
 	// Restore selection (clamped to valid range)
@@ -1086,6 +1091,7 @@ func (p *DetailPanel) DrawFooter(_ any) {}
 func (p *DetailPanel) Clear() {
 	if p.containersTable != nil {
 		p.containersTable.Clear()
+		ui.StyleTable(p.containersTable)
 	}
 }
 

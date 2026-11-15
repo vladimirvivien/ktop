@@ -705,7 +705,7 @@ func (app *Application) buildHeaderString(namespaceDisplay string) string {
 	client := app.GetK8sClient()
 	context := ui.Truncate(client.ClusterName(), 25)
 	user := ui.Truncate(client.Username(), 20)
-	ns := ui.Truncate(namespaceDisplay, 16)
+	ns := namespaceDisplay
 
 	var metricsStr string
 	if app.metricsSource != nil && app.metricsSource.IsHealthy() {
@@ -752,7 +752,7 @@ func (app *Application) getNamespaceDisplay() string {
 
 	// Check if filter is editing or active
 	if app.panel.isNamespaceFilterEditing() {
-		filterText := app.panel.getNamespaceFilter()
+		filterText := ui.Truncate(app.panel.getNamespaceFilter(), 15)
 		if mono {
 			return fmt.Sprintf("[::b]%s▌[::-]", filterText)
 		}
@@ -766,7 +766,7 @@ func (app *Application) getNamespaceDisplay() string {
 	// Check if filter is active (has confirmed filter text)
 	filterText := app.panel.getNamespaceFilter()
 	if filterText != "" {
-		return filterText
+		return ui.Truncate(filterText, 16)
 	}
 
 	// No filter - show actual namespace
@@ -777,7 +777,7 @@ func (app *Application) getNamespaceDisplay() string {
 		}
 		return fmt.Sprintf("[%s](all)[-]", ui.TagFg(p.GaugeElevated))
 	}
-	return namespace
+	return ui.Truncate(namespace, 16)
 }
 
 // updateHeader refreshes the header with current metrics status

@@ -267,6 +267,13 @@ func TestAllBuiltinThemesRenderAndContrast(t *testing.T) {
 					{"ToastFg/ToastInfoBg", p.ToastFg, p.ToastInfoBg},
 					{"ToastFg/ToastErrorBg", p.ToastFg, p.ToastErrorBg},
 				}
+				if tc.themeName == "light" {
+					pairs45 = append(pairs45, struct {
+						name string
+						fg   tcell.Color
+						bg   tcell.Color
+					}{"HeaderHotkey/HeaderBg", p.HeaderHotkey, p.HeaderBg})
+				}
 				for _, pair := range pairs45 {
 					ratio := wcagContrastRatio(pair.fg, pair.bg, bgFallback)
 					if ratio < 4.5 {
@@ -290,6 +297,28 @@ func TestAllBuiltinThemesRenderAndContrast(t *testing.T) {
 			}
 		})
 	}
+}
+
+func findCellTokenOnRow(cells []tcell.SimCell, w, y int, token string) (int, bool) {
+	target := []rune(token)
+	if len(target) == 0 {
+		return -1, false
+	}
+	base := y * w
+	for x := 0; x <= w-len(target); x++ {
+		match := true
+		for i, want := range target {
+			runes := cells[base+x+i].Runes
+			if len(runes) == 0 || runes[0] != want {
+				match = false
+				break
+			}
+		}
+		if match {
+			return x, true
+		}
+	}
+	return -1, false
 }
 
 func TestMonochromeAndNoColorStrictZeroColors(t *testing.T) {
@@ -330,10 +359,12 @@ func TestMonochromeAndNoColorStrictZeroColors(t *testing.T) {
 			snap := buildThemeTestSnapshot(t)
 			views := renderThemeViews(t, snap)
 
-			var sawTableReverse bool
+			var sawHeaderBoldNoReverse bool
+			var sawFocusedRowReverse bool
 			var sawBold bool
 			var sawCrashLoopPrefix bool
 			var sawCrashLoopUnderline bool
+			var sawSummaryCriticalPrefix bool
 
 			for _, v := range views {
 				ts, err := ui.NewTestScreen(160, 45)
@@ -353,24 +384,78 @@ func TestMonochromeAndNoColorStrictZeroColors(t *testing.T) {
 					if attrs&tcell.AttrBold != 0 {
 						sawBold = true
 					}
-					if (v.name == "NodePanel" || v.name == "PodPanel") && attrs&tcell.AttrReverse != 0 {
-						sawTableReverse = true
-					}
 				}
 
-				if v.name == "PodPanel" {
-					lines := ts.Lines()
+				lines := ts.Lines()
+				switch v.name {
+				case "SummaryPanel":
+					text := ts.Text()
+					if strings.Contains(text, "! 1/2") {
+						sawSummaryCriticalPrefix = true
+					}
+					if !strings.Contains(text, "CPU ") {
+						t.Errorf("%s/SummaryPanel: expected unclipped 'CPU ' title, got:\n%s", tc.name, text)
+					}
+				case "NodePanel":
+					text := ts.Text()
+					if !strings.Contains(text, "Ready") || strings.Contains(text, "! Ready") {
+						t.Errorf("%s/NodePanel: healthy node status should render 'Ready' without '! ', got:\n%s", tc.name, text)
+					}
 					for y, line := range lines {
-						if idx := strings.Index(line, "! CrashLoop"); idx >= 0 && y < h {
-							sawCrashLoopPrefix = true
-							for dx := 0; dx < len("! CrashLoop"); dx++ {
-								col := idx + dx
-								if col >= w {
-									break
+						if strings.Contains(line, "NAME") && strings.Contains(line, "STATUS") && y < h {
+							for _, word := range []string{"NAME", "STATUS", "PODS"} {
+								if idx, ok := findCellTokenOnRow(cells, w, y, word); ok {
+									sawHeaderBoldNoReverse = true
+									for dx := 0; dx < len([]rune(word)) && idx+dx < w; dx++ {
+										_, _, attrs := cells[y*w+idx+dx].Style.Decompose()
+										if attrs&tcell.AttrBold == 0 {
+											t.Errorf("%s/NodePanel: header %q rune %d missing AttrBold", tc.name, word, dx)
+										}
+										if attrs&tcell.AttrReverse != 0 {
+											t.Errorf("%s/NodePanel: header %q rune %d should not use AttrReverse", tc.name, word, dx)
+										}
+									}
 								}
-								_, _, attrs := cells[y*w+col].Style.Decompose()
-								if attrs&tcell.AttrUnderline != 0 {
-									sawCrashLoopUnderline = true
+							}
+						}
+					}
+					// Focus table and verify selected row renders with AttrReverse
+					ts.Focus(v.primitive)
+					ts.Draw(v.primitive)
+					focusedCells, fw, fh := ts.Screen().GetContents()
+					for y, line := range ts.Lines() {
+						if y >= fh {
+							break
+						}
+						if strings.Contains(line, "node-1") {
+							if idx, ok := findCellTokenOnRow(focusedCells, fw, y, "node-1"); ok {
+								for dx := 0; dx < len("node-1") && idx+dx < fw; dx++ {
+									_, _, attrs := focusedCells[y*fw+idx+dx].Style.Decompose()
+									if attrs&tcell.AttrReverse != 0 {
+										sawFocusedRowReverse = true
+									}
+								}
+							}
+						}
+					}
+				case "PodPanel":
+					text := ts.Text()
+					if !strings.Contains(text, "Running") || strings.Contains(text, "! Running") {
+						t.Errorf("%s/PodPanel: healthy pod status should render 'Running' without '! ', got:\n%s", tc.name, text)
+					}
+					for y, line := range lines {
+						if y < h && strings.Contains(line, "! CrashLoop") {
+							if idx, ok := findCellTokenOnRow(cells, w, y, "! CrashLoop"); ok {
+								sawCrashLoopPrefix = true
+								for dx := 0; dx < len("! CrashLoop"); dx++ {
+									col := idx + dx
+									if col >= w {
+										break
+									}
+									_, _, attrs := cells[y*w+col].Style.Decompose()
+									if attrs&tcell.AttrUnderline != 0 {
+										sawCrashLoopUnderline = true
+									}
 								}
 							}
 						}
@@ -381,17 +466,196 @@ func TestMonochromeAndNoColorStrictZeroColors(t *testing.T) {
 				ts.Close()
 			}
 
-			if !sawTableReverse {
-				t.Errorf("%s: expected AttrReverse on monochrome table header/selection cells", tc.name)
+			// Verify healthy summary stats render without "! " prefix in monochrome
+			healthySnap, err := snapshot.NewBuilder().Build(context.Background(), snapshot.BuildInput{
+				Cluster: snapshot.ClusterInfo{Ready: true, MetricsSource: metrics.SourceTypePrometheus},
+				Summary: model.ClusterSummary{
+					HealthScore:      100,
+					Uptime:           metav1.NewTime(snap.Summary.Uptime),
+					NodesReady:       1,
+					NodesCount:       1,
+					Namespaces:       2,
+					PodsRunning:      2,
+					PodsAvailable:    2,
+					DeploymentsReady: 2,
+					DeploymentsTotal: 2,
+				},
+			})
+			if err != nil {
+				t.Fatalf("healthy SnapshotBuilder.Build failed: %v", err)
+			}
+			healthySum := overview.NewClusterSummaryPanel(nil, "Cluster Summary")
+			healthySum.DrawBody(healthySnap)
+			hts, err := ui.NewTestScreen(160, 20)
+			if err != nil {
+				t.Fatalf("NewTestScreen: %v", err)
+			}
+			hts.Draw(healthySum.GetRootView())
+			healthyText := hts.Text()
+			hts.Close()
+			if !strings.Contains(healthyText, "Deploys: 2/2") || !strings.Contains(healthyText, "Pods: 2/2") {
+				t.Errorf("%s: expected healthy summary 'Deploys: 2/2' and 'Pods: 2/2', got:\n%s", tc.name, healthyText)
+			}
+			if strings.Contains(healthyText, "! ") {
+				t.Errorf("%s: healthy summary must not contain '! ', got:\n%s", tc.name, healthyText)
+			}
+
+			if !sawHeaderBoldNoReverse {
+				t.Errorf("%s: expected monochrome table headers with AttrBold and without AttrReverse", tc.name)
+			}
+			if !sawFocusedRowReverse {
+				t.Errorf("%s: expected AttrReverse on focused monochrome table row", tc.name)
 			}
 			if !sawBold {
 				t.Errorf("%s: expected AttrBold structural styling in monochrome mode", tc.name)
+			}
+			if !sawSummaryCriticalPrefix {
+				t.Errorf("%s: expected '! 1/2' prefix for critical Deploys/Pods ratio", tc.name)
 			}
 			if !sawCrashLoopPrefix || !sawCrashLoopUnderline {
 				t.Errorf("%s: expected '! CrashLoop' prefix (%v) with AttrUnderline (%v)",
 					tc.name, sawCrashLoopPrefix, sawCrashLoopUnderline)
 			}
 		})
+	}
+}
+
+func TestLightThemeTableContrastAndClipping(t *testing.T) {
+	t.Cleanup(func() {
+		_, _ = ui.ResolveAndApplyTheme("dark", "truecolor")
+	})
+
+	rt, err := ui.ResolveAndApplyTheme("light", "truecolor")
+	if err != nil {
+		t.Fatalf("ResolveAndApplyTheme(light) failed: %v", err)
+	}
+
+	snap := buildThemeTestSnapshot(t)
+
+	// Unfocused NodePanel data rows must paint LightPalette.CanvasBg with >= 4.5 contrast.
+	nodePanel := overview.NewNodePanel(nil, "Nodes")
+	nodePanel.DrawHeader([]string{"NAME", "STATUS", "RST", "PODS", "CPU", "MEM"})
+	nodePanel.DrawBody(snap)
+
+	ts, err := ui.NewTestScreen(160, 20)
+	if err != nil {
+		t.Fatalf("NewTestScreen: %v", err)
+	}
+	defer ts.Close()
+	// Prime TestScreen focus on an unrelated dummy box so NodePanel draws unfocused first.
+	ts.Draw(tview.NewBox())
+	ts.Draw(nodePanel.GetRootView())
+
+	cells, w, h := ts.Screen().GetContents()
+	foundNodeRow := false
+	for y, line := range ts.Lines() {
+		if y >= h {
+			break
+		}
+		if strings.Contains(line, "node-1") {
+			foundNodeRow = true
+			// Check rendered cells on the data row span CanvasBg across the row.
+			for x := 2; x < w-2; x++ {
+				_, bg, _ := cells[y*w+x].Style.Decompose()
+				if bg != rt.Palette.CanvasBg {
+					t.Fatalf("light NodePanel unselected cell (%d,%d) bg = %v, want %v", x, y, bg, rt.Palette.CanvasBg)
+				}
+			}
+			// Check readable contrast on key text tokens in the row.
+			for _, tok := range []string{"node-1", "Ready"} {
+				tidx, ok := findCellTokenOnRow(cells, w, y, tok)
+				if !ok {
+					t.Fatalf("expected token %q in node row %q", tok, line)
+				}
+				for dx := 0; dx < len(tok); dx++ {
+					fg, bg, _ := cells[y*w+tidx+dx].Style.Decompose()
+					if ratio := wcagContrastRatio(fg, bg, 0xfafafa); ratio < 4.5 {
+						t.Fatalf("light NodePanel unselected %q rune %d contrast = %.2f (< 4.5)", tok, dx, ratio)
+					}
+				}
+			}
+		}
+	}
+	if !foundNodeRow {
+		t.Fatalf("expected 'node-1' row in light NodePanel output:\n%s", ts.Text())
+	}
+
+	// Focused/selected row must use RowSelectedFg on RowSelectedBg with >= 4.5 contrast.
+	ts.Focus(nodePanel.GetRootView())
+	ts.Draw(nodePanel.GetRootView())
+	scells, sw, sh := ts.Screen().GetContents()
+	foundSelectedRow := false
+	for y, line := range ts.Lines() {
+		if y >= sh {
+			break
+		}
+		if strings.Contains(line, "node-1") {
+			foundSelectedRow = true
+			idx, ok := findCellTokenOnRow(scells, sw, y, "node-1")
+			if !ok {
+				t.Fatalf("expected focused token 'node-1' in row %q", line)
+			}
+			for dx := 0; dx < len("node-1") && idx+dx < sw; dx++ {
+				fg, bg, _ := scells[y*sw+idx+dx].Style.Decompose()
+				if bg != rt.Palette.RowSelectedBg {
+					t.Fatalf("light NodePanel selected cell bg = %v, want %v", bg, rt.Palette.RowSelectedBg)
+				}
+				if fg != rt.Palette.RowSelectedFg {
+					t.Fatalf("light NodePanel selected cell fg = %v, want %v", fg, rt.Palette.RowSelectedFg)
+				}
+				if ratio := wcagContrastRatio(fg, bg, 0xfafafa); ratio < 4.5 {
+					t.Fatalf("light NodePanel selected row contrast = %.2f (< 4.5)", ratio)
+				}
+			}
+		}
+	}
+	if !foundSelectedRow {
+		t.Fatalf("expected focused 'node-1' row in light NodePanel output")
+	}
+
+	// Check PodPanel data rows also paint CanvasBg cleanly both unfocused and for unselected rows when focused.
+	podPanel := overview.NewPodPanel(nil, "Pods")
+	podPanel.DrawHeader([]string{"NAMESPACE", "POD", "READY", "STATUS", "CPU", "MEMORY"})
+	podPanel.DrawBody(snap)
+	pts, err := ui.NewTestScreen(160, 20)
+	if err != nil {
+		t.Fatalf("NewTestScreen: %v", err)
+	}
+	defer pts.Close()
+	pts.Draw(tview.NewBox())
+	pts.Draw(podPanel.GetRootView())
+	pcells, pw, ph := pts.Screen().GetContents()
+	foundPodRow := false
+	for y, line := range pts.Lines() {
+		if y >= ph {
+			break
+		}
+		if strings.Contains(line, "api-0") {
+			foundPodRow = true
+			for x := 2; x < pw-2; x++ {
+				_, bg, _ := pcells[y*pw+x].Style.Decompose()
+				if bg != rt.Palette.CanvasBg {
+					t.Fatalf("light PodPanel unselected cell (%d,%d) bg = %v, want %v", x, y, bg, rt.Palette.CanvasBg)
+				}
+			}
+		}
+	}
+	if !foundPodRow {
+		t.Fatalf("expected 'api-0' row in light PodPanel output")
+	}
+
+	// Check SummaryPanel sparkline title does not clip leading "CPU " even in narrower layouts.
+	sum := overview.NewClusterSummaryPanel(nil, "Cluster Summary")
+	sum.DrawBody(snap)
+	sts, err := ui.NewTestScreen(130, 25)
+	if err != nil {
+		t.Fatalf("NewTestScreen: %v", err)
+	}
+	defer sts.Close()
+	sts.Draw(sum.GetRootView())
+	sumText := sts.Text()
+	if !strings.Contains(sumText, "CPU ") {
+		t.Fatalf("expected unclipped 'CPU ' in light SummaryPanel, got:\n%s", sumText)
 	}
 }
 

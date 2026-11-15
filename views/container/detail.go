@@ -236,18 +236,21 @@ func (p *DetailPanel) buildLayout() {
 	p.leftDetailTable.SetBorder(false)
 	p.leftDetailTable.SetBorders(false)
 	p.leftDetailTable.SetSelectable(false, false)
+	ui.StyleTable(p.leftDetailTable)
 
 	// Center column: State Details table
 	p.centerDetailTable = tview.NewTable()
 	p.centerDetailTable.SetBorder(false)
 	p.centerDetailTable.SetBorders(false)
 	p.centerDetailTable.SetSelectable(false, false)
+	ui.StyleTable(p.centerDetailTable)
 
 	// Right column: Probes & Resources table
 	p.rightDetailTable = tview.NewTable()
 	p.rightDetailTable.SetBorder(false)
 	p.rightDetailTable.SetBorders(false)
 	p.rightDetailTable.SetSelectable(false, false)
+	ui.StyleTable(p.rightDetailTable)
 
 	p.containerDetailPanel.AddItem(p.leftDetailTable, 0, 1, false)
 	p.containerDetailPanel.AddItem(p.centerDetailTable, 0, 1, false)
@@ -452,6 +455,9 @@ func (p *DetailPanel) drawContainerDetail() {
 	p.leftDetailTable.Clear()
 	p.centerDetailTable.Clear()
 	p.rightDetailTable.Clear()
+	ui.StyleTable(p.leftDetailTable)
+	ui.StyleTable(p.centerDetailTable)
+	ui.StyleTable(p.rightDetailTable)
 
 	// === LEFT COLUMN: Container Info ===
 	row := 0
@@ -576,14 +582,18 @@ func (p *DetailPanel) drawContainerDetail() {
 		row++
 
 		// Ready
-		readyStr := "No"
-		if mono {
-			readyStr = "! No"
-		}
-		readyColor := errColor
+		var readyStr string
+		var readyColor tcell.Color
 		if p.containerStatus.Ready {
 			readyStr = "Yes"
 			readyColor = okColor
+		} else {
+			if mono {
+				readyStr = "! No"
+			} else {
+				readyStr = "No"
+			}
+			readyColor = errColor
 		}
 		ui.AddDetailRowColor(p.centerDetailTable, row, "Ready", readyStr, readyColor)
 		row++
@@ -743,7 +753,7 @@ func (p *DetailPanel) addDetailHeader(table *tview.Table, row int, title string)
 	if ui.IsMonochrome() {
 		sectionColor = tcell.ColorDefault
 	}
-	table.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("[::b]%s[::-]", title)).SetTextColor(sectionColor).SetSelectable(false))
+	table.SetCell(row, 0, ui.NewDataCell(fmt.Sprintf("[::b]%s[::-]", title)).SetTextColor(sectionColor).SetSelectable(false))
 }
 
 func formatLogsTitle(count int, following, expanded bool) string {

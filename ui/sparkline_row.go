@@ -26,21 +26,21 @@ func NewSparklineRow(prometheusMode bool) *SparklineRow {
 
 	r := &SparklineRow{
 		Box:            tview.NewBox(),
-		cpuSparkline:   NewSparkline().SetColorKeys(colorKeys),
-		memSparkline:   NewSparkline().SetColorKeys(colorKeys),
+		cpuSparkline:   NewSparkline(),
+		memSparkline:   NewSparkline(),
 		prometheusMode: prometheusMode,
 		colorKeys:      colorKeys,
 	}
 
 	borderColor := ActivePalette().BorderNormal
-	r.cpuSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignCenter)
-	r.memSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignCenter)
+	r.cpuSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignLeft)
+	r.memSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignLeft)
 
 	if prometheusMode {
-		r.netSparkline = NewSparkline().SetColorKeys(colorKeys)
-		r.diskSparkline = NewSparkline().SetColorKeys(colorKeys)
-		r.netSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignCenter)
-		r.diskSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignCenter)
+		r.netSparkline = NewSparkline()
+		r.diskSparkline = NewSparkline()
+		r.netSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignLeft)
+		r.diskSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignLeft)
 	}
 
 	return r
@@ -54,10 +54,10 @@ func (r *SparklineRow) SetPrometheusMode(enabled bool) *SparklineRow {
 	r.prometheusMode = enabled
 	if enabled && r.netSparkline == nil {
 		borderColor := ActivePalette().BorderNormal
-		r.netSparkline = NewSparkline().SetColorKeys(r.colorKeys)
-		r.diskSparkline = NewSparkline().SetColorKeys(r.colorKeys)
-		r.netSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignCenter)
-		r.diskSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignCenter)
+		r.netSparkline = NewSparkline()
+		r.diskSparkline = NewSparkline()
+		r.netSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignLeft)
+		r.diskSparkline.SetBorder(true).SetBorderColor(borderColor).SetTitleAlign(tview.AlignLeft)
 	}
 	return r
 }
@@ -123,6 +123,17 @@ func (r *SparklineRow) Reset() {
 
 // Draw implements tview.Primitive.
 func (r *SparklineRow) Draw(screen tcell.Screen) {
+	pal := ActivePalette()
+	r.colorKeys = DefaultColorKeys()
+	r.Box.SetBackgroundColor(pal.CanvasBg)
+	r.cpuSparkline.SetBorderColor(pal.BorderNormal)
+	r.memSparkline.SetBorderColor(pal.BorderNormal)
+	if r.netSparkline != nil {
+		r.netSparkline.SetBorderColor(pal.BorderNormal)
+	}
+	if r.diskSparkline != nil {
+		r.diskSparkline.SetBorderColor(pal.BorderNormal)
+	}
 	r.Box.DrawForSubclass(screen, r)
 
 	x, y, width, height := r.GetInnerRect()

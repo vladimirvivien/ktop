@@ -131,12 +131,14 @@ func (p *DetailPanel) Layout(_ any) {
 		p.leftDetailTable.SetBorder(false)
 		p.leftDetailTable.SetBorders(false)
 		p.leftDetailTable.SetSelectable(false, false)
+		ui.StyleTable(p.leftDetailTable)
 
 		// Middle column: Conditions table
 		p.middleDetailTable = tview.NewTable()
 		p.middleDetailTable.SetBorder(false)
 		p.middleDetailTable.SetBorders(false)
 		p.middleDetailTable.SetSelectable(false, false)
+		ui.StyleTable(p.middleDetailTable)
 
 		// Labels column: TextView (scrollable, sorted)
 		p.labelsTextView = tview.NewTextView()
@@ -167,7 +169,7 @@ func (p *DetailPanel) Layout(_ any) {
 		p.podsTable.SetSelectable(false, false) // Start unselectable, enable on focus
 		p.podsTable.SetBorder(false)
 		p.podsTable.SetBorders(false)
-		p.podsTable.SetSelectedStyle(ui.SelectedRowStyle())
+		ui.StyleTable(p.podsTable)
 
 		podColumnToKey := map[string]rune{
 			"NAMESPACE": 'n',
@@ -513,6 +515,8 @@ func (p *DetailPanel) drawSparklines() {
 func (p *DetailPanel) drawSystemDetailSection() {
 	p.leftDetailTable.Clear()
 	p.middleDetailTable.Clear()
+	ui.StyleTable(p.leftDetailTable)
+	ui.StyleTable(p.middleDetailTable)
 	p.labelsTextView.Clear()
 	p.annotationsTextView.Clear()
 
@@ -546,7 +550,7 @@ func (p *DetailPanel) drawSystemDetailSection() {
 
 	// === LEFT COLUMN: System Info ===
 	row := 0
-	p.leftDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]System[::-]").SetTextColor(sectionColor).SetSelectable(false))
+	p.leftDetailTable.SetCell(row, 0, ui.NewDataCell("[::b]System[::-]").SetTextColor(sectionColor).SetSelectable(false))
 	row++
 
 	// MachineID (truncate for display)
@@ -600,7 +604,7 @@ func (p *DetailPanel) drawSystemDetailSection() {
 
 	// === MIDDLE COLUMN: Conditions ===
 	row = 0
-	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]Conditions[::-]").SetTextColor(sectionColor).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 0, ui.NewDataCell("[::b]Conditions[::-]").SetTextColor(sectionColor).SetSelectable(false))
 	row++
 
 	conditions := p.data.GetConditions()
@@ -615,8 +619,8 @@ func (p *DetailPanel) drawSystemDetailSection() {
 				statusAttrs = tcell.AttrUnderline | tcell.AttrBold
 			}
 		}
-		p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", cond.Type)).SetTextColor(mutedColor).SetSelectable(false))
-		p.middleDetailTable.SetCell(row, 1, tview.NewTableCell(statusText).SetTextColor(statusColor).SetAttributes(statusAttrs).SetSelectable(false))
+		p.middleDetailTable.SetCell(row, 0, ui.NewDataCell(fmt.Sprintf("%-18s", cond.Type)).SetTextColor(mutedColor).SetSelectable(false))
+		p.middleDetailTable.SetCell(row, 1, ui.NewDataCell(statusText).SetTextColor(statusColor).SetAttributes(statusAttrs).SetSelectable(false))
 		row++
 	}
 
@@ -629,8 +633,8 @@ func (p *DetailPanel) drawSystemDetailSection() {
 			cordonedValue = errOpen + "True" + closeTag
 		}
 	}
-	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", "Cordoned")).SetTextColor(mutedColor).SetSelectable(false))
-	p.middleDetailTable.SetCell(row, 1, tview.NewTableCell(cordonedValue).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 0, ui.NewDataCell(fmt.Sprintf("%-18s", "Cordoned")).SetTextColor(mutedColor).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 1, ui.NewDataCell(cordonedValue).SetSelectable(false))
 	row++
 
 	// Taints
@@ -642,8 +646,8 @@ func (p *DetailPanel) drawSystemDetailSection() {
 			taintsValue = fmt.Sprintf("%s%d%s", warnOpen, node.TaintCount, closeTag)
 		}
 	}
-	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", "Taints")).SetTextColor(mutedColor).SetSelectable(false))
-	p.middleDetailTable.SetCell(row, 1, tview.NewTableCell(taintsValue).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 0, ui.NewDataCell(fmt.Sprintf("%-18s", "Taints")).SetTextColor(mutedColor).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 1, ui.NewDataCell(taintsValue).SetSelectable(false))
 	row++
 
 	// Pressures
@@ -656,13 +660,13 @@ func (p *DetailPanel) drawSystemDetailSection() {
 			pressureValue = errOpen + joined + closeTag
 		}
 	}
-	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell(fmt.Sprintf("%-18s", "Pressures")).SetTextColor(mutedColor).SetSelectable(false))
-	p.middleDetailTable.SetCell(row, 1, tview.NewTableCell(pressureValue).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 0, ui.NewDataCell(fmt.Sprintf("%-18s", "Pressures")).SetTextColor(mutedColor).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 1, ui.NewDataCell(pressureValue).SetSelectable(false))
 	row++
 
 	// === EVENTS SUMMARY ===
 	row++
-	p.middleDetailTable.SetCell(row, 0, tview.NewTableCell("[::b]Events[::-]").SetTextColor(sectionColor).SetSelectable(false))
+	p.middleDetailTable.SetCell(row, 0, ui.NewDataCell("[::b]Events[::-]").SetTextColor(sectionColor).SetSelectable(false))
 	row++
 
 	if p.data != nil && len(p.data.Events) > 0 {
@@ -749,6 +753,7 @@ func (p *DetailPanel) drawPodsTable() {
 	selectedRow, selectedCol := p.podsTable.GetSelection()
 
 	p.podsTable.Clear()
+	ui.StyleTable(p.podsTable)
 
 	// Draw header
 	headers := []string{"NAMESPACE", "POD", "STATUS", "READY", "RESTARTS", "CPU", "MEM", "AGE"}
@@ -851,14 +856,14 @@ func (p *DetailPanel) drawPodsTable() {
 		cpuStr := ui.FormatCPU(pod.PodUsageCpuQty)
 		memStr := ui.FormatMemory(pod.PodUsageMemQty)
 
-		p.podsTable.SetCell(rowIdx, 0, tview.NewTableCell(pod.Namespace).SetTextColor(cellColor))
-		p.podsTable.SetCell(rowIdx, 1, tview.NewTableCell(pod.Name).SetTextColor(cellColor).SetMaxWidth(30))
-		p.podsTable.SetCell(rowIdx, 2, ui.StyleStatusCell(tview.NewTableCell(pod.Status), pod.Status, "pod"))
-		p.podsTable.SetCell(rowIdx, 3, tview.NewTableCell(readyStr).SetTextColor(cellColor))
-		p.podsTable.SetCell(rowIdx, 4, tview.NewTableCell(fmt.Sprintf("%d", pod.Restarts)).SetTextColor(restartColor).SetAttributes(restartAttrs))
-		p.podsTable.SetCell(rowIdx, 5, tview.NewTableCell(cpuStr).SetTextColor(cellColor))
-		p.podsTable.SetCell(rowIdx, 6, tview.NewTableCell(memStr).SetTextColor(cellColor))
-		p.podsTable.SetCell(rowIdx, 7, tview.NewTableCell(pod.TimeSince).SetTextColor(mutedColor))
+		p.podsTable.SetCell(rowIdx, 0, ui.NewDataCell(pod.Namespace).SetTextColor(cellColor))
+		p.podsTable.SetCell(rowIdx, 1, ui.NewDataCell(pod.Name).SetTextColor(cellColor).SetMaxWidth(30))
+		p.podsTable.SetCell(rowIdx, 2, ui.StyleStatusCell(ui.NewDataCell(pod.Status), pod.Status, "pod"))
+		p.podsTable.SetCell(rowIdx, 3, ui.NewDataCell(readyStr).SetTextColor(cellColor))
+		p.podsTable.SetCell(rowIdx, 4, ui.NewDataCell(fmt.Sprintf("%d", pod.Restarts)).SetTextColor(restartColor).SetAttributes(restartAttrs))
+		p.podsTable.SetCell(rowIdx, 5, ui.NewDataCell(cpuStr).SetTextColor(cellColor))
+		p.podsTable.SetCell(rowIdx, 6, ui.NewDataCell(memStr).SetTextColor(cellColor))
+		p.podsTable.SetCell(rowIdx, 7, ui.NewDataCell(pod.TimeSince).SetTextColor(mutedColor))
 	}
 
 	// Restore selection (clamped to valid range)
@@ -889,6 +894,7 @@ func (p *DetailPanel) DrawFooter(_ any) {}
 func (p *DetailPanel) Clear() {
 	if p.podsTable != nil {
 		p.podsTable.Clear()
+		ui.StyleTable(p.podsTable)
 	}
 }
 

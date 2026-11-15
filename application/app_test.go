@@ -1,12 +1,21 @@
 package application
 
 import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/k8s"
+	"github.com/vladimirvivien/ktop/ui"
+	"k8s.io/cli-runtime/pkg/genericclioptions"
 )
 
 func TestApplicationRefreshNonBlockingCoalescing(t *testing.T) {
@@ -163,5 +172,93 @@ func TestApplication_ShowHelpModal(t *testing.T) {
 
 	if app.HasActiveModalPage() {
 		t.Fatalf("expected no active modal page after DismissModalPage")
+	}
+}
+
+func TestApplication_HeaderAllNamespacesNotClipped(t *testing.T) {
+	t.Cleanup(func() {
+		_, _ = ui.ResolveAndApplyTheme("dark", "truecolor")
+	})
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"major":"1","minor":"35","gitVersion":"v1.35.0"}`)
+	}))
+	defer srv.Close()
+
+	kcPath := filepath.Join(t.TempDir(), "kubeconfig")
+	kcYAML := fmt.Sprintf(`apiVersion: v1
+kind: Config
+clusters:
+- cluster:
+    server: %s
+  name: kind-kind
+contexts:
+- context:
+    cluster: kind-kind
+    user: kind-kind
+  name: kind-kind
+current-context: kind-kind
+users:
+- name: kind-kind
+  user: {}
+`, srv.URL)
+	if err := os.WriteFile(kcPath, []byte(kcYAML), 0o600); err != nil {
+		t.Fatalf("WriteFile kubeconfig failed: %v", err)
+	}
+
+	flags := genericclioptions.NewConfigFlags(false)
+	allNS := k8s.AllNamespaces
+	flags.KubeConfig = &kcPath
+	flags.Namespace = &allNS
+	client, err := k8s.New(flags)
+	if err != nil {
+		t.Fatalf("k8s.New failed: %v", err)
+	}
+
+	for _, tc := range []struct {
+		theme string
+		mode  string
+	}{
+		{"light", "truecolor"},
+		{"monochrome", "none"},
+	} {
+		t.Run(tc.theme, func(t *testing.T) {
+			if _, err := ui.ResolveAndApplyTheme(tc.theme, tc.mode); err != nil {
+				t.Fatalf("ResolveAndApplyTheme failed: %v", err)
+			}
+
+			tapp := tview.NewApplication()
+			panel := newPanel(tapp)
+			panel.header = tview.NewTable()
+			panel.header.SetBorders(false)
+			panel.header.SetBorder(true)
+			ui.StyleTable(panel.header)
+
+			app := &Application{
+				tviewApp:  tapp,
+				panel:     panel,
+				k8sClient: client,
+				navStack:  NewNavigationStack(),
+			}
+
+			hdr := app.buildHeaderString(app.getNamespaceDisplay())
+			panel.DrawHeader(hdr)
+
+			ts, err := ui.NewTestScreen(160, 5)
+			if err != nil {
+				t.Fatalf("NewTestScreen failed: %v", err)
+			}
+			defer ts.Close()
+
+			ts.Draw(panel.header)
+			rendered := ts.Text()
+			if !strings.Contains(rendered, "Namespace: (all)") {
+				t.Fatalf("expected unclipped 'Namespace: (all)' in %s header, got:\n%s", tc.theme, rendered)
+			}
+			if strings.Contains(rendered, "(all...") {
+				t.Fatalf("unexpected '(all...' truncation in %s header, got:\n%s", tc.theme, rendered)
+			}
+		})
 	}
 }

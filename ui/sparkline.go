@@ -13,8 +13,9 @@ type Sparkline struct {
 	*tview.Box
 
 	// Internal state
-	state     *SparklineState
-	colorKeys ColorKeys
+	state        *SparklineState
+	colorKeys    ColorKeys
+	customColors bool
 
 	// Dimensions (used when creating/resizing state)
 	sparkWidth  int
@@ -50,8 +51,19 @@ func (s *Sparkline) SetDimensions(width, height int) *Sparkline {
 // SetColorKeys sets the color thresholds.
 func (s *Sparkline) SetColorKeys(colors ColorKeys) *Sparkline {
 	s.colorKeys = colors
+	s.customColors = true
 	s.state = NewSparklineStateWithHeight(s.sparkWidth, s.sparkHeight, s.colorKeys)
 	return s
+}
+
+func (s *Sparkline) refreshDefaultColors() {
+	if s.customColors {
+		return
+	}
+	s.colorKeys = DefaultColorKeys()
+	if s.state != nil {
+		s.state.colors = s.colorKeys
+	}
 }
 
 // SetTitle sets the panel title (chainable, returns *Sparkline).
@@ -122,6 +134,8 @@ func (s *Sparkline) RenderText() string {
 // Draw implements tview.Primitive.
 // Like tview's Table and TextArea, this method adapts to container dimensions.
 func (s *Sparkline) Draw(screen tcell.Screen) {
+	s.refreshDefaultColors()
+	s.Box.SetBackgroundColor(ActivePalette().CanvasBg)
 	s.Box.DrawForSubclass(screen, s)
 
 	// Get inner dimensions (accounting for border)

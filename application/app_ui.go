@@ -59,9 +59,11 @@ func (p *appPanel) Layout(data any) {
 	p.header.SetBorders(false)
 
 	p.header.SetBorder(true)
+	ui.StyleTable(p.header)
 	p.pages = tview.NewPages()
 	p.footer = tview.NewTable()
 	p.footer.SetBorder(true)
+	ui.StyleTable(p.footer)
 
 	// Initialize context-aware navigation footer
 	p.footerComponent = ui.NewFooter()
@@ -85,20 +87,11 @@ func (p *appPanel) Layout(data any) {
 	}
 
 	// setup page and page buttons in footer
-	pal := ui.ActivePalette()
 	for i, page := range pages {
 		p.pages.AddPage(page.Title, page.Panel.GetRootView(), true, false)
-		cell := &tview.TableCell{
-			Text:      fmt.Sprintf("  %s (F%d)  ", page.Title, i+1),
-			Color:     pal.DataSecondary,
-			Align:     tview.AlignCenter,
-			Expansion: 0,
-		}
-		if ui.IsMonochrome() {
-			cell.SetTextColor(tcell.ColorDefault).SetBackgroundColor(tcell.ColorDefault)
-		} else {
-			cell.SetBackgroundColor(pal.CanvasBg)
-		}
+		cell := ui.NewDataCell(fmt.Sprintf("  %s (F%d)  ", page.Title, i+1)).
+			SetAlign(tview.AlignCenter).
+			SetExpansion(0)
 		p.footer.SetCell(0, i, cell)
 	}
 }
@@ -109,6 +102,7 @@ func (p *appPanel) DrawHeader(data any) {
 		panic(fmt.Sprintf("application.Drawheader got unexpected type %T", data))
 	}
 
+	ui.StyleTable(p.header)
 	pal := ui.ActivePalette()
 	leftColor := pal.DataPrimary
 	rightColor := pal.DataSecondary
@@ -120,7 +114,7 @@ func (p *appPanel) DrawHeader(data any) {
 	// Header string already includes namespace filter state (handled by getNamespaceDisplay)
 	p.header.SetCell(
 		0, 0,
-		tview.NewTableCell(header).
+		ui.NewDataCell(header).
 			SetTextColor(leftColor).
 			SetAlign(tview.AlignLeft).
 			SetExpansion(100),
@@ -128,7 +122,7 @@ func (p *appPanel) DrawHeader(data any) {
 
 	p.header.SetCell(
 		0, 1,
-		tview.NewTableCell("ktop: "+buildinfo.Version).
+		ui.NewDataCell("ktop: "+buildinfo.Version).
 			SetTextColor(rightColor).
 			SetAlign(tview.AlignRight).
 			SetExpansion(100),
