@@ -51,19 +51,23 @@ func NewColumnSelectorModal(cfg ColumnSelectorConfig) *ColumnSelectorModal {
 
 	m.table.SetInputCapture(m.HandleInput)
 
+	p := ActivePalette()
 	instrText := "[::b]Space[::-] Toggle  [::b]Enter[::-] Apply  [::b]Esc[::-] Cancel"
 	if !IsMonochrome() {
-		keyTag := TagFg(ActivePalette().DataPrimary)
+		keyTag := TagFg(p.DataPrimary)
 		instrText = fmt.Sprintf("[%s]Space[-] Toggle  [%s]Enter[-] Apply  [%s]Esc[-] Cancel", keyTag, keyTag, keyTag)
 	}
 	instructions := tview.NewTextView().
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter).
 		SetText(instrText)
+	instructions.SetTextColor(p.CanvasFg)
+	instructions.SetBackgroundColor(p.CanvasBg)
 
 	box := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(m.table, 0, 1, true).
 		AddItem(instructions, 1, 0, false)
+	box.SetBackgroundColor(p.CanvasBg)
 	box.SetBorder(true).
 		SetTitle(fmt.Sprintf(" Configure Columns: %s ", cfg.Title)).
 		SetTitleAlign(tview.AlignCenter)

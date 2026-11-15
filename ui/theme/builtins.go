@@ -49,7 +49,7 @@ func DarkPalette() Palette {
 
 		ToastInfoBg:    tcell.ColorDarkBlue,
 		ToastSuccessBg: tcell.ColorDarkGreen,
-		ToastWarnBg:    tcell.ColorDarkOrange,
+		ToastWarnBg:    tcell.NewHexColor(0x92400e),
 		ToastErrorBg:   tcell.ColorDarkRed,
 		ToastFg:        tcell.ColorWhite,
 	}
@@ -69,25 +69,25 @@ func LightPalette() Palette {
 		TitleNormal:   tcell.NewHexColor(0x1e293b),
 		TitleFocused:  tcell.NewHexColor(0x0f4c81),
 
-		HeaderBg:        tcell.NewHexColor(0x1f3a52),
-		HeaderFg:        tcell.NewHexColor(0xffffff),
-		HeaderHotkey:    tcell.NewHexColor(0x38bdf8),
-		HeaderSortArrow: tcell.NewHexColor(0x38bdf8),
+		HeaderBg:        tcell.NewHexColor(0xe2e8f0),
+		HeaderFg:        tcell.NewHexColor(0x1e293b),
+		HeaderHotkey:    tcell.NewHexColor(0x0369a1),
+		HeaderSortArrow: tcell.NewHexColor(0x0369a1),
 		RowSelectedBg:   tcell.NewHexColor(0xdbeafe),
 		RowSelectedFg:   tcell.NewHexColor(0x0f172a),
 		RowAlternateBg:  tcell.ColorDefault,
 
 		StatusOK:      tcell.NewHexColor(0x047857),
-		StatusWarning: tcell.NewHexColor(0xb45309),
+		StatusWarning: tcell.NewHexColor(0x9a6700),
 		StatusError:   tcell.NewHexColor(0xb91c1c),
 		StatusInfo:    tcell.NewHexColor(0x0369a1),
 		StatusMuted:   tcell.NewHexColor(0x6b7280),
 
 		GaugeLow:        tcell.NewHexColor(0x047857),
-		GaugeMedium:     tcell.NewHexColor(0xb45309),
+		GaugeMedium:     tcell.NewHexColor(0x9a6700),
 		GaugeElevated:   tcell.NewHexColor(0xc2410c),
 		GaugeHigh:       tcell.NewHexColor(0xb91c1c),
-		SparklineNormal: tcell.NewHexColor(0x047857),
+		SparklineNormal: tcell.NewHexColor(0x0369a1),
 		SparklineAlert:  tcell.NewHexColor(0xb91c1c),
 		SparklineEmpty:  tcell.NewHexColor(0x9ca3af),
 		BarEmpty:        tcell.NewHexColor(0x9ca3af),
@@ -96,11 +96,11 @@ func LightPalette() Palette {
 		DataPrimary:   tcell.NewHexColor(0x0f4c81),
 		DataSecondary: tcell.NewHexColor(0x1a1a1a),
 
-		ToastInfoBg:    tcell.NewHexColor(0x1e3a8a),
-		ToastSuccessBg: tcell.NewHexColor(0x065f46),
-		ToastWarnBg:    tcell.NewHexColor(0x92400e),
-		ToastErrorBg:   tcell.NewHexColor(0x991b1b),
-		ToastFg:        tcell.NewHexColor(0xffffff),
+		ToastInfoBg:    tcell.NewHexColor(0xe0f2fe),
+		ToastSuccessBg: tcell.NewHexColor(0xdcfce7),
+		ToastWarnBg:    tcell.NewHexColor(0xfef3c7),
+		ToastErrorBg:   tcell.NewHexColor(0xfee2e2),
+		ToastFg:        tcell.NewHexColor(0x0f172a),
 	}
 }
 

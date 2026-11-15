@@ -354,6 +354,10 @@ func (tc *TableController) IsFilterEditing() bool {
 func GetSparkline(sparklines map[string]*Sparkline, key string, width int, colors ColorKeys) *Sparkline {
 	if spark, ok := sparklines[key]; ok {
 		spark.Resize(width)
+		spark.colorKeys = colors
+		if spark.state != nil {
+			spark.state.colors = colors
+		}
 		return spark
 	}
 	spark := NewSparkline().SetDimensions(width, 1).SetColorKeys(colors)

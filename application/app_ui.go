@@ -269,7 +269,7 @@ func (p *appPanel) showToastWithButtons(message string, level ui.ToastLevel, dur
 		}()
 	}
 
-	var toast *tview.Modal
+	var toast *ui.ToastModal
 	if len(buttons) > 0 {
 		// Create toast with buttons
 		toast = ui.NewToastWithButtons(message, level, buttons, wrappedCallback)

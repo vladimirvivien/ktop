@@ -67,15 +67,15 @@ func TestBuiltinsAndByName(t *testing.T) {
 
 func TestResolveColorTiersAndRoundTrip(t *testing.T) {
 	light := LightPalette()
-	sample := light.HeaderBg // #1f3a52
+	sample := light.HeaderBg // #e2e8f0
 
 	// Tier 1: TrueColor preserves exact RGB.
 	tc := ResolveColor(sample, ColorModeTrueColor)
 	if tc != sample || !tc.IsRGB() {
 		t.Fatalf("TrueColor modified RGB color: got %v, want %v", tc, sample)
 	}
-	if tag := ColorTag(sample, ColorModeTrueColor); tag != "#1f3a52" {
-		t.Errorf("TrueColor ColorTag = %q, want #1f3a52", tag)
+	if tag := ColorTag(sample, ColorModeTrueColor); tag != "#e2e8f0" {
+		t.Errorf("TrueColor ColorTag = %q, want #e2e8f0", tag)
 	}
 
 	// Tier 2: 256-color quantizes RGB into PaletteColor(16..255) without IsRGB().
@@ -112,15 +112,15 @@ func TestResolveColorTiersAndRoundTrip(t *testing.T) {
 	// Verify DarkPalette named tags remain exact W3C names under TrueColor.
 	dark := DarkPalette()
 	for color, want := range map[tcell.Color]string{
-		dark.GaugeLow:        "green",
-		dark.GaugeMedium:     "yellow",
-		dark.GaugeElevated:   "orange",
-		dark.GaugeHigh:       "red",
-		dark.StatusMuted:     "gray",
-		dark.StatusOK:        "olivedrab",
-		dark.BarEmpty:        "darkgray",
-		dark.BorderFocused:   "dodgerblue",
-		dark.DataSecondary:   "white",
+		dark.GaugeLow:      "green",
+		dark.GaugeMedium:   "yellow",
+		dark.GaugeElevated: "orange",
+		dark.GaugeHigh:     "red",
+		dark.StatusMuted:   "gray",
+		dark.StatusOK:      "olivedrab",
+		dark.BarEmpty:      "darkgray",
+		dark.BorderFocused: "dodgerblue",
+		dark.DataSecondary: "white",
 	} {
 		if got := ColorTag(color, ColorModeTrueColor); got != want {
 			t.Errorf("DarkPalette ColorTag(%v) = %q, want %q", color, got, want)

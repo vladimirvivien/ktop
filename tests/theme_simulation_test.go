@@ -157,7 +157,7 @@ func renderThemeViews(t *testing.T, snap *snapshot.Snapshot) []struct {
 		AllColumns:     []string{"NAME", "STATUS", "CPU"},
 		CurrentColumns: []string{"NAME", "CPU"},
 	}).GetRootView()
-	toast := ui.NewToast("connection lost", ui.ToastError)
+	toast := ui.NewToastWithButtons("connection lost [403]", ui.ToastError, []string{"Retry", "Quit"}, nil)
 
 	return []struct {
 		name      string
@@ -265,14 +265,38 @@ func TestAllBuiltinThemesRenderAndContrast(t *testing.T) {
 					{"HeaderFg/HeaderBg", p.HeaderFg, p.HeaderBg},
 					{"RowSelectedFg/RowSelectedBg", p.RowSelectedFg, p.RowSelectedBg},
 					{"ToastFg/ToastInfoBg", p.ToastFg, p.ToastInfoBg},
+					{"ToastFg/ToastSuccessBg", p.ToastFg, p.ToastSuccessBg},
+					{"ToastFg/ToastWarnBg", p.ToastFg, p.ToastWarnBg},
 					{"ToastFg/ToastErrorBg", p.ToastFg, p.ToastErrorBg},
 				}
 				if tc.themeName == "light" {
-					pairs45 = append(pairs45, struct {
-						name string
-						fg   tcell.Color
-						bg   tcell.Color
-					}{"HeaderHotkey/HeaderBg", p.HeaderHotkey, p.HeaderBg})
+					pairs45 = append(pairs45,
+						struct {
+							name string
+							fg   tcell.Color
+							bg   tcell.Color
+						}{"HeaderHotkey/HeaderBg", p.HeaderHotkey, p.HeaderBg},
+						struct {
+							name string
+							fg   tcell.Color
+							bg   tcell.Color
+						}{"HeaderSortArrow/HeaderBg", p.HeaderSortArrow, p.HeaderBg},
+						struct {
+							name string
+							fg   tcell.Color
+							bg   tcell.Color
+						}{"StatusWarning/CanvasBg", p.StatusWarning, p.CanvasBg},
+						struct {
+							name string
+							fg   tcell.Color
+							bg   tcell.Color
+						}{"GaugeMedium/CanvasBg", p.GaugeMedium, p.CanvasBg},
+						struct {
+							name string
+							fg   tcell.Color
+							bg   tcell.Color
+						}{"SparklineNormal/CanvasBg", p.SparklineNormal, p.CanvasBg},
+					)
 				}
 				for _, pair := range pairs45 {
 					ratio := wcagContrastRatio(pair.fg, pair.bg, bgFallback)
@@ -547,10 +571,27 @@ func TestLightThemeTableContrastAndClipping(t *testing.T) {
 	ts.Draw(nodePanel.GetRootView())
 
 	cells, w, h := ts.Screen().GetContents()
+	foundHeaderRow := false
 	foundNodeRow := false
 	for y, line := range ts.Lines() {
 		if y >= h {
 			break
+		}
+		if strings.Contains(line, "NAME") {
+			foundHeaderRow = true
+			hidx, ok := findCellTokenOnRow(cells, w, y, "NAME")
+			if !ok {
+				t.Fatalf("expected token 'NAME' in header row %q", line)
+			}
+			for dx := 0; dx < len("NAME"); dx++ {
+				fg, bg, _ := cells[y*w+hidx+dx].Style.Decompose()
+				if bg != rt.Palette.HeaderBg {
+					t.Fatalf("light NodePanel header cell bg = %v, want %v", bg, rt.Palette.HeaderBg)
+				}
+				if ratio := wcagContrastRatio(fg, bg, 0xfafafa); ratio < 4.5 {
+					t.Fatalf("light NodePanel header rune %d contrast = %.2f (< 4.5)", dx, ratio)
+				}
+			}
 		}
 		if strings.Contains(line, "node-1") {
 			foundNodeRow = true
@@ -575,6 +616,9 @@ func TestLightThemeTableContrastAndClipping(t *testing.T) {
 				}
 			}
 		}
+	}
+	if !foundHeaderRow {
+		t.Fatalf("expected 'NAME' header row in light NodePanel output:\n%s", ts.Text())
 	}
 	if !foundNodeRow {
 		t.Fatalf("expected 'node-1' row in light NodePanel output:\n%s", ts.Text())
@@ -644,7 +688,8 @@ func TestLightThemeTableContrastAndClipping(t *testing.T) {
 		t.Fatalf("expected 'api-0' row in light PodPanel output")
 	}
 
-	// Check SummaryPanel sparkline title does not clip leading "CPU " even in narrower layouts.
+	// Check SummaryPanel sparkline title does not clip leading "CPU " and bargraph
+	// cells use LightPalette SparklineNormal instead of olive/green tones.
 	sum := overview.NewClusterSummaryPanel(nil, "Cluster Summary")
 	sum.DrawBody(snap)
 	sts, err := ui.NewTestScreen(130, 25)
@@ -656,6 +701,33 @@ func TestLightThemeTableContrastAndClipping(t *testing.T) {
 	sumText := sts.Text()
 	if !strings.Contains(sumText, "CPU ") {
 		t.Fatalf("expected unclipped 'CPU ' in light SummaryPanel, got:\n%s", sumText)
+	}
+
+	scellsSum, swSum, shSum := sts.Screen().GetContents()
+	sawActiveBar := false
+	oliveLegacy := tcell.ColorOliveDrab
+	forestLegacy := tcell.NewHexColor(0x047857)
+	for i := 0; i < swSum*shSum && i < len(scellsSum); i++ {
+		if len(scellsSum[i].Runes) == 0 {
+			continue
+		}
+		switch scellsSum[i].Runes[0] {
+		case '▂', '▃', '▄', '▅', '▆', '▇', '█':
+			sawActiveBar = true
+			fg, bg, _ := scellsSum[i].Style.Decompose()
+			if fg == oliveLegacy || fg == forestLegacy {
+				t.Fatalf("light SummaryPanel bargraph used off-palette color %v, want %v", fg, rt.Palette.SparklineNormal)
+			}
+			if fg != rt.Palette.SparklineNormal {
+				t.Fatalf("light SummaryPanel bargraph fg = %v, want %v", fg, rt.Palette.SparklineNormal)
+			}
+			if ratio := wcagContrastRatio(fg, bg, 0xfafafa); ratio < 4.5 {
+				t.Fatalf("light SummaryPanel bargraph contrast = %.2f (< 4.5)", ratio)
+			}
+		}
+	}
+	if !sawActiveBar {
+		t.Fatalf("expected active bargraph cells in light SummaryPanel output:\n%s", sumText)
 	}
 }
 

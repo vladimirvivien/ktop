@@ -28,10 +28,13 @@ func NewHelpModal(cfg HelpModalConfig) *HelpModal {
 		onClose: cfg.OnClose,
 	}
 
+	p := ActivePalette()
 	m.textView = tview.NewTextView().
 		SetDynamicColors(true).
 		SetScrollable(true).
 		SetWrap(false)
+	m.textView.SetTextColor(p.CanvasFg)
+	m.textView.SetBackgroundColor(p.CanvasBg)
 
 	m.textView.SetText(m.renderHelpContent(cfg))
 	m.textView.SetInputCapture(m.HandleInput)
@@ -43,7 +46,7 @@ func NewHelpModal(cfg HelpModalConfig) *HelpModal {
 
 	instrText := "[::b]Esc[::-] / [::b]Enter[::-] / [::b]?[::-] / [::b]q[::-] Close   [::b]↑/↓[::-] Scroll"
 	if !IsMonochrome() {
-		keyTag := TagFg(ActivePalette().DataPrimary)
+		keyTag := TagFg(p.DataPrimary)
 		instrText = fmt.Sprintf("[%s]Esc[-] / [%s]Enter[-] / [%s]?[-] / [%s]q[-] Close   [%s]↑/↓[-] Scroll",
 			keyTag, keyTag, keyTag, keyTag, keyTag)
 	}
@@ -51,10 +54,13 @@ func NewHelpModal(cfg HelpModalConfig) *HelpModal {
 		SetDynamicColors(true).
 		SetTextAlign(tview.AlignCenter).
 		SetText(instrText)
+	instructions.SetTextColor(p.CanvasFg)
+	instructions.SetBackgroundColor(p.CanvasBg)
 
 	box := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(m.textView, 0, 1, true).
 		AddItem(instructions, 1, 0, false)
+	box.SetBackgroundColor(p.CanvasBg)
 	box.SetBorder(true).
 		SetTitle(title).
 		SetTitleAlign(tview.AlignCenter)
