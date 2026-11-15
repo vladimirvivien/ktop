@@ -170,6 +170,44 @@ func (cc *CollectorController) collectFromAllComponents(ctx context.Context) {
 	}
 
 	wg.Wait()
+	cc.recordCycleCompletion()
+}
+
+func (cc *CollectorController) recordCycleCompletion() {
+	cc.cycleMu.Lock()
+	cc.completedCycles++
+	if cc.cycleNotify != nil {
+		close(cc.cycleNotify)
+	}
+	cc.cycleNotify = make(chan struct{})
+	cc.cycleMu.Unlock()
+}
+
+// WaitForCycles blocks until at least minCycles scrape cycles have completed
+// or ctx is cancelled.
+func (cc *CollectorController) WaitForCycles(ctx context.Context, minCycles int) error {
+	if minCycles <= 0 {
+		return nil
+	}
+	for {
+		cc.cycleMu.Lock()
+		if cc.completedCycles >= minCycles {
+			cc.cycleMu.Unlock()
+			return nil
+		}
+		notify := cc.cycleNotify
+		if notify == nil {
+			notify = make(chan struct{})
+			cc.cycleNotify = notify
+		}
+		cc.cycleMu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-notify:
+		}
+	}
 }
 
 // collectFromComponent collects metrics from a single component

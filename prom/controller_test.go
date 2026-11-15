@@ -461,3 +461,49 @@ func TestControllerErrorHandling(t *testing.T) {
 	mu.Unlock()
 	_ = err // Use the variable
 }
+
+func TestWaitForCycles(t *testing.T) {
+	cc := NewCollectorController(&rest.Config{Host: "https://test-cluster"}, DefaultScrapeConfig())
+
+	t.Run("zero minCycles returns immediately", func(t *testing.T) {
+		if err := cc.WaitForCycles(context.Background(), 0); err != nil {
+			t.Fatalf("WaitForCycles(0) unexpected error: %v", err)
+		}
+	})
+
+	t.Run("unblocks after recorded cycles", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+
+		done := make(chan error, 1)
+		go func() {
+			done <- cc.WaitForCycles(ctx, 2)
+		}()
+
+		cc.recordCycleCompletion()
+		select {
+		case err := <-done:
+			t.Fatalf("WaitForCycles(2) returned early after 1 cycle: %v", err)
+		case <-time.After(20 * time.Millisecond):
+		}
+
+		cc.recordCycleCompletion()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("WaitForCycles(2) unexpected error: %v", err)
+			}
+		case <-time.After(500 * time.Millisecond):
+			t.Fatal("WaitForCycles(2) timed out after 2 cycles")
+		}
+	})
+
+	t.Run("returns context error on timeout", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+		defer cancel()
+
+		if err := cc.WaitForCycles(ctx, 5); err == nil {
+			t.Fatal("expected context error, got nil")
+		}
+	})
+}

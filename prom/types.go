@@ -34,12 +34,12 @@ var DefaultMetricAllowlist = map[string]bool{
 	"container_cpu_cfs_throttled_periods_total": true,
 	"container_cpu_cfs_periods_total":           true,
 	"container_memory_working_set_bytes":        true,
-	"container_network_receive_bytes_total":  true,
-	"container_network_transmit_bytes_total": true,
-	"container_fs_reads_bytes_total":         true,
-	"container_fs_writes_bytes_total":        true,
-	"kubelet_running_pods":                   true,
-	"container_count":                        true,
+	"container_network_receive_bytes_total":     true,
+	"container_network_transmit_bytes_total":    true,
+	"container_fs_reads_bytes_total":            true,
+	"container_fs_writes_bytes_total":           true,
+	"kubelet_running_pods":                      true,
+	"container_count":                           true,
 
 	// Pressure Stall Information (PSI). The "waiting" axis carries the
 	// dominant stall signal; "stalled" is for detail-page rendering. Not
@@ -175,6 +175,10 @@ type CollectorController struct {
 	// Event callbacks
 	onMetricsCollected func(component ComponentType, metrics *ScrapedMetrics)
 	onError            func(component ComponentType, err error)
+
+	cycleMu         sync.Mutex
+	completedCycles int
+	cycleNotify     chan struct{}
 }
 
 // DefaultScrapeConfig returns a default configuration for metrics scraping
@@ -203,6 +207,7 @@ func NewCollectorController(kubeConfig *rest.Config, config *ScrapeConfig) *Coll
 		config:              config,
 		kubeConfig:          kubeConfig,
 		availableComponents: make(map[ComponentType]bool),
+		cycleNotify:         make(chan struct{}),
 	}
 }
 

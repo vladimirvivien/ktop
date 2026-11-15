@@ -261,6 +261,7 @@ func (c *Controller) BuildClusterSummary(ctx context.Context) (model.ClusterSumm
 	}
 
 	hasMetrics := c.metricsSource != nil && (len(nodeMetricsByNode) > 0 || (len(nodes) == 0 && c.metricsSource.IsHealthy()))
+	summary.PSIBeta = !c.client.PSIVersionOK()
 	summary.HealthScore = model.CalculateHealthScore(summary, hasMetrics)
 
 	// Report success after all data is collected

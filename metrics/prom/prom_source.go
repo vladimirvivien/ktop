@@ -117,6 +117,15 @@ func (p *PromMetricsSource) TestConnection(ctx context.Context) error {
 	return p.controller.TestScrape(ctx)
 }
 
+// WaitForWarmup waits for two scrape cycles to complete so rate-based metrics
+// have populated counter deltas before an initial snapshot is captured.
+func (p *PromMetricsSource) WaitForWarmup(ctx context.Context) error {
+	if p == nil || p.controller == nil {
+		return nil
+	}
+	return p.controller.WaitForCycles(ctx, 2)
+}
+
 // counterDelta computes the counter delta and elapsed seconds between the first
 // and last samples in a window, handling counter resets.
 func counterDelta(samples []*prom.MetricSample) (deltaVal float64, deltaSec float64) {
