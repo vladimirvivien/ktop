@@ -48,6 +48,24 @@ type Config struct {
 	Filename string      // override the default file path; ignored when Dest is stderr
 }
 
+// Validate checks that Level, Format, and Dest contain supported values
+// without opening or creating any log sink.
+func Validate(cfg Config) error {
+	level, err := parseLevel(cfg.Level)
+	if err != nil {
+		return err
+	}
+	if _, err := makeHandler(io.Discard, cfg.Format, level); err != nil {
+		return err
+	}
+	switch Destination(strings.ToLower(string(cfg.Dest))) {
+	case "", DestFile, DestStderr:
+		return nil
+	default:
+		return fmt.Errorf("unknown log destination: %s (valid: file, stderr)", cfg.Dest)
+	}
+}
+
 // Init configures slog's default logger from cfg and returns an io.Closer that
 // the caller should close on shutdown. The returned closer is always non-nil
 // even on error, so callers can defer Close() unconditionally.

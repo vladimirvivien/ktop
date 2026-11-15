@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 
@@ -31,6 +32,7 @@ func main() {
 
 	// run standalone
 	if err := cmd.NewKtopCmd().Execute(); err != nil {
-		os.Exit(1)
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(cmd.ExitCode(err))
 	}
 }
