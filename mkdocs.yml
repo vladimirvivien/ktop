@@ -70,6 +70,7 @@ nav:
   - Guide:
     - Getting Started: guide.md
     - CLI Reference: cli.md
+    - Non-Interactive Mode: noui.md
   - Metrics:
     - Prometheus: prometheus.md
     - Metrics Server: metrics-server.md

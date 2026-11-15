@@ -19,6 +19,7 @@ Following the tradition of Unix/Linux `top` tools, `ktop` is a tool that display
 * **Zero Cluster Installation** - Runs locally using your kubeconfig; no agents or server-side components
 * **Works Anywhere kubectl Works** - Connects through the Kubernetes API; no direct node access required
 * **Streaming Container Logs** - Real-time logs with filtering, timestamps, line wrap, and full-screen mode
+* **Scriptable Non-Interactive Mode (`--noui`)** - Emit structured JSON or streaming JSONL cluster snapshots and `0–100` `health_score` metrics to `stdout` for CI gates and automation
 * **Ergonomic Shortcuts** - Integrated keyboard shortcuts help (`?` or `F1`) and clipboard resource copying (`y`)
 * **Multiple Metrics Sources** - Support Prometheus for enhanced metrics, Metrics-Server, or no-metrics as fallback
 * **Graceful Degradation** - Works even without metrics infrastructure by showing resource requests/limits
@@ -73,6 +74,15 @@ ktop --sort-pods=-Memory --sort-nodes=+Name
 
 # Use Prometheus for enhanced metrics
 ktop --metrics-source=prometheus
+
+# Run headless and emit a single JSON snapshot
+ktop --noui | jq .
+
+# Gate a CI pipeline on the cluster health score
+ktop --noui --quiet | jq -e '.summary.health_score >= 80'
+
+# Stream JSONL snapshots every 5s over a 30s window
+ktop --noui -d 30s -i 5s -o jsonl --quiet
 ```
 
 Press `?` inside ktop at any time to open the keyboard shortcuts reference.

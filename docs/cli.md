@@ -54,6 +54,41 @@ Additional control plane components (apiserver, etcd, scheduler, controller-mana
 | `--theme` | UI color theme: `auto` (default), `dark`, `light`, `ansi`, or `monochrome` |
 | `--color-mode` | Terminal color depth override: `auto` (default), `truecolor`, `256`, `16`, or `none` |
 
+## Non-Interactive (`--noui`) Flags
+
+Use `--noui` when running `ktop` in CI pipelines, cron tasks, or shell scripts that consume structured JSON over `stdout`. See the [Non-Interactive Mode Guide](noui.md) for output schema details and `jq` recipes.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--noui` | `false` | Disable interactive terminal UI and emit structured output to `stdout` |
+| `-d, --duration` | `0s` | Collection window duration (for example `30s`, `5m`); `0s` captures a single snapshot |
+| `-i, --interval` | `5s` | Sampling interval between snapshots during a timed collection window |
+| `-o, --output` | `json` | Output format in `--noui` mode: `json` (single document) or `jsonl` (line-delimited stream) |
+| `--quiet` | `false` | Suppress readiness and collection progress messages on `stderr` |
+
+## Logging Flags
+
+Diagnostic logs are written outside `stdout` so neither the terminal UI nor `--noui` JSON output is corrupted.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--log` | `file` | Log destination: `file` (`~/.ktop/ktop.log`) or `stderr` |
+| `--log-level` | `info` | Log verbosity: `debug`, `info`, `warn`, or `error` |
+| `--log-format` | `text` | Log record format: `text` or `json` |
+
+## Operational Exit Codes
+
+`ktop` returns distinct non-zero exit codes to distinguish configuration errors from cluster connectivity, metrics availability, and readiness timeouts:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success |
+| `1` | General application or runtime error |
+| `2` | Invalid CLI flags, configuration values, or unexpected arguments |
+| `3` | Kubernetes API connection or RBAC authorization failure |
+| `4` | Explicitly requested metrics source unavailable |
+| `5` | Readiness warmup or collection request timeout |
+
 ## Themes and Terminal Color Adaptation
 
 Terminal emulators vary in background luminance and color-depth support, from 24-bit TrueColor local consoles to 16-color multiplexers or `$NO_COLOR` sessions. `ktop` adapts both its semantic color palette and color encoding tier to keep status indicators, sparklines, and selection highlights legible without per-host configuration.
