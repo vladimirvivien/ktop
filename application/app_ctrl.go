@@ -29,6 +29,7 @@ type Application struct {
 	metricsSource metrics.MetricsSource
 	tviewApp      *tview.Application
 	pages         []AppPage
+	sessions      []PageSession
 	modals        []tview.Primitive
 	pageIdx       int
 	tabIdx        int // -1 = header, 0+ = children panels
@@ -37,13 +38,14 @@ type Application struct {
 	refreshQ      chan struct{}
 	stopCh        chan struct{}
 
-	// Navigation stack for detail view navigation
+	// Navigation stack for active page (synced with active session)
 	navStack *NavigationStack
 
 	// Detail view callbacks
 	nodeDetailCallback    func(nodeName string)
 	podDetailCallback     func(namespace, podName string)
 	containerLogsCallback func(namespace, podName, containerName string)
+	detailResetCallback   func()
 
 	// Health state tracking for transitions
 	lastHealthyState      bool
@@ -59,20 +61,25 @@ type Application struct {
 	apiHealthTracker *health.APIHealthTracker
 	apiHealthToastID string // Persistent toast for API health issues
 
-	// Namespace filter callback for pod filtering
-	namespaceFilterCallback func(namespace string)
+	// Namespace filter callbacks for multi-page pod/resource filtering
+	namespaceFilterCallback  func(namespace string)
+	namespaceFilterListeners []func(namespace string)
 
-	// Quit confirmation state (double-ESC to quit from Overview)
+	// Quit confirmation state (double-ESC to quit from root page)
 	pendingQuit     bool
 	pendingQuitTime time.Time
 }
 
 func New(k8sC *k8s.Client, metricsSource metrics.MetricsSource) *Application {
 	tapp := tview.NewApplication()
+	ns := k8s.AllNamespaces
+	if k8sC != nil {
+		ns = k8sC.Namespace()
+	}
 	app := &Application{
 		k8sClient:     k8sC,
 		metricsSource: metricsSource,
-		namespace:     k8sC.Namespace(),
+		namespace:     ns,
 		tviewApp:      tapp,
 		panel:         newPanel(tapp),
 		refreshQ:      make(chan struct{}, 1),
@@ -174,7 +181,14 @@ func (app *Application) IsAPIDisconnected() bool {
 }
 
 func (app *Application) AddPage(panel ui.PanelController) {
-	app.pages = append(app.pages, AppPage{Title: panel.GetTitle(), Panel: panel})
+	title := ""
+	if panel != nil {
+		title = panel.GetTitle()
+	}
+	app.RegisterPage(PageDescriptor{
+		Title: title,
+		Panel: panel,
+	})
 }
 
 func (app *Application) ShowModal(view tview.Primitive) {
@@ -231,11 +245,37 @@ func (app *Application) QueueUpdateDraw(f func()) {
 	app.tviewApp.QueueUpdateDraw(f)
 }
 
-// SetNamespaceFilterCallback sets the callback for namespace filter changes
+// SetNamespaceFilterCallback sets the primary callback for namespace filter changes.
 func (app *Application) SetNamespaceFilterCallback(callback func(namespace string)) {
 	app.namespaceFilterCallback = callback
-	// Also set it on the panel so it can notify when user types
-	app.panel.setNamespaceFilterCallback(callback)
+	if app.panel != nil {
+		app.panel.setNamespaceFilterCallback(app.dispatchNamespaceFilter)
+	}
+}
+
+// AddNamespaceFilterListener registers an additional listener notified when the header namespace filter changes.
+func (app *Application) AddNamespaceFilterListener(callback func(namespace string)) {
+	if callback == nil {
+		return
+	}
+	app.namespaceFilterListeners = append(app.namespaceFilterListeners, callback)
+	if app.panel != nil {
+		app.panel.setNamespaceFilterCallback(app.dispatchNamespaceFilter)
+	}
+}
+
+func (app *Application) dispatchNamespaceFilter(namespace string) {
+	if app.namespaceFilterCallback != nil {
+		app.namespaceFilterCallback(namespace)
+	}
+	for _, listener := range app.namespaceFilterListeners {
+		listener(namespace)
+	}
+	for _, page := range app.pages {
+		if target, ok := page.Panel.(interface{ SetNamespaceFilter(string) }); ok {
+			target.SetNamespaceFilter(namespace)
+		}
+	}
 }
 
 // GetNamespaceFilter returns the current namespace filter text
@@ -245,17 +285,13 @@ func (app *Application) GetNamespaceFilter() string {
 
 // updatePanelFocus updates focus state for all child panels based on tabIdx
 func (app *Application) updatePanelFocus(views []tview.Primitive) {
-	// Get the main panel to access child panels with FocusablePanel interface
-	if len(app.pages) == 0 {
+	activePanel := app.activePagePanel()
+	if activePanel == nil {
 		return
 	}
-
-	mainPanel := app.pages[0].Panel
-	children := mainPanel.GetChildrenViews()
+	children := activePanel.GetChildrenViews()
 
 	for i, child := range children {
-		// Try to get the underlying panel that implements FocusablePanel
-		// We need to check if the panel (not the view) implements the interface
 		if focusable, ok := app.getPanelForView(child).(ui.FocusablePanel); ok {
 			focusable.SetFocused(i == app.tabIdx)
 		}
@@ -263,27 +299,74 @@ func (app *Application) updatePanelFocus(views []tview.Primitive) {
 }
 
 // getPanelForView returns the panel for a given view (helper for focus management)
-// This is a workaround since we store views but need access to panel methods
 func (app *Application) getPanelForView(view tview.Primitive) interface{} {
-	// The views are children of the main panel, so we need to match them
-	// to the actual panel objects. For now, we'll use a simple approach
-	// since the MainPanel stores references to its child panels.
-	if len(app.pages) == 0 {
+	activePanel := app.activePagePanel()
+	if activePanel == nil {
 		return nil
 	}
-	mainPanel := app.pages[0].Panel
-	children := mainPanel.GetChildrenViews()
+	children := activePanel.GetChildrenViews()
 
 	for i, child := range children {
 		if child == view {
-			// Return the panel that owns this view
-			// This requires MainPanel to expose its child panels
-			if provider, ok := mainPanel.(interface{ GetChildPanel(int) ui.Panel }); ok {
+			if provider, ok := activePanel.(interface{ GetChildPanel(int) ui.Panel }); ok {
 				return provider.GetChildPanel(i)
 			}
 		}
 	}
 	return nil
+}
+
+func (app *Application) restoreActivePageFocus() {
+	if app.panel == nil {
+		return
+	}
+	if app.IsInDetailView() {
+		if panel := app.getActiveDetailPanel(); panel != nil {
+			if rootProvider, ok := panel.(interface{ GetRootView() tview.Primitive }); ok {
+				app.panel.setHeaderFocused(false)
+				app.Focus(rootProvider.GetRootView())
+				return
+			}
+		}
+	}
+
+	activePanel := app.activePagePanel()
+	var views []tview.Primitive
+	if activePanel != nil {
+		views = activePanel.GetChildrenViews()
+	}
+
+	if app.tabIdx == -1 || len(views) == 0 {
+		app.tabIdx = -1
+		app.panel.setHeaderFocused(true)
+		app.updatePanelFocus(views)
+		app.Focus(app.panel.getHeader())
+		return
+	}
+
+	if app.tabIdx >= len(views) {
+		app.tabIdx = len(views) - 1
+	}
+	app.panel.setHeaderFocused(false)
+	app.updatePanelFocus(views)
+	app.Focus(views[app.tabIdx])
+}
+
+func (app *Application) syncTabBar() {
+	if app.panel == nil {
+		return
+	}
+	s := app.activeSession()
+	if s == nil {
+		app.panel.setBreadcrumb("")
+		return
+	}
+	app.panel.setActiveTab(app.visibleView, "")
+	if s.NavStack == nil {
+		app.panel.setBreadcrumb("")
+		return
+	}
+	app.panel.setBreadcrumb(FormatBreadcrumb(s.Descriptor.Title, s.NavStack.Breadcrumb()))
 }
 
 func (app *Application) ShowPanel(i int) {
@@ -306,52 +389,76 @@ func (app *Application) WelcomeBanner() {
 	fmt.Println("Loading cluster data...")
 }
 
+// Setup initializes pages, layout, and input capture without entering the blocking event loop.
+func (app *Application) Setup(ctx context.Context) error {
+	return app.setup(ctx)
+}
+
+// RootPrimitive returns the top-level root primitive for rendering and simulation testing.
+func (app *Application) RootPrimitive() tview.Primitive {
+	if app.panel == nil {
+		return nil
+	}
+	return app.panel.GetRootView()
+}
+
+// HandleInput dispatches a key event through the application's global input capture handler.
+func (app *Application) HandleInput(event *tcell.EventKey) *tcell.EventKey {
+	return app.handleInputEvent(event)
+}
+
 func (app *Application) setup(ctx context.Context) error {
+	if len(app.sessions) > 0 {
+		if app.visibleView < 0 || app.visibleView >= len(app.sessions) {
+			app.visibleView = 0
+		}
+		app.navStack = app.sessions[app.visibleView].NavStack
+		app.tabIdx = app.sessions[app.visibleView].TabIdx
+	}
+
 	// setup each page panel
 	for _, page := range app.pages {
+		if page.Panel == nil {
+			continue
+		}
 		if err := page.Panel.Run(ctx); err != nil {
 			return fmt.Errorf("init failed: page %s: %s", page.Title, err)
 		}
 	}
 
+	if app.k8sClient != nil {
+		if err := app.k8sClient.Controller().Start(ctx, 10*time.Second); err != nil {
+			return fmt.Errorf("init failed: k8s controller: %w", err)
+		}
+	}
+
 	// continue setup rest of UI
-	app.panel.Layout(app.pages)
+	if len(app.sessions) > 0 {
+		app.panel.Layout(app.sessions)
+	} else {
+		app.panel.Layout(app.pages)
+	}
 
 	// Draw initial header using shared helper functions
 	nsDisplay := app.getNamespaceDisplay()
 	app.panel.DrawHeader(app.buildHeaderString(nsDisplay))
 
-	app.panel.DrawFooter(app.getPageTitles()[app.visibleView])
+	if s := app.activeSession(); s != nil {
+		app.panel.setActiveTab(app.visibleView, s.Descriptor.Title)
+	} else if titles := app.getPageTitles(); app.visibleView >= 0 && app.visibleView < len(titles) {
+		app.panel.setActiveTab(app.visibleView, titles[app.visibleView])
+	}
+	app.syncTabBar()
 
 	// Set initial focus to header panel and unfocus all child panels
-	app.panel.setHeaderFocused(true)
-	if len(app.pages) > 0 {
-		views := app.pages[0].Panel.GetChildrenViews()
-		app.updatePanelFocus(views) // With tabIdx=-1, this unfocuses all children
-	}
-	// Explicitly focus header to prevent tview from auto-focusing first child
-	app.Focus(app.panel.getHeader())
+	app.restoreActivePageFocus()
 
-	// Set initial footer context for Overview page with header focused
+	// Set initial footer context for active page
 	app.updateFooterContext()
 
-	// Set up focus restoration callback for toast dismissal
-	// This ensures proper focus is restored based on tabIdx after toast goes away
+	// Set up focus restoration callback for toast and modal dismissal
 	app.panel.setFocusRestorationCallback(func() {
-		views := app.pages[0].Panel.GetChildrenViews()
-		// Restore focus based on current tabIdx
-		if app.tabIdx == -1 {
-			// Header was focused - must explicitly focus header to prevent
-			// tview from auto-focusing the first focusable child (cluster summary)
-			app.panel.setHeaderFocused(true)
-			app.updatePanelFocus(views) // Ensure children are unfocused
-			app.tviewApp.SetFocus(app.panel.getHeader())
-		} else if app.tabIdx >= 0 && app.tabIdx < len(views) {
-			// A child panel was focused
-			app.panel.setHeaderFocused(false)
-			app.updatePanelFocus(views)
-			app.tviewApp.SetFocus(views[app.tabIdx])
-		}
+		app.restoreActivePageFocus()
 	})
 
 	// Set up event-driven metrics health monitoring (replaces polling)
@@ -414,176 +521,183 @@ func (app *Application) setup(ctx context.Context) error {
 		}
 	})
 
-	app.tviewApp.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// When a toast modal is displayed, handle ESC at app level
-		// This is necessary because tview.Modal with no buttons cannot receive focus,
-		// so the modal's SetInputCapture never gets called for key events.
-		if app.HasActiveToast() {
-			if event.Key() == tcell.KeyEsc {
-				app.panel.handleToastEsc()
-				return nil // Consume the event
-			}
-			return event // Pass other keys through
-		}
+	app.tviewApp.SetInputCapture(app.handleInputEvent)
 
-		// When a modal page (e.g. column selector) is displayed, pass key events
-		// directly to the modal widget so it can handle Esc, Enter, Space, etc.
-		// Do NOT intercept ESC for app quit.
-		if app.HasActiveModalPage() {
-			return event
-		}
+	return nil
+}
 
-		// Reset pending quit state on any non-ESC key
-		if event.Key() != tcell.KeyEsc && app.pendingQuit {
-			app.pendingQuit = false
-		}
-
-		// Handle '?' and F1 for help overlay modal (when not actively editing text)
-		if !app.isFilterEditing() && (event.Key() == tcell.KeyF1 || (event.Key() == tcell.KeyRune && event.Rune() == '?')) {
-			app.ShowHelpModal()
-			return nil
-		}
-
-		// Handle ESC - check if header or visible panel has state to clear first
-		// Global handler runs BEFORE focused widget, so we must check panels here
+func (app *Application) handleInputEvent(event *tcell.EventKey) *tcell.EventKey {
+	// When a toast modal is displayed, handle ESC at app level
+	// This is necessary because tview.Modal with no buttons cannot receive focus,
+	// so the modal's SetInputCapture never gets called for key events.
+	if app.HasActiveToast() {
 		if event.Key() == tcell.KeyEsc {
-			// Check if we're in a detail view
-			if app.IsInDetailView() {
-				// First check if the detail panel has escapable state (e.g., filter mode)
-				if panel := app.getActiveDetailPanel(); panel != nil {
-					if escapable, ok := panel.(ui.EscapablePanel); ok {
-						if escapable.HandleEscape() {
-							app.Refresh()
-							return nil // Panel handled ESC (e.g., closed filter)
-						}
-					}
-				}
-				// No state to clear - navigate back
-				app.NavigateBack()
-				app.Refresh()
+			app.panel.handleToastEsc()
+			return nil // Consume the event
+		}
+		return event // Pass other keys through
+	}
+
+	// When a modal page (e.g. column selector) is displayed, pass key events
+	// directly to the modal widget so it can handle Esc, Enter, Space, etc.
+	// Do NOT intercept ESC for app quit.
+	if app.HasActiveModalPage() {
+		return event
+	}
+
+	// Reset pending quit state on any non-ESC key
+	if event.Key() != tcell.KeyEsc && app.pendingQuit {
+		app.pendingQuit = false
+	}
+
+	// Handle '?' and F1 for help overlay modal (when not actively editing text)
+	if !app.isFilterEditing() && (event.Key() == tcell.KeyF1 || (event.Key() == tcell.KeyRune && event.Rune() == '?')) {
+		app.ShowHelpModal()
+		return nil
+	}
+
+	// Handle top-level page switching when not editing a filter input
+	if !app.isFilterEditing() && event.Key() == tcell.KeyRune {
+		r := event.Rune()
+		if r >= '1' && r <= '9' {
+			idx := int(r - '1')
+			if idx < app.PageCount() {
+				app.SwitchToPageIndex(idx)
 				return nil
 			}
-
-			// Check if header has escapable state first (when header is focused)
-			if app.tabIdx == -1 && app.panel.hasEscapableHeaderState() {
-				if app.panel.handleHeaderEscape() {
-					// Use updateHeaderDirect (not updateHeader) because we're
-					// already on the main goroutine. QueueUpdateDraw would deadlock.
-					app.updateHeaderDirect()
-					app.Refresh()
-					return nil // Header handled ESC, don't quit
-				}
+		} else if app.PageCount() > 1 {
+			switch r {
+			case ']':
+				app.NextPage()
+				return nil
+			case '[':
+				app.PrevPage()
+				return nil
 			}
-			// Check if the currently visible panel has escapable state
-			if app.visibleView >= 0 && app.visibleView < len(app.pages) {
-				if escapable, ok := app.pages[app.visibleView].Panel.(ui.EscapablePanel); ok {
+		}
+	}
+
+	// Handle ESC - check if header or visible panel has state to clear first
+	// Global handler runs BEFORE focused widget, so we must check panels here
+	if event.Key() == tcell.KeyEsc {
+		// Check if we're in a detail view
+		if app.IsInDetailView() {
+			// First check if the detail panel has escapable state (e.g., filter mode)
+			if panel := app.getActiveDetailPanel(); panel != nil {
+				if escapable, ok := panel.(ui.EscapablePanel); ok {
 					if escapable.HandleEscape() {
 						app.Refresh()
-						return nil // Panel handled ESC, don't quit
+						return nil // Panel handled ESC (e.g., closed filter)
 					}
 				}
 			}
-			// No panel had state to clear - handle quit confirmation
-			if app.pendingQuit && time.Since(app.pendingQuitTime) < 2*time.Second {
-				// Second ESC within timeout - quit
-				app.Stop()
-				return nil
-			}
-
-			// First ESC - show confirmation toast
-			app.pendingQuit = true
-			app.pendingQuitTime = time.Now()
-			app.ShowToast("Press ESC again to quit", ui.ToastInfo, 2*time.Second)
-
-			// Reset state after toast timeout
-			go func() {
-				time.Sleep(2 * time.Second)
-				app.tviewApp.QueueUpdateDraw(func() {
-					app.pendingQuit = false
-				})
-			}()
-			return nil
-		}
-
-		// Handle 'R' key for reconnecting when API is disconnected
-		if event.Key() == tcell.KeyRune && (event.Rune() == 'R' || event.Rune() == 'r') {
-			if app.IsAPIDisconnected() {
-				app.apiHealthTracker.TryReconnect()
-				return nil
-			}
-		}
-
-		if event.Key() == tcell.KeyTAB || event.Key() == tcell.KeyBacktab {
-			// Check if we're on a detail page - if so, let the detail panel handle Tab
-			if frontPage, _ := app.panel.pages.GetFrontPage(); frontPage != "" {
-				// Detail pages are named "node_detail", "pod_detail", etc.
-				// Overview pages are named "Overview", etc.
-				if frontPage == "node_detail" || frontPage == "pod_detail" {
-					// Pass Tab through to the detail panel
-					return event
-				}
-			}
-
-			views := app.pages[0].Panel.GetChildrenViews()
-			// Cycle: -1 (header) -> 0 -> 1 -> 2 -> -1 (header) ...
-			// -2 = no focus (initial state)
-			if event.Key() == tcell.KeyTAB {
-				app.tabIdx++
-				if app.tabIdx >= len(views) {
-					app.tabIdx = -1 // Back to header
-				}
-			} else {
-				// Backtab - cycle in reverse
-				app.tabIdx--
-				if app.tabIdx < -1 {
-					app.tabIdx = len(views) - 1
-				}
-			}
-
-			// Update focus visuals for all panels
-			app.updatePanelFocus(views)
-
-			// Set tview focus
-			if app.tabIdx == -1 {
-				// Header focused - must explicitly focus header to prevent
-				// tview from auto-focusing the first focusable child
-				app.panel.setHeaderFocused(true)
-				app.Focus(app.panel.getHeader())
-			} else {
-				app.panel.setHeaderFocused(false)
-				app.Focus(views[app.tabIdx])
-			}
-			// Update footer context to reflect new focus
-			app.updateFooterContext()
+			// No state to clear - navigate back
+			app.NavigateBack()
 			app.Refresh()
 			return nil
 		}
 
-		// Handle keyboard input when header is focused
-		if app.tabIdx == -1 {
-			if app.panel.handleHeaderKey(event) {
+		// Check if header has escapable state first (when header is focused)
+		if app.tabIdx == -1 && app.panel.hasEscapableHeaderState() {
+			if app.panel.handleHeaderEscape() {
 				// Use updateHeaderDirect (not updateHeader) because we're
 				// already on the main goroutine. QueueUpdateDraw would deadlock.
 				app.updateHeaderDirect()
 				app.Refresh()
-				return nil
+				return nil // Header handled ESC, don't quit
 			}
 		}
+		// Check if the currently active root panel has escapable state
+		if activePanel := app.activePagePanel(); activePanel != nil {
+			if escapable, ok := activePanel.(ui.EscapablePanel); ok {
+				if escapable.HandleEscape() {
+					app.Refresh()
+					return nil // Panel handled ESC, don't quit
+				}
+			}
+		}
+		// No panel had state to clear - handle quit confirmation
+		if app.pendingQuit && time.Since(app.pendingQuitTime) < 2*time.Second {
+			// Second ESC within timeout - quit
+			app.Stop()
+			return nil
+		}
 
-		if event.Key() < tcell.KeyF1 || event.Key() > tcell.KeyF12 {
+		// First ESC - show confirmation toast
+		app.pendingQuit = true
+		app.pendingQuitTime = time.Now()
+		app.ShowToast("Press ESC again to quit", ui.ToastInfo, 2*time.Second)
+
+		// Reset state after toast timeout
+		go func() {
+			time.Sleep(2 * time.Second)
+			app.tviewApp.QueueUpdateDraw(func() {
+				app.pendingQuit = false
+			})
+		}()
+		return nil
+	}
+
+	// Handle 'R' key for reconnecting when API is disconnected
+	if event.Key() == tcell.KeyRune && (event.Rune() == 'R' || event.Rune() == 'r') {
+		if app.IsAPIDisconnected() {
+			app.apiHealthTracker.TryReconnect()
+			return nil
+		}
+	}
+
+	if event.Key() == tcell.KeyTAB || event.Key() == tcell.KeyBacktab {
+		// Let detail pages manage internal Tab cycling across their own subpanels
+		if app.IsInDetailView() {
 			return event
 		}
 
-		keyPos := event.Key() - tcell.KeyF1
-		titles := app.getPageTitles()
-		if (keyPos >= 0 || keyPos <= 9) && (int(keyPos) <= len(titles)-1) {
-			app.panel.switchToPage(app.getPageTitles()[keyPos])
+		var views []tview.Primitive
+		if activePanel := app.activePagePanel(); activePanel != nil {
+			views = activePanel.GetChildrenViews()
 		}
 
-		return event
-	})
+		// Cycle: -1 (header) -> 0 -> ... -> len(views)-1 -> -1 (header)
+		if len(views) == 0 {
+			app.tabIdx = -1
+		} else if event.Key() == tcell.KeyTAB {
+			app.tabIdx++
+			if app.tabIdx >= len(views) {
+				app.tabIdx = -1
+			}
+		} else {
+			app.tabIdx--
+			if app.tabIdx < -1 {
+				app.tabIdx = len(views) - 1
+			}
+		}
 
-	return nil
+		app.updatePanelFocus(views)
+
+		if app.tabIdx == -1 || len(views) == 0 {
+			app.panel.setHeaderFocused(true)
+			app.Focus(app.panel.getHeader())
+		} else {
+			app.panel.setHeaderFocused(false)
+			app.Focus(views[app.tabIdx])
+		}
+		app.updateFooterContext()
+		app.Refresh()
+		return nil
+	}
+
+	// Handle keyboard input when header is focused
+	if app.tabIdx == -1 {
+		if app.panel.handleHeaderKey(event) {
+			// Use updateHeaderDirect (not updateHeader) because we're
+			// already on the main goroutine. QueueUpdateDraw would deadlock.
+			app.updateHeaderDirect()
+			app.Refresh()
+			return nil
+		}
+	}
+
+	return event
 }
 
 func (app *Application) Run(ctx context.Context) error {
@@ -703,8 +817,14 @@ func (app *Application) handleMetricsHealthChange(healthy bool, info metrics.Sou
 // namespaceDisplay is the namespace value to show (may include filter styling)
 func (app *Application) buildHeaderString(namespaceDisplay string) string {
 	client := app.GetK8sClient()
-	context := ui.Truncate(client.ClusterName(), 25)
-	user := ui.Truncate(client.Username(), 20)
+	contextName := "n/a"
+	serverVersion := "n/a"
+	user := "n/a"
+	if client != nil {
+		contextName = ui.Truncate(client.ClusterName(), 25)
+		serverVersion = client.GetServerVersion()
+		user = ui.Truncate(client.Username(), 20)
+	}
 	ns := namespaceDisplay
 
 	var metricsStr string
@@ -728,7 +848,7 @@ func (app *Application) buildHeaderString(namespaceDisplay string) string {
 	if ui.IsMonochrome() {
 		return fmt.Sprintf(
 			"Context: %s | K8s: %s | User: %s | Namespace: %s | Metrics: %s",
-			context, client.GetServerVersion(), user, ns, metricsStr,
+			contextName, serverVersion, user, ns, metricsStr,
 		)
 	}
 
@@ -737,8 +857,8 @@ func (app *Application) buildHeaderString(namespaceDisplay string) string {
 	valTag := ui.TagFg(p.DataSecondary)
 	return fmt.Sprintf(
 		"[%s]Context: [%s]%s [%s]| K8s: [%s]%s [%s]| User: [%s]%s [%s]| Namespace: [%s]%s [%s]| Metrics: %s",
-		lblTag, valTag, context,
-		lblTag, valTag, client.GetServerVersion(),
+		lblTag, valTag, contextName,
+		lblTag, valTag, serverVersion,
 		lblTag, valTag, user,
 		lblTag, valTag, ns,
 		lblTag, metricsStr,
@@ -770,7 +890,10 @@ func (app *Application) getNamespaceDisplay() string {
 	}
 
 	// No filter - show actual namespace
-	namespace := app.k8sClient.Namespace()
+	namespace := k8s.AllNamespaces
+	if app.k8sClient != nil {
+		namespace = app.k8sClient.Namespace()
+	}
 	if namespace == k8s.AllNamespaces {
 		if mono {
 			return "(all)"
@@ -798,6 +921,11 @@ func (app *Application) updateHeaderDirect() {
 	app.panel.DrawHeader(headerStr)
 }
 
+// SetDetailResetCallback registers a callback invoked when returning from detail views to a root page.
+func (app *Application) SetDetailResetCallback(callback func()) {
+	app.detailResetCallback = callback
+}
+
 // SetNodeDetailCallback sets the callback for navigating to node detail view
 func (app *Application) SetNodeDetailCallback(callback func(nodeName string)) {
 	app.nodeDetailCallback = callback
@@ -810,36 +938,36 @@ func (app *Application) SetPodDetailCallback(callback func(namespace, podName st
 
 // NavigateToNodeDetail navigates to the node detail view for the given node
 func (app *Application) NavigateToNodeDetail(nodeName string) {
-	// Push current state to navigation stack
-	app.navStack.Push(PageState{
-		PageType:   PageNodeDetail,
-		ResourceID: nodeName,
-	})
+	if stack := app.activeNavStack(); stack != nil {
+		stack.Push(PageState{
+			PageType:   PageNodeDetail,
+			ResourceID: nodeName,
+		})
+	}
 
-	// Call the callback to show the detail view
 	if app.nodeDetailCallback != nil {
 		app.nodeDetailCallback(nodeName)
 	}
 
-	// Update footer context for detail page
+	app.syncTabBar()
 	app.updateFooterContext()
 }
 
 // NavigateToPodDetail navigates to the pod detail view for the given pod
 func (app *Application) NavigateToPodDetail(namespace, podName string) {
-	// Push current state to navigation stack
 	resourceID := namespace + "/" + podName
-	app.navStack.Push(PageState{
-		PageType:   PagePodDetail,
-		ResourceID: resourceID,
-	})
+	if stack := app.activeNavStack(); stack != nil {
+		stack.Push(PageState{
+			PageType:   PagePodDetail,
+			ResourceID: resourceID,
+		})
+	}
 
-	// Call the callback to show the detail view
 	if app.podDetailCallback != nil {
 		app.podDetailCallback(namespace, podName)
 	}
 
-	// Update footer context for detail page
+	app.syncTabBar()
 	app.updateFooterContext()
 }
 
@@ -850,82 +978,111 @@ func (app *Application) SetContainerLogsCallback(callback func(namespace, podNam
 
 // NavigateToContainerLogs navigates to the container logs view
 func (app *Application) NavigateToContainerLogs(namespace, podName, containerName string) {
-	// Push current state to navigation stack
 	resourceID := namespace + "/" + podName + "/" + containerName
-	app.navStack.Push(PageState{
-		PageType:   PageContainerLogs,
-		ResourceID: resourceID,
-	})
+	if stack := app.activeNavStack(); stack != nil {
+		stack.Push(PageState{
+			PageType:   PageContainerLogs,
+			ResourceID: resourceID,
+		})
+	}
 
-	// Call the callback to show the logs view
 	if app.containerLogsCallback != nil {
 		app.containerLogsCallback(namespace, podName, containerName)
 	}
 
-	// Update footer context for detail page
+	app.syncTabBar()
 	app.updateFooterContext()
 }
 
-// NavigateBack navigates back to the previous page
+func (app *Application) presentDetailState(state *PageState) {
+	if state == nil {
+		return
+	}
+	switch state.PageType {
+	case PageNodeDetail:
+		if app.nodeDetailCallback != nil {
+			app.nodeDetailCallback(state.ResourceID)
+		}
+	case PagePodDetail:
+		parts := strings.SplitN(state.ResourceID, "/", 2)
+		if len(parts) == 2 && app.podDetailCallback != nil {
+			app.podDetailCallback(parts[0], parts[1])
+		}
+	case PageContainerLogs:
+		parts := strings.SplitN(state.ResourceID, "/", 3)
+		if len(parts) == 3 && app.containerLogsCallback != nil {
+			app.containerLogsCallback(parts[0], parts[1], parts[2])
+		}
+	}
+}
+
+// NavigateBack navigates back to the previous page on the active tab's stack.
 func (app *Application) NavigateBack() bool {
-	popped := app.navStack.Pop()
+	stack := app.activeNavStack()
+	if stack == nil {
+		return false
+	}
+	popped := stack.Pop()
 	if popped == nil {
 		return false // Already at root
 	}
 
-	// Determine what page we're now on
-	current := app.navStack.Current()
+	current := stack.Current()
 	if current == nil {
 		return false
 	}
 
-	switch current.PageType {
-	case PageOverview:
-		// Switch back to the main overview page
-		app.panel.pages.SwitchToPage(app.pages[0].Title)
-		// Reset focus to the overview panel
-		if len(app.pages) > 0 {
-			views := app.pages[0].Panel.GetChildrenViews()
-			if len(views) > 0 && app.tabIdx >= 0 && app.tabIdx < len(views) {
-				app.tviewApp.SetFocus(views[app.tabIdx])
+	if !stack.CanGoBack() {
+		if app.detailResetCallback != nil {
+			app.detailResetCallback()
+		}
+		if app.panel != nil && app.panel.pages != nil {
+			if s := app.activeSession(); s != nil && s.Descriptor.Title != "" {
+				app.panel.pages.SwitchToPage(s.Descriptor.Title)
+			} else if len(app.pages) > 0 {
+				idx := app.visibleView
+				if idx < 0 || idx >= len(app.pages) {
+					idx = 0
+				}
+				app.panel.pages.SwitchToPage(app.pages[idx].Title)
 			}
 		}
-	case PageNodeDetail:
-		// Navigate back to node detail (for nested navigation)
-		if app.nodeDetailCallback != nil {
-			app.nodeDetailCallback(current.ResourceID)
-		}
-	case PagePodDetail:
-		// Navigate back to pod detail (for nested navigation)
-		parts := strings.SplitN(current.ResourceID, "/", 2)
-		if len(parts) == 2 && app.podDetailCallback != nil {
-			app.podDetailCallback(parts[0], parts[1])
-		}
+		app.restoreActivePageFocus()
+	} else {
+		app.presentDetailState(current)
 	}
 
-	// Update footer context for the page we navigated back to
+	app.syncTabBar()
 	app.updateFooterContext()
 
 	return true
 }
 
-// GetNavigationStack returns the navigation stack for breadcrumb display
+// GetNavigationStack returns the navigation stack for the active page.
 func (app *Application) GetNavigationStack() *NavigationStack {
-	return app.navStack
+	return app.activeNavStack()
 }
 
-// IsInDetailView returns true if currently viewing a detail page
+// IsInDetailView returns true if the active page has an open detail view on its stack.
 func (app *Application) IsInDetailView() bool {
-	current := app.navStack.Current()
-	return current != nil && current.PageType != PageOverview
+	stack := app.activeNavStack()
+	return stack != nil && stack.CanGoBack()
 }
 
 // getActiveDetailPanel returns the currently active detail panel if any
 func (app *Application) getActiveDetailPanel() ui.EscapablePanel {
-	// MainPanel is always the first page
-	if len(app.pages) > 0 {
-		if provider, ok := app.pages[0].Panel.(interface{ GetActiveDetailPanel() ui.EscapablePanel }); ok {
-			return provider.GetActiveDetailPanel()
+	if active := app.activePagePanel(); active != nil {
+		if provider, ok := active.(interface{ GetActiveDetailPanel() ui.EscapablePanel }); ok {
+			if detail := provider.GetActiveDetailPanel(); detail != nil {
+				return detail
+			}
+		}
+	}
+	for _, page := range app.pages {
+		if provider, ok := page.Panel.(interface{ GetActiveDetailPanel() ui.EscapablePanel }); ok {
+			if detail := provider.GetActiveDetailPanel(); detail != nil {
+				return detail
+			}
 		}
 	}
 	return nil
@@ -951,8 +1108,9 @@ func (app *Application) getFocusedPanelName() string {
 	if app.tabIdx == -1 {
 		return "header"
 	}
-	// Map tabIdx to panel names based on Overview page structure
-	// Order: summary (0), nodes (1), pods (2)
+	if s := app.activeSession(); s != nil && app.tabIdx >= 0 && app.tabIdx < len(s.Descriptor.ChildNames) {
+		return s.Descriptor.ChildNames[app.tabIdx]
+	}
 	switch app.tabIdx {
 	case 0:
 		return "summary"
@@ -974,24 +1132,33 @@ func (app *Application) ShowHelpModal() {
 	}
 
 	pageName := "Overview"
+	if s := app.activeSession(); s != nil && s.Descriptor.Title != "" {
+		pageName = s.Descriptor.Title
+	}
 	focusedPanel := app.getFocusedPanelName()
-	if current := app.navStack.Current(); current != nil {
-		switch current.PageType {
-		case PageNodeDetail:
-			pageName = "Node Detail"
-			focusedPanel = "node_detail"
-		case PagePodDetail:
-			pageName = "Pod Detail"
-			focusedPanel = "pod_detail"
-		case PageContainerLogs:
-			pageName = "Container Logs"
-			focusedPanel = "logs"
+	if stack := app.activeNavStack(); stack != nil && stack.CanGoBack() {
+		if current := stack.Current(); current != nil {
+			switch current.PageType {
+			case PageNodeDetail:
+				pageName = "Node Detail"
+				focusedPanel = "node_detail"
+			case PagePodDetail:
+				pageName = "Pod Detail"
+				focusedPanel = "pod_detail"
+			case PageContainerLogs:
+				pageName = "Container Logs"
+				focusedPanel = "logs"
+			case PageContainerSpec:
+				pageName = "Container Spec"
+				focusedPanel = "detail"
+			}
 		}
 	}
 
 	modal := ui.NewHelpModal(ui.HelpModalConfig{
 		CurrentPage:  pageName,
 		FocusedPanel: focusedPanel,
+		PageTitles:   app.getPageTitles(),
 		OnClose: func() {
 			app.DismissModalPage(helpModalID)
 		},
@@ -1002,7 +1169,7 @@ func (app *Application) ShowHelpModal() {
 
 // isFilterEditing returns true if any panel or header is currently editing filter text
 func (app *Application) isFilterEditing() bool {
-	if app.panel.isNamespaceFilterEditing() {
+	if app.panel != nil && app.panel.isNamespaceFilterEditing() {
 		return true
 	}
 	if app.IsInDetailView() {
@@ -1011,9 +1178,10 @@ func (app *Application) isFilterEditing() bool {
 				return fe.IsFilterEditing()
 			}
 		}
+		return false
 	}
-	if app.visibleView >= 0 && app.visibleView < len(app.pages) {
-		if fe, ok := app.pages[app.visibleView].Panel.(interface{ IsFilterEditing() bool }); ok {
+	if activePanel := app.activePagePanel(); activePanel != nil {
+		if fe, ok := activePanel.(interface{ IsFilterEditing() bool }); ok {
 			return fe.IsFilterEditing()
 		}
 	}
@@ -1022,16 +1190,38 @@ func (app *Application) isFilterEditing() bool {
 
 // updateFooterContext updates the navigation footer based on current page and focus
 func (app *Application) updateFooterContext() {
-	current := app.navStack.Current()
+	if app.panel == nil {
+		return
+	}
+	stack := app.activeNavStack()
+	if stack == nil {
+		return
+	}
+	current := stack.Current()
 	if current == nil {
 		return
 	}
 
 	var ctx ui.FooterContext
+	pageCount := app.PageCount()
+
+	if !stack.CanGoBack() {
+		if current.PageType == PageOverview {
+			ctx = ui.OverviewContext{
+				FocusedPanel: app.getFocusedPanelName(),
+				PageCount:    pageCount,
+			}
+		} else {
+			ctx = ui.PageContext{
+				FocusedPanel: app.getFocusedPanelName(),
+				PageCount:    pageCount,
+			}
+		}
+		app.panel.setFooterContext(ctx)
+		return
+	}
 
 	switch current.PageType {
-	case PageOverview:
-		ctx = ui.OverviewContext{FocusedPanel: app.getFocusedPanelName()}
 	case PageNodeDetail:
 		ctx = ui.NodeDetailContext{FocusedPanel: "events"}
 	case PagePodDetail:
@@ -1039,7 +1229,10 @@ func (app *Application) updateFooterContext() {
 	case PageContainerLogs:
 		ctx = ui.ContainerDetailContext{FocusedPanel: "logs"}
 	default:
-		ctx = ui.OverviewContext{FocusedPanel: app.getFocusedPanelName()}
+		ctx = ui.PageContext{
+			FocusedPanel: app.getFocusedPanelName(),
+			PageCount:    pageCount,
+		}
 	}
 
 	app.panel.setFooterContext(ctx)

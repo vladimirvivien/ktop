@@ -16,11 +16,11 @@ type appPanel struct {
 	tviewApp        *tview.Application
 	title           string
 	header          *tview.Table
+	tabBar          *ui.TabBar
 	pages           *tview.Pages
-	footer          *tview.Table // Legacy footer for page buttons (future use)
-	footerComponent *ui.Footer   // Context-aware navigation footer
+	footerComponent *ui.Footer // Context-aware navigation footer
 	modals          []tview.Primitive
-	root            *tview.Pages // CHANGED: from *tview.Flex to *tview.Pages
+	root            *tview.Pages // Wrap mainLayout for toast/modal layering
 
 	// Toast tracking
 	currentToastID      string
@@ -44,6 +44,7 @@ func newPanel(app *tview.Application) *appPanel {
 	p := &appPanel{
 		title:           "ktop",
 		tviewApp:        app,
+		tabBar:          ui.NewTabBar(),
 		namespaceFilter: &ui.FilterState{},
 	}
 	return p
@@ -60,40 +61,61 @@ func (p *appPanel) Layout(data any) {
 
 	p.header.SetBorder(true)
 	ui.StyleTable(p.header)
+	if p.tabBar == nil {
+		p.tabBar = ui.NewTabBar()
+	}
 	p.pages = tview.NewPages()
-	p.footer = tview.NewTable()
-	p.footer.SetBorder(true)
-	ui.StyleTable(p.footer)
 
 	// Initialize context-aware navigation footer
 	p.footerComponent = ui.NewFooter()
 
-	// Existing layout with navigation footer
 	mainLayout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.header, 3, 1, true).                    // header - focusable for input handling
-		AddItem(p.pages, 0, 1, true).                     // body
-		AddItem(p.footerComponent.GetView(), 3, 0, false) // navigation footer - 3 rows for border
+		AddItem(p.header, 3, 1, true).
+		AddItem(p.tabBar.GetView(), 1, 0, false).
+		AddItem(p.pages, 0, 1, true).
+		AddItem(p.footerComponent.GetView(), 3, 0, false)
 
-	// NEW: Wrap in Pages for toast layering
 	p.root = tview.NewPages()
 	p.root.AddPage("main", mainLayout, true, true)
 
 	p.tviewApp.SetRoot(p.root, true)
 
-	// add pages
-	pages, ok := data.([]AppPage)
-	if !ok {
+	var tabs []ui.TabItem
+	switch entries := data.(type) {
+	case []PageSession:
+		tabs = make([]ui.TabItem, 0, len(entries))
+		for _, session := range entries {
+			title := session.Descriptor.Title
+			if session.Descriptor.Panel != nil && session.Descriptor.Panel.GetRootView() != nil {
+				p.pages.AddPage(title, session.Descriptor.Panel.GetRootView(), true, false)
+			}
+			tabs = append(tabs, ui.TabItem{
+				ID:    session.Descriptor.ID,
+				Title: title,
+				Key:   session.Descriptor.Key,
+			})
+		}
+	case []AppPage:
+		tabs = make([]ui.TabItem, 0, len(entries))
+		for i, page := range entries {
+			if page.Panel != nil && page.Panel.GetRootView() != nil {
+				p.pages.AddPage(page.Title, page.Panel.GetRootView(), true, false)
+			}
+			var key rune
+			if i < 9 {
+				key = rune('1' + i)
+			}
+			tabs = append(tabs, ui.TabItem{
+				ID:    strings.ToLower(page.Title),
+				Title: page.Title,
+				Key:   key,
+			})
+		}
+	default:
 		panic(fmt.Sprintf("application.Layout got unexpected data type: %T", data))
 	}
 
-	// setup page and page buttons in footer
-	for i, page := range pages {
-		p.pages.AddPage(page.Title, page.Panel.GetRootView(), true, false)
-		cell := ui.NewDataCell(fmt.Sprintf("  %s (F%d)  ", page.Title, i+1)).
-			SetAlign(tview.AlignCenter).
-			SetExpansion(0)
-		p.footer.SetCell(0, i, cell)
-	}
+	p.tabBar.SetTabs(tabs)
 }
 
 func (p *appPanel) DrawHeader(data any) {
@@ -134,49 +156,40 @@ func (p *appPanel) DrawBody(data any) {}
 func (p *appPanel) DrawFooter(data any) {
 	title, ok := data.(string)
 	if !ok {
-		panic(fmt.Sprintf("application.DrawBody got unexpected data type: %T", data))
+		panic(fmt.Sprintf("application.DrawFooter got unexpected data type: %T", data))
 	}
-	p.switchToPage(title)
+	if p.pages != nil {
+		p.pages.SwitchToPage(title)
+	}
 }
 
 func (p *appPanel) Clear() {}
 
 func (p *appPanel) GetRootView() tview.Primitive {
-	//return p.pages
 	return p.root
 }
 
 func (p *appPanel) GetChildrenViews() []tview.Primitive {
-	return []tview.Primitive{p.header, p.pages, p.footer}
+	var tabView tview.Primitive
+	if p.tabBar != nil {
+		tabView = p.tabBar.GetView()
+	}
+	return []tview.Primitive{p.header, tabView, p.pages}
 }
 
-func (p *appPanel) switchToPage(title string) {
-	row := 0
-	cols := p.footer.GetColumnCount()
-	pal := ui.ActivePalette()
-	mono := ui.IsMonochrome()
-
-	for i := 0; i < cols; i++ {
-		cell := p.footer.GetCell(row, i)
-		if strings.HasPrefix(strings.TrimSpace(cell.Text), title) {
-			if mono {
-				cell.SetTextColor(tcell.ColorDefault).
-					SetBackgroundColor(tcell.ColorDefault).
-					SetAttributes(tcell.AttrReverse | tcell.AttrBold)
-			} else {
-				cell.SetTextColor(pal.HeaderFg).SetBackgroundColor(pal.HeaderBg)
-			}
-		} else {
-			if mono {
-				cell.SetTextColor(tcell.ColorDefault).
-					SetBackgroundColor(tcell.ColorDefault).
-					SetAttributes(tcell.AttrNone)
-			} else {
-				cell.SetTextColor(pal.DataSecondary).SetBackgroundColor(pal.CanvasBg)
-			}
-		}
+func (p *appPanel) setActiveTab(idx int, title string) {
+	if p.tabBar != nil {
+		p.tabBar.SetActive(idx)
 	}
-	p.pages.SwitchToPage(title)
+	if p.pages != nil && title != "" {
+		p.pages.SwitchToPage(title)
+	}
+}
+
+func (p *appPanel) setBreadcrumb(crumb string) {
+	if p.tabBar != nil {
+		p.tabBar.SetBreadcrumb(crumb)
+	}
 }
 
 // addDetailPage adds a detail page that can be shown when navigating to resources

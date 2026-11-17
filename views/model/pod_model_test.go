@@ -104,14 +104,14 @@ func TestGetPodContainerSummary(t *testing.T) {
 
 func TestSortPodModelPointersBy(t *testing.T) {
 	pod1 := &PodModel{
-		Namespace: "default",
-		Name:      "b-pod",
+		Namespace:      "default",
+		Name:           "b-pod",
 		PodUsageCpuQty: resource.NewMilliQuantity(500, resource.DecimalSI),
 		PodUsageMemQty: resource.NewQuantity(100*1024*1024, resource.BinarySI),
 	}
 	pod2 := &PodModel{
-		Namespace: "default",
-		Name:      "a-pod",
+		Namespace:      "default",
+		Name:           "a-pod",
 		PodUsageCpuQty: resource.NewMilliQuantity(200, resource.DecimalSI),
 		PodUsageMemQty: resource.NewQuantity(300*1024*1024, resource.BinarySI),
 	}

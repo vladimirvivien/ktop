@@ -219,8 +219,8 @@ func (p *MainPanel) calculatePanelHeights(terminalHeight int, isPrometheus bool)
 		if isPrometheus {
 			summaryHeight = 13
 		}
-		// Available = terminal - header(3) - footer(3) - summary
-		available := terminalHeight - 6 - summaryHeight
+		// Available = terminal - header(3) - tabbar(1) - footer(3) - summary
+		available := terminalHeight - 7 - summaryHeight
 		// Nodes gets 45% of remaining, Pods gets the rest
 		nodeHeight = available * 45 / 100
 		return // Already handled Prometheus bonus above
@@ -270,7 +270,7 @@ func (p *MainPanel) checkAndRebuildLayout() {
 func (p *MainPanel) DrawHeader(_ any) {}
 func (p *MainPanel) DrawBody(_ any)   {}
 func (p *MainPanel) DrawFooter(_ any) {}
-func (p *MainPanel) Clear()                   {}
+func (p *MainPanel) Clear()           {}
 
 func (p *MainPanel) GetTitle() string {
 	return p.title
@@ -353,26 +353,34 @@ func (p *MainPanel) GetActiveDetailPanel() ui.EscapablePanel {
 
 func (p *MainPanel) Run(ctx context.Context) error {
 	p.Layout(nil)
-	ctrl := p.app.GetK8sClient().Controller()
-	ctrl.SetMetricsSource(p.metricsSource) // Provide metrics source to controller for cluster summary
-	ctrl.SetClusterSummaryRefreshFunc(p.refreshWorkloadSummary)
-	ctrl.SetNodeRefreshFunc(p.refreshNodeView)
-	ctrl.SetPodRefreshFunc(p.refreshPods)
 
-	// Set up namespace filter callback to update filtering and immediately refresh pods
-	p.app.SetNamespaceFilterCallback(func(namespace string) {
-		p.namespaceFilter = namespace
-		// Immediately re-filter and display pods with the new filter
-		p.displayFilteredPods()
-	})
+	if p.app != nil {
+		p.app.SetNamespaceFilterCallback(func(namespace string) {
+			p.namespaceFilter = namespace
+			p.displayFilteredPods()
+		})
 
-	// Set up navigation callbacks on the app (detail panels created lazily on first use)
-	p.app.SetNodeDetailCallback(p.showNodeDetail)
-	p.app.SetPodDetailCallback(p.showPodDetail)
-	p.app.SetContainerLogsCallback(p.showContainerLogs)
+		p.app.SetNodeDetailCallback(p.showNodeDetail)
+		p.app.SetPodDetailCallback(p.showPodDetail)
+		p.app.SetContainerLogsCallback(p.showContainerLogs)
+		p.app.SetDetailResetCallback(func() {
+			p.viewState.SetOverview()
+			if p.containerDetailPanel != nil {
+				p.containerDetailPanel.Cleanup()
+			}
+		})
 
-	if err := ctrl.Start(ctx, time.Second*10); err != nil {
-		return fmt.Errorf("main panel: controller start: %w", err)
+		if client := p.app.GetK8sClient(); client != nil {
+			ctrl := client.Controller()
+			ctrl.SetMetricsSource(p.metricsSource)
+			ctrl.SetClusterSummaryRefreshFunc(p.refreshWorkloadSummary)
+			ctrl.SetNodeRefreshFunc(p.refreshNodeView)
+			ctrl.SetPodRefreshFunc(p.refreshPods)
+
+			if err := ctrl.Start(ctx, time.Second*10); err != nil {
+				return fmt.Errorf("main panel: controller start: %w", err)
+			}
+		}
 	}
 	return nil
 }
@@ -510,6 +518,9 @@ func (p *MainPanel) showContainerLogs(namespace, podName, containerName string) 
 
 // showNodeDetail navigates to the node detail view
 func (p *MainPanel) showNodeDetail(nodeName string) {
+	if p.containerDetailPanel != nil {
+		p.containerDetailPanel.Cleanup()
+	}
 	// Ensure the detail panel exists (lazy initialization)
 	p.ensureNodeDetailPanel()
 
@@ -530,6 +541,9 @@ func (p *MainPanel) showNodeDetail(nodeName string) {
 
 // showPodDetail navigates to the pod detail view
 func (p *MainPanel) showPodDetail(namespace, podName string) {
+	if p.containerDetailPanel != nil {
+		p.containerDetailPanel.Cleanup()
+	}
 	// Ensure the detail panel exists (lazy initialization)
 	p.ensurePodDetailPanel()
 

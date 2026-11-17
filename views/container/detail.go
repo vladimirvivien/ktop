@@ -1422,6 +1422,11 @@ func (p *DetailPanel) SetFocused(focused bool) {
 	ui.SetFlexFocused(p.root, focused)
 }
 
+// IsFilterEditing returns whether the log filter input is currently active.
+func (p *DetailPanel) IsFilterEditing() bool {
+	return p.filterMode
+}
+
 // HasEscapableState implements ui.EscapablePanel
 func (p *DetailPanel) HasEscapableState() bool {
 	return p.filterMode // Has state to clear if in filter mode

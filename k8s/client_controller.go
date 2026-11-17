@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/vladimirvivien/ktop/health"
@@ -47,6 +48,9 @@ type Controller struct {
 
 	// API health tracking
 	healthTracker *health.APIHealthTracker
+
+	startMu sync.Mutex
+	started bool
 }
 
 func newController(client *Client) *Controller {
@@ -159,6 +163,14 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	if ctx == nil {
 		return errors.New("context cannot be nil")
 	}
+
+	c.startMu.Lock()
+	if c.started {
+		c.startMu.Unlock()
+		return nil
+	}
+	c.started = true
+	c.startMu.Unlock()
 
 	factory, coreSynced, extraSynced := c.initInformers(resync)
 	factory.Start(ctx.Done())
