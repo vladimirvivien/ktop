@@ -1,5 +1,7 @@
 package ui
 
+import "fmt"
+
 // FooterContext defines the interface for footer content providers
 type FooterContext interface {
 	GetItems() []FooterItem
@@ -8,47 +10,73 @@ type FooterContext interface {
 // OverviewContext provides footer items for Overview page panels
 type OverviewContext struct {
 	FocusedPanel string // "header", "summary", "nodes", "pods"
+	PageCount    int
 }
 
 // GetItems returns footer items based on focused panel
 func (c OverviewContext) GetItems() []FooterItem {
+	pageSwitch := func() []FooterItem {
+		if c.PageCount > 1 {
+			return []FooterItem{{Key: fmt.Sprintf("[1-%d]", c.PageCount), Action: "page"}}
+		}
+		return nil
+	}
+
 	switch c.FocusedPanel {
 	case "header":
-		return []FooterItem{
-			{Key: "[Tab]", Action: "next"},
-			{Key: "[/]", Action: "filter"},
-			{Key: "[?]", Action: "help"},
-			{Key: "[ESC | Ctrl+C]", Action: "quit"},
-		}
-	case "nodes":
-		return []FooterItem{
+		items := []FooterItem{{Key: "[Tab]", Action: "next"}}
+		items = append(items, pageSwitch()...)
+		return append(items,
+			FooterItem{Key: "[/]", Action: "filter"},
+			FooterItem{Key: "[?]", Action: "help"},
+			FooterItem{Key: "[ESC | Ctrl+C]", Action: "quit"},
+		)
+	case "nodes", "pods":
+		items := []FooterItem{
 			{Key: "[↑/↓]", Action: "navigate"},
 			{Key: "[Enter]", Action: "detail"},
 			{Key: "[Tab]", Action: "next"},
-			{Key: "[=]", Action: "cols"},
-			{Key: "[/]", Action: "filter"},
-			{Key: "[y]", Action: "copy"},
-			{Key: "[?]", Action: "help"},
-			{Key: "[ESC | Ctrl+C]", Action: "quit"},
 		}
-	case "pods":
-		return []FooterItem{
-			{Key: "[↑/↓]", Action: "navigate"},
-			{Key: "[Enter]", Action: "detail"},
-			{Key: "[Tab]", Action: "next"},
-			{Key: "[=]", Action: "cols"},
-			{Key: "[/]", Action: "filter"},
-			{Key: "[y]", Action: "copy"},
-			{Key: "[?]", Action: "help"},
-			{Key: "[ESC | Ctrl+C]", Action: "quit"},
-		}
+		items = append(items, pageSwitch()...)
+		return append(items,
+			FooterItem{Key: "[=]", Action: "cols"},
+			FooterItem{Key: "[/]", Action: "filter"},
+			FooterItem{Key: "[y]", Action: "copy"},
+			FooterItem{Key: "[?]", Action: "help"},
+			FooterItem{Key: "[ESC | Ctrl+C]", Action: "quit"},
+		)
 	default: // summary or unknown
-		return []FooterItem{
-			{Key: "[Tab]", Action: "next"},
-			{Key: "[?]", Action: "help"},
-			{Key: "[ESC | Ctrl+C]", Action: "quit"},
-		}
+		items := []FooterItem{{Key: "[Tab]", Action: "next"}}
+		items = append(items, pageSwitch()...)
+		return append(items,
+			FooterItem{Key: "[?]", Action: "help"},
+			FooterItem{Key: "[ESC | Ctrl+C]", Action: "quit"},
+		)
 	}
+}
+
+// PageContext provides generic footer items for top-level pages.
+type PageContext struct {
+	FocusedPanel string
+	PageCount    int
+	Extra        []FooterItem
+}
+
+// GetItems returns footer items for a generic top-level page.
+func (c PageContext) GetItems() []FooterItem {
+	items := []FooterItem{{Key: "[Tab]", Action: "next"}}
+	if c.PageCount > 1 {
+		items = append(items, FooterItem{Key: fmt.Sprintf("[1-%d]", c.PageCount), Action: "page"})
+	}
+	if len(c.Extra) > 0 {
+		items = append(items, c.Extra...)
+	} else if c.FocusedPanel == "header" {
+		items = append(items, FooterItem{Key: "[/]", Action: "filter"})
+	}
+	return append(items,
+		FooterItem{Key: "[?]", Action: "help"},
+		FooterItem{Key: "[ESC | Ctrl+C]", Action: "quit"},
+	)
 }
 
 // NodeDetailContext provides footer items for Node Detail page

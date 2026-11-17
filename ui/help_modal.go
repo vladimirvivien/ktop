@@ -10,8 +10,9 @@ import (
 
 // HelpModalConfig configures the HelpModal display and callbacks
 type HelpModalConfig struct {
-	CurrentPage  string // "Overview", "Node Detail", "Pod Detail", "Container Logs"
-	FocusedPanel string // "header", "summary", "nodes", "pods", "containers", "events", "logs"
+	CurrentPage  string   // "Overview", "Node Detail", "Pod Detail", "Container Logs"
+	FocusedPanel string   // "header", "summary", "nodes", "pods", "containers", "events", "logs"
+	PageTitles   []string // Registered top-level page titles
 	OnClose      func()
 }
 
@@ -120,7 +121,12 @@ func (m *HelpModal) renderHelpContent(cfg HelpModalConfig) string {
 
 	// Section 1: Navigation & General
 	b.WriteString(section("GENERAL & NAVIGATION") + "\n")
-	fmt.Fprintf(&b, "  %s / %s   Cycle focus (Header → Summary → Nodes → Pods)\n", key("Tab"), key("Shift+Tab"))
+	fmt.Fprintf(&b, "  %s / %s   Cycle focus across Header and page panels\n", key("Tab"), key("Shift+Tab"))
+	if len(cfg.PageTitles) > 1 {
+		fmt.Fprintf(&b, "  %s / %s     Switch page (%s)\n", key(fmt.Sprintf("1-%d", len(cfg.PageTitles))), key("[ / ]"), strings.Join(cfg.PageTitles, ", "))
+	} else {
+		fmt.Fprintf(&b, "  %s / %s     Switch top-level page\n", key("1-9"), key("[ / ]"))
+	}
 	fmt.Fprintf(&b, "  %s           Open detail view for selected Node or Pod\n", key("Enter"))
 	fmt.Fprintf(&b, "  %s / %s           Copy selected resource name to clipboard\n", key("y"), key("Y"))
 	fmt.Fprintf(&b, "  %s / %s          Toggle this keyboard shortcuts help modal\n", key("?"), key("F1"))

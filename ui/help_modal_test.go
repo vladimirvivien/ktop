@@ -47,6 +47,16 @@ func TestHelpModal_RenderAndContext(t *testing.T) {
 			},
 			expectBadges: []string{"(Active: Pod Detail)"},
 		},
+		{
+			name: "multi-page shortcuts listed",
+			cfg: HelpModalConfig{
+				CurrentPage:  "Workloads",
+				FocusedPanel: "header",
+				PageTitles:   []string{"Overview", "Workloads", "Events"},
+			},
+			expectBadges:  []string{"(Active: Namespace Header)"},
+			expectContent: []string{"1-3", "Overview, Workloads, Events"},
+		},
 	}
 
 	for _, tt := range tests {
