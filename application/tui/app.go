@@ -17,6 +17,7 @@ import (
 type Options struct {
 	Theme          string
 	ColorMode      string
+	InitialPage    string
 	ShowAllColumns bool
 	NodeColumns    []string
 	PodColumns     []string
@@ -49,7 +50,19 @@ func NewRunner(ctx context.Context, k8sC *k8s.Client, metricsSource metrics.Metr
 	if opts.NodeSortCol != "" || opts.PodSortCol != "" {
 		overviewPage.SetInitialSort(opts.NodeSortCol, opts.NodeSortAsc, opts.PodSortCol, opts.PodSortAsc)
 	}
-	app.AddPage(overviewPage)
+	app.RegisterPage(application.PageDescriptor{
+		ID:         "overview",
+		Title:      "Overview",
+		Key:        '1',
+		RootType:   application.PageOverview,
+		Panel:      overviewPage,
+		ChildNames: []string{"summary", "nodes", "pods"},
+	})
+	if opts.InitialPage != "" {
+		if err := app.SetInitialPage(opts.InitialPage); err != nil {
+			return nil, fmt.Errorf("select initial page: %w", err)
+		}
+	}
 
 	if err := k8sC.AssertCoreAuthz(ctx); err != nil {
 		slog.Error("kubernetes authorization check failed", "error", err)

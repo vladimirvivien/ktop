@@ -53,6 +53,7 @@ Additional control plane components (apiserver, etcd, scheduler, controller-mana
 | `--sort-pods` | Initial sort column and order for pods (e.g. `-Memory`, `+CPU`) |
 | `--theme` | UI color theme: `auto` (default), `dark`, `light`, `ansi`, or `monochrome` |
 | `--color-mode` | Terminal color depth override: `auto` (default), `truecolor`, `256`, `16`, or `none` |
+| `--page` | Initial TUI page to display: `overview` (default) |
 
 ## Non-Interactive (`--noui`) Flags
 
@@ -111,9 +112,10 @@ Persist preferred defaults in `~/.ktop/config.yaml`:
 ui:
   theme: auto
   color_mode: auto
+  default_page: overview
 ```
 
-Command-line `--theme` and `--color-mode` flags override saved values for the current session only.
+Command-line `--theme`, `--color-mode`, and `--page` flags override saved values for the current session only.
 
 ## Advanced Connection Flags
 

@@ -159,10 +159,19 @@ func renderThemeViews(t *testing.T, snap *snapshot.Snapshot) []struct {
 	}).GetRootView()
 	toast := ui.NewToastWithButtons("connection lost [403]", ui.ToastError, []string{"Retry", "Quit"}, nil)
 
+	tabBar := ui.NewTabBar()
+	tabBar.SetTabs([]ui.TabItem{
+		{ID: "overview", Title: "Overview", Key: '1'},
+		{ID: "workloads", Title: "Workloads", Key: '2'},
+	})
+	tabBar.SetActive(0)
+	tabBar.SetBreadcrumb("Overview › pod/default/worker-1")
+
 	return []struct {
 		name      string
 		primitive tview.Primitive
 	}{
+		{"TabBar", tabBar.GetView()},
 		{"SummaryPanel", sum.GetRootView()},
 		{"NodePanel", nodePanel.GetRootView()},
 		{"PodPanel", podPanel.GetRootView()},

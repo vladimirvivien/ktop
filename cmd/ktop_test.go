@@ -29,6 +29,7 @@ func TestNewKtopCmd_Flags(t *testing.T) {
 		{"sort-pods", "", ""},
 		{"theme", "", "auto"},
 		{"color-mode", "", "auto"},
+		{"page", "", "overview"},
 		{"metrics-source", "", "prometheus"},
 		{"prometheus-scrape-interval", "", "5s"},
 		{"prometheus-retention", "", "1h"},
@@ -94,6 +95,25 @@ func TestNewKtopCmd_ThemeValidationFailsFast(t *testing.T) {
 			t.Fatalf("expected invalid theme error from config file, got: %v", err)
 		}
 	})
+
+	t.Run("invalid ui.default_page in config file", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv(userdir.EnvVar, tmpDir)
+		cfgPath := filepath.Join(tmpDir, config.ConfigFileName)
+		if err := os.WriteFile(cfgPath, []byte("ui:\n  default_page: unknown\n"), 0o600); err != nil {
+			t.Fatalf("write config file: %v", err)
+		}
+
+		c := NewKtopCmd()
+		c.SetArgs([]string{})
+		err := c.Execute()
+		if err == nil || !strings.Contains(err.Error(), "invalid page") {
+			t.Fatalf("expected invalid page error from config file, got: %v", err)
+		}
+		if got := ExitCode(err); got != ExitInvalidFlags {
+			t.Fatalf("ExitCode(%v) = %d, want %d", err, got, ExitInvalidFlags)
+		}
+	})
 }
 
 func TestParseSortFlag(t *testing.T) {
@@ -135,6 +155,7 @@ func TestNewKtopCmd_InvalidFlagsExitCode2(t *testing.T) {
 		{name: "invalid log level", args: []string{"--log-level=trace"}},
 		{name: "invalid log format", args: []string{"--log-format=yaml"}},
 		{name: "invalid theme", args: []string{"--theme=solarized"}},
+		{name: "invalid page", args: []string{"--page=unknown"}},
 		{name: "invalid metrics source", args: []string{"--metrics-source=bogus"}},
 		{name: "invalid request timeout", args: []string{"--noui", "--request-timeout=notaduration"}},
 	}

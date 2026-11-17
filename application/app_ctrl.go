@@ -407,6 +407,14 @@ func (app *Application) HandleInput(event *tcell.EventKey) *tcell.EventKey {
 	return app.handleInputEvent(event)
 }
 
+// FocusedPrimitive returns the primitive currently holding focus in tview.
+func (app *Application) FocusedPrimitive() tview.Primitive {
+	if app.tviewApp == nil {
+		return nil
+	}
+	return app.tviewApp.GetFocus()
+}
+
 func (app *Application) setup(ctx context.Context) error {
 	if len(app.sessions) > 0 {
 		if app.visibleView < 0 || app.visibleView >= len(app.sessions) {

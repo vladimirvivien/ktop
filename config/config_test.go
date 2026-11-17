@@ -728,3 +728,56 @@ func TestNormalizeThemeAndColorMode(t *testing.T) {
 		}
 	}
 }
+
+func TestAppConfig_DefaultPageAndNormalizePage(t *testing.T) {
+	def := DefaultAppConfig()
+	if def.UI.DefaultPage != "overview" {
+		t.Fatalf("expected DefaultAppConfig().UI.DefaultPage = 'overview', got %q", def.UI.DefaultPage)
+	}
+
+	tmpDir := t.TempDir()
+	t.Setenv(userdir.EnvVar, tmpDir)
+	cfgPath := filepath.Join(tmpDir, ConfigFileName)
+	if err := os.WriteFile(cfgPath, []byte("ui:\n  default_page: overview\n"), 0o600); err != nil {
+		t.Fatalf("write config file: %v", err)
+	}
+
+	loaded, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig failed: %v", err)
+	}
+	if loaded.UI.DefaultPage != "overview" {
+		t.Fatalf("expected loaded UI.DefaultPage = 'overview', got %q", loaded.UI.DefaultPage)
+	}
+
+	if err := SaveOverviewColumns([]string{"NAME", "CPU"}, nil); err != nil {
+		t.Fatalf("SaveOverviewColumns failed: %v", err)
+	}
+	afterSave, err := LoadAppConfig()
+	if err != nil {
+		t.Fatalf("LoadAppConfig after save failed: %v", err)
+	}
+	if afterSave.UI.DefaultPage != "overview" {
+		t.Fatalf("expected SaveOverviewColumns to preserve UI.DefaultPage, got %q", afterSave.UI.DefaultPage)
+	}
+
+	pageCases := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", "overview", false},
+		{" Overview ", "overview", false},
+		{"unknown", "", true},
+	}
+	for _, tc := range pageCases {
+		got, err := NormalizePage(tc.in)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("NormalizePage(%q) err=%v, wantErr=%v", tc.in, err, tc.wantErr)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("NormalizePage(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

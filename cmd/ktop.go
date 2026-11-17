@@ -54,7 +54,7 @@ type ktopCmdOptions struct {
 	context        string
 	kubeconfig     string
 	kubeFlags      *genericclioptions.ConfigFlags
-	page           string // future use
+	page           string
 	nodeColumns    string // comma-separated list of node columns to display
 	podColumns     string // comma-separated list of pod columns to display
 	showAllColumns bool   // show all columns
@@ -126,6 +126,7 @@ func NewKtopCmd() *cobra.Command {
 	cmd.Flags().StringVar(&o.sortPods, "sort-pods", "", "Initial sort column for pods table, prefix with + for asc, - for desc (e.g. '-MEMORY', '+POD')")
 	cmd.Flags().StringVar(&o.theme, "theme", "auto", "UI color theme (auto, dark, light, ansi, monochrome)")
 	cmd.Flags().StringVar(&o.colorMode, "color-mode", "auto", "Terminal color depth override (auto, truecolor, 256, 16, none)")
+	cmd.Flags().StringVar(&o.page, "page", "overview", "Initial TUI page to display (overview)")
 
 	// Headless / non-interactive flags
 	cmd.Flags().BoolVar(&o.noui, "noui", false, "Disable interactive terminal UI and write structured output to stdout")
@@ -314,6 +315,9 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, _ []string) error {
 		if !c.Flags().Changed("color-mode") && appConfig.UI.ColorMode != "" {
 			o.colorMode = appConfig.UI.ColorMode
 		}
+		if !c.Flags().Changed("page") && appConfig.UI.DefaultPage != "" {
+			o.page = appConfig.UI.DefaultPage
+		}
 		if !c.Flags().Changed("metrics-source") && appConfig.Metrics.Source != "" {
 			o.metricsSource = appConfig.Metrics.Source
 		}
@@ -387,6 +391,13 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, _ []string) error {
 		return WrapExitError(ExitInvalidFlags, err)
 	}
 	o.colorMode = normalizedColorMode
+
+	normalizedPage, err := config.NormalizePage(o.page)
+	if err != nil {
+		slog.Error("invalid page", "value", o.page, "error", err)
+		return WrapExitError(ExitInvalidFlags, err)
+	}
+	o.page = normalizedPage
 
 	k8sC, err := k8s.New(o.kubeFlags)
 	if err != nil {
@@ -505,6 +516,7 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, _ []string) error {
 		runner, err = tui.NewRunner(runCtx, k8sC, metricsSource, tui.Options{
 			Theme:          o.theme,
 			ColorMode:      o.colorMode,
+			InitialPage:    o.page,
 			ShowAllColumns: o.showAllColumns,
 			NodeColumns:    nodeColumns,
 			PodColumns:     podColumns,

@@ -80,9 +80,10 @@ type AppConfig struct {
 
 // UIConfig holds UI preferences.
 type UIConfig struct {
-	Theme     string           `json:"theme,omitempty" yaml:"theme,omitempty"`
-	ColorMode string           `json:"color_mode,omitempty" yaml:"color_mode,omitempty"`
-	Overview  OverviewUIConfig `json:"overview" yaml:"overview"`
+	Theme       string           `json:"theme,omitempty" yaml:"theme,omitempty"`
+	ColorMode   string           `json:"color_mode,omitempty" yaml:"color_mode,omitempty"`
+	DefaultPage string           `json:"default_page,omitempty" yaml:"default_page,omitempty"`
+	Overview    OverviewUIConfig `json:"overview" yaml:"overview"`
 }
 
 // OverviewUIConfig holds column selections for overview tables.
@@ -110,8 +111,9 @@ type LoggingConfig struct {
 func DefaultAppConfig() *AppConfig {
 	return &AppConfig{
 		UI: UIConfig{
-			Theme:     "auto",
-			ColorMode: "auto",
+			Theme:       "auto",
+			ColorMode:   "auto",
+			DefaultPage: "overview",
 			Overview: OverviewUIConfig{
 				NodeCols: slicesClone(DefaultNodeColumns),
 				PodCols:  slicesClone(DefaultPodColumns),
@@ -171,6 +173,9 @@ func LoadAppConfig() (*AppConfig, error) {
 	}
 	if strings.TrimSpace(cfg.UI.ColorMode) == "" {
 		cfg.UI.ColorMode = "auto"
+	}
+	if strings.TrimSpace(cfg.UI.DefaultPage) == "" {
+		cfg.UI.DefaultPage = "overview"
 	}
 	cfg.UI.Overview.NodeCols = NormalizeColumns(cfg.UI.Overview.NodeCols)
 	cfg.UI.Overview.PodCols = NormalizeColumns(cfg.UI.Overview.PodCols)
@@ -244,6 +249,11 @@ var ValidColorModes = map[string]string{
 	"none":      "none",
 }
 
+// ValidPages lists valid initial top-level TUI page identifiers.
+var ValidPages = map[string]string{
+	"overview": "overview",
+}
+
 // NormalizeMetricsSource converts aliases to canonical names
 func NormalizeMetricsSource(source string) (string, error) {
 	normalized, ok := ValidMetricsSources[strings.ToLower(source)]
@@ -261,6 +271,11 @@ func NormalizeTheme(theme string) (string, error) {
 // NormalizeColorMode validates and canonicalizes a terminal color mode override.
 func NormalizeColorMode(mode string) (string, error) {
 	return normalizeOption(mode, "auto", "color mode", ValidColorModes, "auto, truecolor, 256, 16, none")
+}
+
+// NormalizePage validates and canonicalizes a top-level TUI page identifier.
+func NormalizePage(page string) (string, error) {
+	return normalizeOption(page, "overview", "page", ValidPages, "overview")
 }
 
 func normalizeOption(raw, emptyDefault, kind string, valid map[string]string, validList string) (string, error) {
