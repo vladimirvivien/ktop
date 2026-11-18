@@ -129,7 +129,7 @@ func (tb *TabBar) render() {
 			if mono {
 				tabsMarkup.WriteString("[::rb]" + escaped + "[::-]")
 			} else {
-				fmt.Fprintf(&tabsMarkup, "[%s:%s:b]%s[-:-:-]", TagFg(pal.HeaderFg), TagFg(pal.HeaderBg), escaped)
+				fmt.Fprintf(&tabsMarkup, "[%s:%s:b]%s[-:-:-]", TagFg(pal.TabActiveFg), TagFg(pal.TabActiveBg), escaped)
 			}
 		} else {
 			if mono {

@@ -85,11 +85,11 @@ func TestTabBar_ZeroGapAndThemedInactiveColors(t *testing.T) {
 		t.Fatalf("unexpected tab offsets first=%d second=%d in %q", firstStart, secondStart, line)
 	}
 
-	// Cell right before second tab must carry active HeaderBg; first cell of second tab must carry TabInactiveBg.
+	// Cell right before second tab must carry active TabActiveBg; first cell of second tab must carry TabInactiveBg.
 	activeFG, activeBG, _ := cells[secondStart-1].Style.Decompose()
 	inactiveFG, inactiveBG, _ := cells[secondStart].Style.Decompose()
-	if activeFG != rt.Palette.HeaderFg || activeBG != rt.Palette.HeaderBg {
-		t.Fatalf("active tab style = (%v, %v), want (%v, %v)", activeFG, activeBG, rt.Palette.HeaderFg, rt.Palette.HeaderBg)
+	if activeFG != rt.Palette.TabActiveFg || activeBG != rt.Palette.TabActiveBg {
+		t.Fatalf("active tab style = (%v, %v), want (%v, %v)", activeFG, activeBG, rt.Palette.TabActiveFg, rt.Palette.TabActiveBg)
 	}
 	if inactiveFG != rt.Palette.TabInactiveFg || inactiveBG != rt.Palette.TabInactiveBg {
 		t.Fatalf("inactive tab style = (%v, %v), want (%v, %v)", inactiveFG, inactiveBG, rt.Palette.TabInactiveFg, rt.Palette.TabInactiveBg)
