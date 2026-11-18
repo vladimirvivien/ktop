@@ -182,14 +182,12 @@ func (p *Page) Layout(_ any) {
 	})
 
 	p.children = []tview.Primitive{
-		p.summary.GetRootView(),
 		p.deployments.TablePrimitive(),
 		p.statefulsets.TablePrimitive(),
 		p.daemonsets.TablePrimitive(),
 		p.jobs.TablePrimitive(),
 	}
 	p.childPanels = []ui.Panel{
-		p.summary,
 		p.deployments,
 		p.statefulsets,
 		p.daemonsets,

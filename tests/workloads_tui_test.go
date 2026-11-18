@@ -114,7 +114,7 @@ func TestWorkloadsTUI_EndToEndNavigationAndDrillDown(t *testing.T) {
 		Key:        '1',
 		RootType:   application.PageOverview,
 		Panel:      overviewPanel,
-		ChildNames: []string{"summary", "nodes", "pods"},
+		ChildNames: []string{"nodes", "pods"},
 	})
 	app.RegisterPage(application.PageDescriptor{
 		ID:         "workloads",
@@ -122,7 +122,7 @@ func TestWorkloadsTUI_EndToEndNavigationAndDrillDown(t *testing.T) {
 		Key:        '2',
 		RootType:   application.PageWorkloads,
 		Panel:      workloadsPanel,
-		ChildNames: []string{"summary", "deployments", "statefulsets", "daemonsets", "jobs"},
+		ChildNames: []string{"deployments", "statefulsets", "daemonsets", "jobs"},
 	})
 
 	if err := client.Controller().StartInformers(ctx, 10*time.Second, 5*time.Second); err != nil {
@@ -150,6 +150,17 @@ func TestWorkloadsTUI_EndToEndNavigationAndDrillDown(t *testing.T) {
 		t.Fatalf("expected Overview and Workloads tabs on screen, got:\n%s", ts.Text())
 	}
 
+	// Verify Overview Tab cycle skips Cluster Summary: Header -> Nodes -> Pods -> Header.
+	sendAppKey(ts, app, tcell.KeyTab, 0, tcell.ModNone)
+	if !overviewPanel.GetChildrenViews()[0].HasFocus() {
+		t.Fatalf("expected first Tab on Overview to skip Cluster Summary and focus Nodes panel")
+	}
+	sendAppKey(ts, app, tcell.KeyTab, 0, tcell.ModNone)
+	if !overviewPanel.GetChildrenViews()[1].HasFocus() {
+		t.Fatalf("expected second Tab on Overview to focus Pods panel")
+	}
+	sendAppKey(ts, app, tcell.KeyTab, 0, tcell.ModNone) // Wrap back to Header
+
 	// Press '2' to switch to Workloads tab.
 	sendAppKey(ts, app, tcell.KeyRune, '2', tcell.ModNone)
 	if app.ActivePageID() != "workloads" {
@@ -162,9 +173,11 @@ func TestWorkloadsTUI_EndToEndNavigationAndDrillDown(t *testing.T) {
 		}
 	}
 
-	// Tab twice (Header -> Summary -> Deployments table) and press Enter on Deployment "api".
+	// First Tab on Workloads skips Workload Summary and lands directly on Deployments table.
 	sendAppKey(ts, app, tcell.KeyTab, 0, tcell.ModNone)
-	sendAppKey(ts, app, tcell.KeyTab, 0, tcell.ModNone)
+	if app.FocusedPrimitive() != workloadsPanel.GetChildrenViews()[0] {
+		t.Fatalf("expected first Tab on Workloads to skip Workload Summary and focus Deployments table")
+	}
 	sendAppKey(ts, app, tcell.KeyEnter, 0, tcell.ModNone)
 
 	detailScreen := ts.Text()

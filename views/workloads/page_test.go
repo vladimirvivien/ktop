@@ -28,7 +28,7 @@ func TestWorkloadsPage_RendersTablesSummaryAndDetail(t *testing.T) {
 		Key:        '1',
 		RootType:   application.PageWorkloads,
 		Panel:      page,
-		ChildNames: []string{"summary", "deployments", "statefulsets", "daemonsets", "jobs"},
+		ChildNames: []string{"deployments", "statefulsets", "daemonsets", "jobs"},
 	})
 	if err := app.Setup(context.Background()); err != nil {
 		t.Fatalf("Setup failed: %v", err)

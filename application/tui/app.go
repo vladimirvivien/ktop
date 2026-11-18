@@ -57,7 +57,7 @@ func NewRunner(ctx context.Context, k8sC *k8s.Client, metricsSource metrics.Metr
 		Key:        '1',
 		RootType:   application.PageOverview,
 		Panel:      overviewPage,
-		ChildNames: []string{"summary", "nodes", "pods"},
+		ChildNames: []string{"nodes", "pods"},
 	})
 	workloadsPage := workloads.New(app, "Workloads")
 	app.RegisterPage(application.PageDescriptor{
@@ -66,7 +66,7 @@ func NewRunner(ctx context.Context, k8sC *k8s.Client, metricsSource metrics.Metr
 		Key:        '2',
 		RootType:   application.PageWorkloads,
 		Panel:      workloadsPage,
-		ChildNames: []string{"summary", "deployments", "statefulsets", "daemonsets", "jobs"},
+		ChildNames: []string{"deployments", "statefulsets", "daemonsets", "jobs"},
 	})
 	if opts.InitialPage != "" {
 		if err := app.SetInitialPage(opts.InitialPage); err != nil {

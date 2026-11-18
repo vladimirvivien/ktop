@@ -164,14 +164,12 @@ func (p *MainPanel) Layout(data any) {
 	}
 
 	p.children = []tview.Primitive{
-		p.clusterSummaryPanel.GetRootView(),
 		p.nodePanel.GetRootView(),
 		p.podPanel.GetRootView(),
 	}
 
 	// Store panels in order for focus management
 	p.childPanels = []ui.Panel{
-		p.clusterSummaryPanel,
 		p.nodePanel,
 		p.podPanel,
 	}

@@ -1170,13 +1170,11 @@ func (app *Application) getFocusedPanelName() string {
 	}
 	switch app.tabIdx {
 	case 0:
-		return "summary"
-	case 1:
 		return "nodes"
-	case 2:
+	case 1:
 		return "pods"
 	default:
-		return "summary"
+		return "nodes"
 	}
 }
 

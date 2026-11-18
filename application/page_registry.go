@@ -41,7 +41,7 @@ func (app *Application) RegisterPage(desc PageDescriptor) {
 		desc.RootType = PageType(desc.ID)
 	}
 	if len(desc.ChildNames) == 0 && desc.ID == "overview" {
-		desc.ChildNames = []string{"summary", "nodes", "pods"}
+		desc.ChildNames = []string{"nodes", "pods"}
 	}
 
 	session := PageSession{
