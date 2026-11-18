@@ -428,8 +428,12 @@ func (p *Page) HandleEscape() bool {
 	return false
 }
 
-func (p *Page) DrawHeader(_ any)                    {}
-func (p *Page) DrawBody(_ any)                      {}
+func (p *Page) DrawHeader(_ any) {}
+func (p *Page) DrawBody(data any) {
+	if snap, ok := data.(model.WorkloadsSnapshot); ok {
+		p.applySnapshot(snap)
+	}
+}
 func (p *Page) DrawFooter(_ any)                    {}
 func (p *Page) Clear()                              {}
 func (p *Page) GetTitle() string                    { return p.title }

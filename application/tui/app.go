@@ -11,6 +11,7 @@ import (
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/overview"
+	"github.com/vladimirvivien/ktop/views/workloads"
 )
 
 // Options configures the interactive TUI application runner.
@@ -57,6 +58,15 @@ func NewRunner(ctx context.Context, k8sC *k8s.Client, metricsSource metrics.Metr
 		RootType:   application.PageOverview,
 		Panel:      overviewPage,
 		ChildNames: []string{"summary", "nodes", "pods"},
+	})
+	workloadsPage := workloads.New(app, "Workloads")
+	app.RegisterPage(application.PageDescriptor{
+		ID:         "workloads",
+		Title:      "Workloads",
+		Key:        '2',
+		RootType:   application.PageWorkloads,
+		Panel:      workloadsPage,
+		ChildNames: []string{"summary", "deployments", "statefulsets", "daemonsets", "jobs"},
 	})
 	if opts.InitialPage != "" {
 		if err := app.SetInitialPage(opts.InitialPage); err != nil {

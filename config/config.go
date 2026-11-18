@@ -251,7 +251,8 @@ var ValidColorModes = map[string]string{
 
 // ValidPages lists valid initial top-level TUI page identifiers.
 var ValidPages = map[string]string{
-	"overview": "overview",
+	"overview":  "overview",
+	"workloads": "workloads",
 }
 
 // NormalizeMetricsSource converts aliases to canonical names
@@ -275,7 +276,7 @@ func NormalizeColorMode(mode string) (string, error) {
 
 // NormalizePage validates and canonicalizes a top-level TUI page identifier.
 func NormalizePage(page string) (string, error) {
-	return normalizeOption(page, "overview", "page", ValidPages, "overview")
+	return normalizeOption(page, "overview", "page", ValidPages, "overview, workloads")
 }
 
 func normalizeOption(raw, emptyDefault, kind string, valid map[string]string, validList string) (string, error) {

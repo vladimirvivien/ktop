@@ -132,9 +132,12 @@ This is the most compatible option for managed Kubernetes services.
 ktop uses a hierarchical navigation model:
 
 ```
-Overview → Node Detail → (back to Overview)
-         → Pod Detail → Container Detail → (back through each level)
+Overview  → Node Detail     → Pod Detail → Container Detail
+          → Pod Detail      → Container Detail
+Workloads → Workload Detail → Pod Detail → Container Detail
 ```
+
+Switch top-level tabs at any time using `1`–`2` or `[` / `]`. Launch directly onto a specific page with `--page=workloads` or `ui.default_page` in `~/.ktop/config.yaml`.
 
 ### Key Controls
 
@@ -167,6 +170,25 @@ Overview → Node Detail → (back to Overview)
 The main dashboard showing cluster health at a glance. Displays summary statistics, nodes with their resource usage, and pods with status and metrics.
 
 **Navigation:** Select a node or pod and press Enter to see details. Press Tab to move between panels.
+
+### Workloads
+
+Groups application controllers into four sortable, filterable sections alongside a top Workload Summary rollup bar:
+
+- **Deployments** (`NAMESPACE`, `NAME`, `READY`, `UP-TO-DATE`, `AVAIL`, `AGE`, `EFF`, `STATUS`)
+- **StatefulSets** (`NAMESPACE`, `NAME`, `READY`, `AGE`, `EFF`, `STATUS`)
+- **DaemonSets** (`NAMESPACE`, `NAME`, `DESIRED`, `CURRENT`, `READY`, `AGE`, `EFF`, `STATUS`)
+- **Jobs** (`NAMESPACE`, `NAME`, `COMPLETIONS`, `AGE`, `STATUS`)
+
+The `EFF` column compares actual CPU/memory usage against pod resource requests across owned pods to highlight sizing health:
+
+- `< 25%` (red): severely over-provisioned
+- `25%–50%` (yellow): over-provisioned
+- `50%–90%` (green): well-sized
+- `90%–100%` (orange): near limit
+- `> 100%` (red): throttled or OOM risk
+
+Press `Tab` to move across Workload sections and `Enter` on any row to open **Workload Detail**, which displays aggregate CPU/memory trends, selector/label metadata, rollout conditions, scoped events, and owned pods (`Enter` drills directly into Pod Detail).
 
 ### Node Detail
 
