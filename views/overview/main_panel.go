@@ -376,10 +376,6 @@ func (p *MainPanel) Run(ctx context.Context) error {
 			ctrl.SetClusterSummaryRefreshFunc(p.refreshWorkloadSummary)
 			ctrl.SetNodeRefreshFunc(p.refreshNodeView)
 			ctrl.SetPodRefreshFunc(p.refreshPods)
-
-			if err := ctrl.Start(ctx, time.Second*10); err != nil {
-				return fmt.Errorf("main panel: controller start: %w", err)
-			}
 		}
 	}
 	return nil

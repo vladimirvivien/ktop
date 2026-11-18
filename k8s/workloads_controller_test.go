@@ -202,3 +202,38 @@ func TestWorkloadsController_SnapshotAndDetail(t *testing.T) {
 		t.Fatalf("expected 1 aggregated history sample, got %d", len(detail.MetricsHistory))
 	}
 }
+
+func TestWorkloadsController_LateRefreshRegistrationStartsHandler(t *testing.T) {
+	dep := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "late-app"},
+	}
+	fakeKube := fake.NewSimpleClientset(dep)
+	client := NewWithClient(fakeKube, AllNamespaces, "test-ctx", &version.Info{GitVersion: "v1.32.0"})
+	ctrl := client.Controller()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start controller first (simulating Overview calling Start before Workloads registers).
+	if err := ctrl.Start(ctx, 10*time.Second); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	gotCh := make(chan model.WorkloadsSnapshot, 4)
+	ctrl.SetWorkloadsRefreshFunc(func(_ context.Context, snap model.WorkloadsSnapshot) error {
+		gotCh <- snap
+		return nil
+	})
+
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case snap := <-gotCh:
+			if len(snap.Deployments) == 1 && snap.Deployments[0].Name == "late-app" {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for late-registered workloads handler to deliver Deployment")
+		}
+	}
+}

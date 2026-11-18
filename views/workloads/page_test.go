@@ -80,6 +80,20 @@ func TestWorkloadsPage_RendersTablesSummaryAndDetail(t *testing.T) {
 		}
 	}
 
+	// Verify 2-column layout places Deployments alongside StatefulSets and DaemonSets alongside Jobs.
+	var foundTopRow, foundBottomRow bool
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "Deployments") && strings.Contains(line, "StatefulSets") {
+			foundTopRow = true
+		}
+		if strings.Contains(line, "DaemonSets") && strings.Contains(line, "Jobs") {
+			foundBottomRow = true
+		}
+	}
+	if !foundTopRow || !foundBottomRow {
+		t.Fatalf("expected 2-column equal grid layout (foundTopRow=%v, foundBottomRow=%v), got:\n%s", foundTopRow, foundBottomRow, text)
+	}
+
 	// Verify namespace filtering updates visible rows and summary counts.
 	page.SetNamespaceFilter("prod")
 	ts.Draw(app.RootPrimitive())

@@ -670,7 +670,7 @@ func SortDeploymentModelsBy(items []DeploymentModel, column string, ascending bo
 				return a.Name < b.Name
 			}
 			return ra < rb
-		case "UP-TO-DATE":
+		case "UP-TO-DATE", "UP":
 			if a.Updated == b.Updated {
 				return a.Name < b.Name
 			}

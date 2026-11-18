@@ -135,10 +135,14 @@ func (w *workloadTable[T]) DrawHeader(data any) {
 
 	for i, col := range cols {
 		headerText := w.tableCtrl.FormatColumnHeader(col)
+		exp := 0
+		if col == "NAME" {
+			exp = 1
+		}
 		w.table.SetCell(0, i,
 			ui.StyleHeaderCell(tview.NewTableCell(headerText).
 				SetAlign(tview.AlignLeft).
-				SetExpansion(100).
+				SetExpansion(exp).
 				SetSelectable(false)),
 		)
 		w.colMap[col] = i

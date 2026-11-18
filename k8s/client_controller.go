@@ -52,8 +52,10 @@ type Controller struct {
 	// API health tracking
 	healthTracker *health.APIHealthTracker
 
-	startMu sync.Mutex
-	started bool
+	startMu          sync.Mutex
+	started          bool
+	startCtx         context.Context
+	workloadsStarted bool
 }
 
 func newController(client *Client) *Controller {
@@ -79,7 +81,18 @@ func (c *Controller) SetClusterSummaryRefreshFunc(fn RefreshSummaryFunc) *Contro
 }
 
 func (c *Controller) SetWorkloadsRefreshFunc(fn RefreshWorkloadsFunc) *Controller {
+	c.startMu.Lock()
 	c.workloadsRefreshFunc = fn
+	shouldStart := c.started && !c.workloadsStarted && fn != nil && c.startCtx != nil
+	if shouldStart {
+		c.workloadsStarted = true
+	}
+	ctx := c.startCtx
+	c.startMu.Unlock()
+
+	if shouldStart {
+		c.setupWorkloadsHandler(ctx, fn)
+	}
 	return c
 }
 
@@ -181,6 +194,7 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 		return nil
 	}
 	c.started = true
+	c.startCtx = ctx
 	c.startMu.Unlock()
 
 	factory, coreSynced, extraSynced := c.initInformers(resync)
@@ -222,7 +236,17 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	c.setupSummaryHandler(ctx, c.summaryRefreshFunc)
 	c.setupNodeHandler(ctx, c.nodeRefreshFunc)
 	c.installPodsHandler(ctx, c.podRefreshFunc)
-	c.setupWorkloadsHandler(ctx, c.workloadsRefreshFunc)
+
+	c.startMu.Lock()
+	wlFn := c.workloadsRefreshFunc
+	startWL := !c.workloadsStarted && wlFn != nil
+	if startWL {
+		c.workloadsStarted = true
+	}
+	c.startMu.Unlock()
+	if startWL {
+		c.setupWorkloadsHandler(ctx, wlFn)
+	}
 
 	// Wire up reconnect callback to trigger immediate health check when user presses Retry
 	if c.healthTracker != nil {

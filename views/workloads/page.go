@@ -28,7 +28,6 @@ type Page struct {
 	childPanels     []ui.Panel
 	namespaceFilter string
 	lastSnap        model.WorkloadsSnapshot
-	layoutSig       string
 
 	detailMu     sync.RWMutex
 	detailActive bool
@@ -53,25 +52,25 @@ func (p *Page) Layout(_ any) {
 		return
 	}
 
-	p.summary = newSummaryPanel(fmt.Sprintf(" %s Workload Summary ", ui.Icons.Thermometer))
+	p.summary = newSummaryPanel(fmt.Sprintf(" %s  Workload Summary ", ui.Icons.Thermometer))
 
 	p.deployments = newWorkloadTable(p.app, workloadTableConfig[model.DeploymentModel]{
 		title: "Deployments",
 		icon:  ui.Icons.Rocket,
 		columns: []string{
-			"NAMESPACE", "NAME", "READY", "UP-TO-DATE", "AVAIL", "AGE", "EFF", "STATUS",
+			"NS", "NAME", "READY", "UP", "AVAIL", "AGE", "EFF", "STATUS",
 		},
 		columnToKey: map[string]rune{
-			"NAMESPACE":  'n',
-			"NAME":       'd',
-			"READY":      'r',
-			"UP-TO-DATE": 'u',
-			"AVAIL":      'v',
-			"AGE":        'a',
-			"EFF":        'e',
-			"STATUS":     's',
+			"NS":     'n',
+			"NAME":   'm',
+			"READY":  'r',
+			"UP":     'u',
+			"AVAIL":  'v',
+			"AGE":    'a',
+			"EFF":    'e',
+			"STATUS": 's',
 		},
-		defaultSortCol: "NAMESPACE",
+		defaultSortCol: "NS",
 		defaultSortAsc: true,
 		sortFn:         model.SortDeploymentModelsBy,
 		namespaceFn:    func(d model.DeploymentModel) string { return d.Namespace },
@@ -92,17 +91,17 @@ func (p *Page) Layout(_ any) {
 		title: "StatefulSets",
 		icon:  ui.Icons.Package,
 		columns: []string{
-			"NAMESPACE", "NAME", "READY", "AGE", "EFF", "STATUS",
+			"NS", "NAME", "READY", "AGE", "EFF", "STATUS",
 		},
 		columnToKey: map[string]rune{
-			"NAMESPACE": 'n',
-			"NAME":      'f',
-			"READY":     'r',
-			"AGE":       'a',
-			"EFF":       'e',
-			"STATUS":    's',
+			"NS":     'n',
+			"NAME":   'm',
+			"READY":  'r',
+			"AGE":    'a',
+			"EFF":    'e',
+			"STATUS": 's',
 		},
-		defaultSortCol: "NAMESPACE",
+		defaultSortCol: "NS",
 		defaultSortAsc: true,
 		sortFn:         model.SortStatefulSetModelsBy,
 		namespaceFn:    func(s model.StatefulSetModel) string { return s.Namespace },
@@ -123,19 +122,19 @@ func (p *Page) Layout(_ any) {
 		title: "DaemonSets",
 		icon:  ui.Icons.Controller,
 		columns: []string{
-			"NAMESPACE", "NAME", "DESIRED", "CURRENT", "READY", "AGE", "EFF", "STATUS",
+			"NS", "NAME", "DESIRED", "CURRENT", "READY", "AGE", "EFF", "STATUS",
 		},
 		columnToKey: map[string]rune{
-			"NAMESPACE": 'n',
-			"NAME":      'd',
-			"DESIRED":   'i',
-			"CURRENT":   'c',
-			"READY":     'r',
-			"AGE":       'a',
-			"EFF":       'e',
-			"STATUS":    's',
+			"NS":      'n',
+			"NAME":    'm',
+			"DESIRED": 'd',
+			"CURRENT": 'c',
+			"READY":   'r',
+			"AGE":     'a',
+			"EFF":     'e',
+			"STATUS":  's',
 		},
-		defaultSortCol: "NAMESPACE",
+		defaultSortCol: "NS",
 		defaultSortAsc: true,
 		sortFn:         model.SortDaemonSetModelsBy,
 		namespaceFn:    func(ds model.DaemonSetModel) string { return ds.Namespace },
@@ -156,16 +155,16 @@ func (p *Page) Layout(_ any) {
 		title: "Jobs",
 		icon:  ui.Icons.Clock,
 		columns: []string{
-			"NAMESPACE", "NAME", "COMPLETIONS", "AGE", "STATUS",
+			"NS", "NAME", "COMPLETIONS", "AGE", "STATUS",
 		},
 		columnToKey: map[string]rune{
-			"NAMESPACE":   'n',
-			"NAME":        'j',
+			"NS":          'n',
+			"NAME":        'm',
 			"COMPLETIONS": 'c',
 			"AGE":         'a',
 			"STATUS":      's',
 		},
-		defaultSortCol: "NAMESPACE",
+		defaultSortCol: "NS",
 		defaultSortAsc: true,
 		sortFn:         model.SortJobModelsBy,
 		namespaceFn:    func(j model.JobModel) string { return j.Namespace },
@@ -197,8 +196,18 @@ func (p *Page) Layout(_ any) {
 		p.jobs,
 	}
 
-	p.root = tview.NewFlex().SetDirection(tview.FlexRow)
-	p.rebuildLayout(false)
+	grid := tview.NewGrid().
+		SetRows(-1, -1).
+		SetColumns(-1, -1).
+		SetGap(1, 1).
+		AddItem(p.deployments.GetRootView(), 0, 0, 1, 1, 0, 0, false).
+		AddItem(p.statefulsets.GetRootView(), 0, 1, 1, 1, 0, 0, false).
+		AddItem(p.daemonsets.GetRootView(), 1, 0, 1, 1, 0, 0, false).
+		AddItem(p.jobs.GetRootView(), 1, 1, 1, 1, 0, 0, false)
+
+	p.root = tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(p.summary.GetRootView(), 4, 0, false).
+		AddItem(grid, 0, 1, false)
 }
 
 func (p *Page) Run(ctx context.Context) error {
@@ -256,7 +265,6 @@ func (p *Page) applySnapshot(snap model.WorkloadsSnapshot) {
 	p.daemonsets.DrawBody(snap.DaemonSets)
 	p.jobs.DrawBody(snap.Jobs)
 	p.summary.DrawBody(model.ComputeWorkloadSummary(snap, p.namespaceFilter))
-	p.rebuildLayoutIfNeeded()
 }
 
 // SetNamespaceFilter updates the namespace filter across all workload tables and summary counts.
@@ -268,53 +276,6 @@ func (p *Page) SetNamespaceFilter(ns string) {
 	p.jobs.SetNamespaceFilter(p.namespaceFilter)
 	p.summary.SetNamespaceFilter(p.namespaceFilter)
 	p.summary.DrawBody(model.ComputeWorkloadSummary(p.lastSnap, p.namespaceFilter))
-	p.rebuildLayoutIfNeeded()
-}
-
-func (p *Page) rebuildLayoutIfNeeded() {
-	sig := fmt.Sprintf("%t/%t/%t/%t",
-		p.deployments.Count() > 0,
-		p.statefulsets.Count() > 0,
-		p.daemonsets.Count() > 0,
-		p.jobs.Count() > 0,
-	)
-	if sig == p.layoutSig {
-		return
-	}
-	p.layoutSig = sig
-	p.rebuildLayout(true)
-}
-
-func (p *Page) rebuildLayout(_ bool) {
-	if p.root == nil {
-		return
-	}
-
-	depPop := p.deployments.Count() > 0
-	stsPop := p.statefulsets.Count() > 0
-	dsPop := p.daemonsets.Count() > 0
-	jobPop := p.jobs.Count() > 0
-	anyPop := depPop || stsPop || dsPop || jobPop
-
-	p.root.Clear()
-	p.root.AddItem(p.summary.GetRootView(), 4, 0, false)
-
-	addSection := func(panel ui.Panel, populated bool, popWeight int) {
-		if !anyPop {
-			p.root.AddItem(panel.GetRootView(), 0, 1, false)
-			return
-		}
-		if populated {
-			p.root.AddItem(panel.GetRootView(), 0, popWeight, false)
-		} else {
-			p.root.AddItem(panel.GetRootView(), 4, 0, false)
-		}
-	}
-
-	addSection(p.deployments, depPop, 2)
-	addSection(p.statefulsets, stsPop, 1)
-	addSection(p.daemonsets, dsPop, 1)
-	addSection(p.jobs, jobPop, 1)
 }
 
 func (p *Page) ensureDetailPanel() {
@@ -450,10 +411,10 @@ func (p *Page) GetChildPanel(index int) ui.Panel {
 
 func renderDeploymentCell(d model.DeploymentModel, col string, rowColor tcell.Color) *tview.TableCell {
 	switch col {
-	case "NAMESPACE":
-		return ui.NewDataCell(d.Namespace).SetTextColor(rowColor)
+	case "NS":
+		return ui.NewDataCell(d.Namespace).SetTextColor(rowColor).SetMaxWidth(14)
 	case "NAME":
-		return ui.NewDataCell(d.Name).SetTextColor(rowColor).SetMaxWidth(32)
+		return ui.NewDataCell(d.Name).SetTextColor(rowColor).SetMaxWidth(24)
 	case "READY":
 		text := fmt.Sprintf("%d/%d", d.Ready, d.Desired)
 		c := ui.GetTcellColor(ui.GetReadyColor(int(d.Ready), int(max(d.Desired, 1))))
@@ -461,7 +422,7 @@ func renderDeploymentCell(d model.DeploymentModel, col string, rowColor tcell.Co
 			c = rowColor
 		}
 		return ui.NewDataCell(text).SetTextColor(c)
-	case "UP-TO-DATE":
+	case "UP":
 		return ui.NewDataCell(fmt.Sprintf("%d", d.Updated)).SetTextColor(rowColor)
 	case "AVAIL":
 		return ui.NewDataCell(fmt.Sprintf("%d", d.Available)).SetTextColor(rowColor)
@@ -478,10 +439,10 @@ func renderDeploymentCell(d model.DeploymentModel, col string, rowColor tcell.Co
 
 func renderStatefulSetCell(s model.StatefulSetModel, col string, rowColor tcell.Color) *tview.TableCell {
 	switch col {
-	case "NAMESPACE":
-		return ui.NewDataCell(s.Namespace).SetTextColor(rowColor)
+	case "NS":
+		return ui.NewDataCell(s.Namespace).SetTextColor(rowColor).SetMaxWidth(14)
 	case "NAME":
-		return ui.NewDataCell(s.Name).SetTextColor(rowColor).SetMaxWidth(32)
+		return ui.NewDataCell(s.Name).SetTextColor(rowColor).SetMaxWidth(24)
 	case "READY":
 		text := fmt.Sprintf("%d/%d", s.Ready, s.Desired)
 		c := ui.GetTcellColor(ui.GetReadyColor(int(s.Ready), int(max(s.Desired, 1))))
@@ -502,10 +463,10 @@ func renderStatefulSetCell(s model.StatefulSetModel, col string, rowColor tcell.
 
 func renderDaemonSetCell(ds model.DaemonSetModel, col string, rowColor tcell.Color) *tview.TableCell {
 	switch col {
-	case "NAMESPACE":
-		return ui.NewDataCell(ds.Namespace).SetTextColor(rowColor)
+	case "NS":
+		return ui.NewDataCell(ds.Namespace).SetTextColor(rowColor).SetMaxWidth(14)
 	case "NAME":
-		return ui.NewDataCell(ds.Name).SetTextColor(rowColor).SetMaxWidth(32)
+		return ui.NewDataCell(ds.Name).SetTextColor(rowColor).SetMaxWidth(24)
 	case "DESIRED":
 		return ui.NewDataCell(fmt.Sprintf("%d", ds.Desired)).SetTextColor(rowColor)
 	case "CURRENT":
@@ -530,10 +491,10 @@ func renderDaemonSetCell(ds model.DaemonSetModel, col string, rowColor tcell.Col
 
 func renderJobCell(j model.JobModel, col string, rowColor tcell.Color) *tview.TableCell {
 	switch col {
-	case "NAMESPACE":
-		return ui.NewDataCell(j.Namespace).SetTextColor(rowColor)
+	case "NS":
+		return ui.NewDataCell(j.Namespace).SetTextColor(rowColor).SetMaxWidth(14)
 	case "NAME":
-		return ui.NewDataCell(j.Name).SetTextColor(rowColor).SetMaxWidth(32)
+		return ui.NewDataCell(j.Name).SetTextColor(rowColor).SetMaxWidth(24)
 	case "COMPLETIONS":
 		return ui.NewDataCell(j.FormatCompletions()).SetTextColor(rowColor)
 	case "AGE":

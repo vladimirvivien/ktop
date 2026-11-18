@@ -173,12 +173,12 @@ The main dashboard showing cluster health at a glance. Displays summary statisti
 
 ### Workloads
 
-Groups application controllers into four sortable, filterable sections alongside a top Workload Summary rollup bar:
+Groups application controllers into a two-column layout of four sortable, filterable panels alongside a top Workload Summary rollup bar:
 
-- **Deployments** (`NAMESPACE`, `NAME`, `READY`, `UP-TO-DATE`, `AVAIL`, `AGE`, `EFF`, `STATUS`)
-- **StatefulSets** (`NAMESPACE`, `NAME`, `READY`, `AGE`, `EFF`, `STATUS`)
-- **DaemonSets** (`NAMESPACE`, `NAME`, `DESIRED`, `CURRENT`, `READY`, `AGE`, `EFF`, `STATUS`)
-- **Jobs** (`NAMESPACE`, `NAME`, `COMPLETIONS`, `AGE`, `STATUS`)
+- **Deployments** (`NS`, `NAME`, `READY`, `UP`, `AVAIL`, `AGE`, `EFF`, `STATUS`)
+- **StatefulSets** (`NS`, `NAME`, `READY`, `AGE`, `EFF`, `STATUS`)
+- **DaemonSets** (`NS`, `NAME`, `DESIRED`, `CURRENT`, `READY`, `AGE`, `EFF`, `STATUS`)
+- **Jobs** (`NS`, `NAME`, `COMPLETIONS`, `AGE`, `STATUS`)
 
 The `EFF` column compares actual CPU/memory usage against pod resource requests across owned pods to highlight sizing health:
 
