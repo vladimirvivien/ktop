@@ -22,6 +22,7 @@ import (
 type RefreshNodesFunc func(ctx context.Context, items []model.NodeModel) error
 type RefreshPodsFunc func(ctx context.Context, items []model.PodModel) error
 type RefreshSummaryFunc func(ctx context.Context, items model.ClusterSummary) error
+type RefreshWorkloadsFunc func(ctx context.Context, snap model.WorkloadsSnapshot) error
 
 type Controller struct {
 	client        *Client
@@ -42,9 +43,11 @@ type Controller struct {
 	replicaSetInformer  appsV1Informers.ReplicaSetInformer
 	statefulSetInformer appsV1Informers.StatefulSetInformer
 
-	nodeRefreshFunc    RefreshNodesFunc
-	podRefreshFunc     RefreshPodsFunc
-	summaryRefreshFunc RefreshSummaryFunc
+	nodeRefreshFunc      RefreshNodesFunc
+	podRefreshFunc       RefreshPodsFunc
+	summaryRefreshFunc   RefreshSummaryFunc
+	workloadsRefreshFunc RefreshWorkloadsFunc
+	workloadsNotifyCh    chan struct{}
 
 	// API health tracking
 	healthTracker *health.APIHealthTracker
@@ -54,7 +57,10 @@ type Controller struct {
 }
 
 func newController(client *Client) *Controller {
-	ctrl := &Controller{client: client}
+	ctrl := &Controller{
+		client:            client,
+		workloadsNotifyCh: make(chan struct{}, 1),
+	}
 	return ctrl
 }
 
@@ -69,6 +75,11 @@ func (c *Controller) SetPodRefreshFunc(fn RefreshPodsFunc) *Controller {
 
 func (c *Controller) SetClusterSummaryRefreshFunc(fn RefreshSummaryFunc) *Controller {
 	c.summaryRefreshFunc = fn
+	return c
+}
+
+func (c *Controller) SetWorkloadsRefreshFunc(fn RefreshWorkloadsFunc) *Controller {
+	c.workloadsRefreshFunc = fn
 	return c
 }
 
@@ -200,11 +211,18 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 		if !ok {
 			slog.Warn("some non-core informers failed to sync", "namespace", c.client.namespace)
 		}
+		if c.workloadsNotifyCh != nil {
+			select {
+			case c.workloadsNotifyCh <- struct{}{}:
+			default:
+			}
+		}
 	}()
 
 	c.setupSummaryHandler(ctx, c.summaryRefreshFunc)
 	c.setupNodeHandler(ctx, c.nodeRefreshFunc)
 	c.installPodsHandler(ctx, c.podRefreshFunc)
+	c.setupWorkloadsHandler(ctx, c.workloadsRefreshFunc)
 
 	// Wire up reconnect callback to trigger immediate health check when user presses Retry
 	if c.healthTracker != nil {
