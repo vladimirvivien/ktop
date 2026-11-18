@@ -175,3 +175,24 @@ func TestCycleFocus(t *testing.T) {
 		t.Errorf("CycleFocus reverse from 0 in 3 = %d, want 2", got)
 	}
 }
+
+func TestFormatEfficiencyCell(t *testing.T) {
+	if got := FormatEfficiencyCell(0, false); !strings.Contains(got, "n/a") {
+		t.Fatalf("expected n/a for missing efficiency, got %q", got)
+	}
+	for _, tc := range []struct {
+		pct  float64
+		want string
+	}{
+		{15, "15%"},
+		{35, "35%"},
+		{72, "72%"},
+		{95, "95%"},
+		{115, "115%"},
+	} {
+		got := FormatEfficiencyCell(tc.pct, true)
+		if !strings.Contains(got, tc.want) {
+			t.Fatalf("FormatEfficiencyCell(%.0f) = %q, expected %q", tc.pct, got, tc.want)
+		}
+	}
+}

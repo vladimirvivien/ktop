@@ -6,13 +6,14 @@ import "strings"
 type PageType string
 
 const (
-	PageOverview      PageType = "overview"
-	PageWorkloads     PageType = "workloads"
-	PageEvents        PageType = "events"
-	PageNodeDetail    PageType = "node_detail"
-	PagePodDetail     PageType = "pod_detail"
-	PageContainerLogs PageType = "container_logs"
-	PageContainerSpec PageType = "container_spec"
+	PageOverview       PageType = "overview"
+	PageWorkloads      PageType = "workloads"
+	PageWorkloadDetail PageType = "workload_detail"
+	PageEvents         PageType = "events"
+	PageNodeDetail     PageType = "node_detail"
+	PagePodDetail      PageType = "pod_detail"
+	PageContainerLogs  PageType = "container_logs"
+	PageContainerSpec  PageType = "container_spec"
 )
 
 // PageState represents a page in the navigation stack
@@ -139,6 +140,8 @@ func FormatBreadcrumb(pageTitle string, states []PageState) string {
 			segments = append(segments, "node/"+s.ResourceID)
 		case PagePodDetail:
 			segments = append(segments, "pod/"+s.ResourceID)
+		case PageWorkloadDetail:
+			segments = append(segments, formatWorkloadBreadcrumb(s.ResourceID))
 		case PageContainerLogs:
 			segments = append(segments, "logs/"+lastResourceSegment(s.ResourceID))
 		case PageContainerSpec:
@@ -160,4 +163,23 @@ func lastResourceSegment(resourceID string) string {
 		return resourceID
 	}
 	return resourceID[idx+1:]
+}
+
+func formatWorkloadBreadcrumb(resourceID string) string {
+	parts := strings.SplitN(resourceID, "/", 3)
+	if len(parts) != 3 {
+		return "workload/" + resourceID
+	}
+	prefix := strings.ToLower(strings.TrimSpace(parts[0]))
+	switch prefix {
+	case "deployment":
+		prefix = "deploy"
+	case "statefulset":
+		prefix = "sts"
+	case "daemonset":
+		prefix = "ds"
+	case "job":
+		prefix = "job"
+	}
+	return prefix + "/" + parts[1] + "/" + parts[2]
 }

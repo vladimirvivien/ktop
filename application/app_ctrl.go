@@ -42,10 +42,12 @@ type Application struct {
 	navStack *NavigationStack
 
 	// Detail view callbacks
-	nodeDetailCallback    func(nodeName string)
-	podDetailCallback     func(namespace, podName string)
-	containerLogsCallback func(namespace, podName, containerName string)
-	detailResetCallback   func()
+	nodeDetailCallback     func(nodeName string)
+	podDetailCallback      func(namespace, podName string)
+	workloadDetailCallback func(kind, namespace, name string)
+	containerLogsCallback  func(namespace, podName, containerName string)
+	detailResetCallback    func()
+	detailResetListeners   []func()
 
 	// Health state tracking for transitions
 	lastHealthyState      bool
@@ -934,6 +936,45 @@ func (app *Application) SetDetailResetCallback(callback func()) {
 	app.detailResetCallback = callback
 }
 
+// AddDetailResetListener registers an additional callback invoked when returning to a root page.
+func (app *Application) AddDetailResetListener(callback func()) {
+	if callback != nil {
+		app.detailResetListeners = append(app.detailResetListeners, callback)
+	}
+}
+
+func (app *Application) fireDetailResetCallbacks() {
+	if app.detailResetCallback != nil {
+		app.detailResetCallback()
+	}
+	for _, fn := range app.detailResetListeners {
+		fn()
+	}
+}
+
+// SetWorkloadDetailCallback sets the callback for navigating to workload detail view.
+func (app *Application) SetWorkloadDetailCallback(callback func(kind, namespace, name string)) {
+	app.workloadDetailCallback = callback
+}
+
+// NavigateToWorkloadDetail navigates to the workload detail view for the given workload.
+func (app *Application) NavigateToWorkloadDetail(kind, namespace, name string) {
+	resourceID := kind + "/" + namespace + "/" + name
+	if stack := app.activeNavStack(); stack != nil {
+		stack.Push(PageState{
+			PageType:   PageWorkloadDetail,
+			ResourceID: resourceID,
+		})
+	}
+
+	if app.workloadDetailCallback != nil {
+		app.workloadDetailCallback(kind, namespace, name)
+	}
+
+	app.syncTabBar()
+	app.updateFooterContext()
+}
+
 // SetNodeDetailCallback sets the callback for navigating to node detail view
 func (app *Application) SetNodeDetailCallback(callback func(nodeName string)) {
 	app.nodeDetailCallback = callback
@@ -1016,6 +1057,11 @@ func (app *Application) presentDetailState(state *PageState) {
 		if len(parts) == 2 && app.podDetailCallback != nil {
 			app.podDetailCallback(parts[0], parts[1])
 		}
+	case PageWorkloadDetail:
+		parts := strings.SplitN(state.ResourceID, "/", 3)
+		if len(parts) == 3 && app.workloadDetailCallback != nil {
+			app.workloadDetailCallback(parts[0], parts[1], parts[2])
+		}
 	case PageContainerLogs:
 		parts := strings.SplitN(state.ResourceID, "/", 3)
 		if len(parts) == 3 && app.containerLogsCallback != nil {
@@ -1041,9 +1087,7 @@ func (app *Application) NavigateBack() bool {
 	}
 
 	if !stack.CanGoBack() {
-		if app.detailResetCallback != nil {
-			app.detailResetCallback()
-		}
+		app.fireDetailResetCallbacks()
 		if app.panel != nil && app.panel.pages != nil {
 			if s := app.activeSession(); s != nil && s.Descriptor.Title != "" {
 				app.panel.pages.SwitchToPage(s.Descriptor.Title)
@@ -1084,6 +1128,11 @@ func (app *Application) getActiveDetailPanel() ui.EscapablePanel {
 			if detail := provider.GetActiveDetailPanel(); detail != nil {
 				return detail
 			}
+		}
+	}
+	if stack := app.activeNavStack(); stack != nil && stack.CanGoBack() {
+		if current := stack.Current(); current != nil && current.PageType == PageWorkloadDetail {
+			return nil
 		}
 	}
 	for _, page := range app.pages {
@@ -1153,6 +1202,14 @@ func (app *Application) ShowHelpModal() {
 			case PagePodDetail:
 				pageName = "Pod Detail"
 				focusedPanel = "pod_detail"
+			case PageWorkloadDetail:
+				pageName = "Workload Detail"
+				focusedPanel = "pods"
+				if detail := app.getActiveDetailPanel(); detail != nil {
+					if fp, ok := detail.(interface{ GetFocusedPanelName() string }); ok {
+						focusedPanel = fp.GetFocusedPanelName()
+					}
+				}
 			case PageContainerLogs:
 				pageName = "Container Logs"
 				focusedPanel = "logs"
@@ -1214,12 +1271,18 @@ func (app *Application) updateFooterContext() {
 	pageCount := app.PageCount()
 
 	if !stack.CanGoBack() {
-		if current.PageType == PageOverview {
+		switch current.PageType {
+		case PageOverview:
 			ctx = ui.OverviewContext{
 				FocusedPanel: app.getFocusedPanelName(),
 				PageCount:    pageCount,
 			}
-		} else {
+		case PageWorkloads:
+			ctx = ui.WorkloadsContext{
+				FocusedPanel: app.getFocusedPanelName(),
+				PageCount:    pageCount,
+			}
+		default:
 			ctx = ui.PageContext{
 				FocusedPanel: app.getFocusedPanelName(),
 				PageCount:    pageCount,
@@ -1234,6 +1297,14 @@ func (app *Application) updateFooterContext() {
 		ctx = ui.NodeDetailContext{FocusedPanel: "events"}
 	case PagePodDetail:
 		ctx = ui.PodDetailContext{FocusedPanel: "events"}
+	case PageWorkloadDetail:
+		focused := "pods"
+		if detail := app.getActiveDetailPanel(); detail != nil {
+			if fp, ok := detail.(interface{ GetFocusedPanelName() string }); ok {
+				focused = fp.GetFocusedPanelName()
+			}
+		}
+		ctx = ui.WorkloadDetailContext{FocusedPanel: focused}
 	case PageContainerLogs:
 		ctx = ui.ContainerDetailContext{FocusedPanel: "logs"}
 	default:

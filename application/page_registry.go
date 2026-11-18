@@ -127,9 +127,7 @@ func (app *Application) SwitchToPageIndex(idx int) bool {
 	if in.NavStack != nil && in.NavStack.CanGoBack() {
 		app.presentDetailState(in.NavStack.Current())
 	} else {
-		if app.detailResetCallback != nil {
-			app.detailResetCallback()
-		}
+		app.fireDetailResetCallbacks()
 		if app.panel != nil && app.panel.pages != nil {
 			app.panel.pages.SwitchToPage(in.Descriptor.Title)
 		}

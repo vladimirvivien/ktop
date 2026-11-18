@@ -303,3 +303,47 @@ func FormatHealthScore(score int) string {
 	}
 	return fmt.Sprintf("[%s]%d%%[-]", TagFg(c), score)
 }
+
+// FormatEfficiencyCell formats a workload resource efficiency percentage using
+// capacity-sizing thresholds:
+//
+//	<25%   -> error (severely over-provisioned)
+//	25-50% -> warning (over-provisioned)
+//	50-90% -> ok (well-sized)
+//	90-100%-> elevated/orange (at-limit risk)
+//	>100%  -> error (throttled / OOM risk)
+func FormatEfficiencyCell(effPct float64, hasEff bool) string {
+	p := ActivePalette()
+	if !hasEff {
+		if IsMonochrome() {
+			return "n/a"
+		}
+		return fmt.Sprintf("[%s]n/a[-]", TagFg(p.StatusMuted))
+	}
+
+	pctText := fmt.Sprintf("%.0f%%", effPct)
+	if IsMonochrome() {
+		if effPct < 25 || effPct > 100 {
+			return ErrorMarkup(pctText)
+		}
+		if effPct < 50 || effPct >= 90 {
+			return "[::b]" + pctText + "[::-]"
+		}
+		return pctText
+	}
+
+	var c tcell.Color
+	switch {
+	case effPct > 100:
+		c = p.StatusError
+	case effPct >= 90:
+		c = p.GaugeElevated
+	case effPct >= 50:
+		c = p.StatusOK
+	case effPct >= 25:
+		c = p.StatusWarning
+	default:
+		c = p.StatusError
+	}
+	return fmt.Sprintf("[%s]%s[-]", TagFg(c), pctText)
+}

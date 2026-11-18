@@ -114,10 +114,16 @@ func (m *HelpModal) renderHelpContent(cfg HelpModalConfig) string {
 		return fmt.Sprintf(" [%s](Active: %s)[-]", TagFg(p.StatusOK), label)
 	}
 
-	isTableActive := cfg.FocusedPanel == "nodes" || cfg.FocusedPanel == "pods" || cfg.FocusedPanel == "containers"
+	isTableActive := cfg.FocusedPanel == "nodes" ||
+		cfg.FocusedPanel == "pods" ||
+		cfg.FocusedPanel == "containers" ||
+		cfg.FocusedPanel == "deployments" ||
+		cfg.FocusedPanel == "statefulsets" ||
+		cfg.FocusedPanel == "daemonsets" ||
+		cfg.FocusedPanel == "jobs"
 	isHeaderActive := cfg.FocusedPanel == "header"
 	isLogsActive := cfg.FocusedPanel == "logs" || cfg.CurrentPage == "Container Logs"
-	isDetailActive := cfg.CurrentPage == "Node Detail" || cfg.CurrentPage == "Pod Detail"
+	isDetailActive := cfg.CurrentPage == "Node Detail" || cfg.CurrentPage == "Pod Detail" || cfg.CurrentPage == "Workload Detail"
 
 	// Section 1: Navigation & General
 	b.WriteString(section("GENERAL & NAVIGATION") + "\n")
@@ -127,7 +133,7 @@ func (m *HelpModal) renderHelpContent(cfg HelpModalConfig) string {
 	} else {
 		fmt.Fprintf(&b, "  %s / %s     Switch top-level page\n", key("1-9"), key("[ / ]"))
 	}
-	fmt.Fprintf(&b, "  %s           Open detail view for selected Node or Pod\n", key("Enter"))
+	fmt.Fprintf(&b, "  %s           Open detail view for selected Node, Pod, or Workload\n", key("Enter"))
 	fmt.Fprintf(&b, "  %s / %s           Copy selected resource name to clipboard\n", key("y"), key("Y"))
 	fmt.Fprintf(&b, "  %s / %s          Toggle this keyboard shortcuts help modal\n", key("?"), key("F1"))
 	fmt.Fprintf(&b, "  %s             Clear filter / Back to previous view / Double-ESC quit\n\n", key("Esc"))

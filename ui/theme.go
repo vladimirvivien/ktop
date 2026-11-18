@@ -446,6 +446,21 @@ func GetStatusSeverity(status string, resourceType string) StatusSeverity {
 		}
 	}
 
+	if resourceType == "workload" {
+		switch status {
+		case "Ready", "Complete":
+			return StatusSeverityOK
+		case "Progressing", "Running":
+			return StatusSeverityInfo
+		case "Suspended", "Scaled 0":
+			return StatusSeverityWarning
+		case "Degraded", "Failed":
+			return StatusSeverityError
+		default:
+			return StatusSeverityUnknown
+		}
+	}
+
 	return StatusSeverityUnknown
 }
 
@@ -497,6 +512,21 @@ func GetStatusIcon(status string, resourceType string) string {
 		case "ContainerCreating":
 			return Icons.Info
 		case "CrashLoopBackOff", "Error", "Failed", "ImagePullBackOff":
+			return Icons.Error
+		default:
+			return Icons.Unknown
+		}
+	}
+
+	if resourceType == "workload" {
+		switch status {
+		case "Ready", "Complete":
+			return Icons.Healthy
+		case "Progressing", "Running":
+			return Icons.Info
+		case "Suspended", "Scaled 0":
+			return Icons.Warning
+		case "Degraded", "Failed":
 			return Icons.Error
 		default:
 			return Icons.Unknown

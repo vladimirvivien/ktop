@@ -97,6 +97,16 @@ func TestFormatBreadcrumb(t *testing.T) {
 			want: "Overview › node/worker-1 › pod/default/api-0",
 		},
 		{
+			name:  "workload detail deployment",
+			title: "Workloads",
+			states: []PageState{
+				{PageType: PageWorkloads},
+				{PageType: PageWorkloadDetail, ResourceID: "Deployment/default/api"},
+				{PageType: PagePodDetail, ResourceID: "default/api-0"},
+			},
+			want: "Workloads › deploy/default/api › pod/default/api-0",
+		},
+		{
 			name:  "pod to container logs",
 			title: "Workloads",
 			states: []PageState{
