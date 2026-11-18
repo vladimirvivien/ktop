@@ -32,6 +32,8 @@ type Palette struct {
 	HeaderFg        tcell.Color
 	HeaderHotkey    tcell.Color
 	HeaderSortArrow tcell.Color
+	TabInactiveBg   tcell.Color
+	TabInactiveFg   tcell.Color
 	RowSelectedBg   tcell.Color
 	RowSelectedFg   tcell.Color
 	RowAlternateBg  tcell.Color
@@ -191,6 +193,8 @@ func (p Palette) Resolve(mode ColorMode) Palette {
 	p.HeaderFg = ResolveColor(p.HeaderFg, mode)
 	p.HeaderHotkey = ResolveColor(p.HeaderHotkey, mode)
 	p.HeaderSortArrow = ResolveColor(p.HeaderSortArrow, mode)
+	p.TabInactiveBg = ResolveColor(p.TabInactiveBg, mode)
+	p.TabInactiveFg = ResolveColor(p.TabInactiveFg, mode)
 	p.RowSelectedBg = ResolveColor(p.RowSelectedBg, mode)
 	p.RowSelectedFg = ResolveColor(p.RowSelectedFg, mode)
 	p.RowAlternateBg = ResolveColor(p.RowAlternateBg, mode)

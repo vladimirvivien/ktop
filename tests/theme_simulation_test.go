@@ -272,6 +272,7 @@ func TestAllBuiltinThemesRenderAndContrast(t *testing.T) {
 				}{
 					{"CanvasFg/CanvasBg", p.CanvasFg, p.CanvasBg},
 					{"HeaderFg/HeaderBg", p.HeaderFg, p.HeaderBg},
+					{"TabInactiveFg/TabInactiveBg", p.TabInactiveFg, p.TabInactiveBg},
 					{"RowSelectedFg/RowSelectedBg", p.RowSelectedFg, p.RowSelectedBg},
 					{"ToastFg/ToastInfoBg", p.ToastFg, p.ToastInfoBg},
 					{"ToastFg/ToastSuccessBg", p.ToastFg, p.ToastSuccessBg},

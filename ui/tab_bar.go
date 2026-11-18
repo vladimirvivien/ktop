@@ -18,7 +18,9 @@ type TabItem struct {
 
 // TabBar renders top-level navigation tabs and an optional right-aligned breadcrumb trail.
 type TabBar struct {
-	table      *tview.Table
+	root       *tview.Flex
+	tabsView   *tview.TextView
+	crumbView  *tview.TextView
 	tabs       []TabItem
 	activeIdx  int
 	breadcrumb string
@@ -26,14 +28,24 @@ type TabBar struct {
 
 // NewTabBar creates a single-row navigation tab bar.
 func NewTabBar() *TabBar {
-	table := tview.NewTable()
-	table.SetBorder(false)
-	table.SetBorders(false).
-		SetSelectable(false, false).
-		SetFixed(1, 0)
+	tabsView := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWrap(false)
+	tabsView.SetBorder(false)
+
+	crumbView := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWrap(false).
+		SetTextAlign(tview.AlignRight)
+	crumbView.SetBorder(false)
+
+	root := tview.NewFlex().SetDirection(tview.FlexColumn)
+	root.SetBorder(false)
 
 	tb := &TabBar{
-		table: table,
+		root:      root,
+		tabsView:  tabsView,
+		crumbView: crumbView,
 	}
 	tb.render()
 	return tb
@@ -41,7 +53,7 @@ func NewTabBar() *TabBar {
 
 // GetView returns the underlying tview primitive for layout composition.
 func (tb *TabBar) GetView() tview.Primitive {
-	return tb.table
+	return tb.root
 }
 
 // SetTabs replaces the displayed tabs and clamps the active tab index.
@@ -91,70 +103,69 @@ func (tb *TabBar) Refresh() {
 }
 
 func (tb *TabBar) render() {
-	tb.table.Clear()
-
 	mono := IsMonochrome()
 	pal := ActivePalette()
+	bg := pal.CanvasBg
 	if mono {
-		tb.table.SetBackgroundColor(tcell.ColorDefault)
-	} else {
-		tb.table.SetBackgroundColor(pal.CanvasBg)
+		bg = tcell.ColorDefault
 	}
+
+	tb.root.SetBackgroundColor(bg)
+	tb.tabsView.SetBackgroundColor(bg)
+	tb.crumbView.SetBackgroundColor(bg)
+
+	var tabsMarkup strings.Builder
+	tabsWidth := 0
 
 	for i, tab := range tb.tabs {
 		label := fmt.Sprintf(" %s ", tab.Title)
 		if tab.Key != 0 {
 			label = fmt.Sprintf(" [%c] %s ", tab.Key, tab.Title)
 		}
-		// Escape literal brackets so tview does not strip or parse "[1]" as a style tag.
-		cell := tview.NewTableCell(tview.Escape(label)).
-			SetAlign(tview.AlignLeft).
-			SetExpansion(0)
+		tabsWidth += tview.TaggedStringWidth(tview.Escape(label))
+		escaped := tview.Escape(label)
 
 		if i == tb.activeIdx {
 			if mono {
-				cell.SetTextColor(tcell.ColorDefault).
-					SetBackgroundColor(tcell.ColorDefault).
-					SetAttributes(tcell.AttrReverse | tcell.AttrBold)
+				tabsMarkup.WriteString("[::rb]" + escaped + "[::-]")
 			} else {
-				cell.SetTextColor(pal.HeaderFg).
-					SetBackgroundColor(pal.HeaderBg).
-					SetAttributes(tcell.AttrBold)
+				fmt.Fprintf(&tabsMarkup, "[%s:%s:b]%s[-:-:-]", TagFg(pal.HeaderFg), TagFg(pal.HeaderBg), escaped)
 			}
 		} else {
 			if mono {
-				cell.SetTextColor(tcell.ColorDefault).
-					SetBackgroundColor(tcell.ColorDefault).
-					SetAttributes(tcell.AttrNone)
+				tabsMarkup.WriteString(escaped)
 			} else {
-				cell.SetTextColor(pal.CanvasFg).
-					SetBackgroundColor(pal.CanvasBg).
-					SetAttributes(tcell.AttrNone)
+				fmt.Fprintf(&tabsMarkup, "[%s:%s:-]%s[-:-:-]", TagFg(pal.TabInactiveFg), TagFg(pal.TabInactiveBg), escaped)
 			}
 		}
-		tb.table.SetCell(0, i, cell)
 	}
 
-	crumbText := ""
+	tb.tabsView.SetTextColor(tcell.ColorDefault)
+	if !mono {
+		tb.tabsView.SetTextColor(pal.CanvasFg)
+	}
+	tb.tabsView.SetText(tabsMarkup.String())
+
+	crumbMarkup := ""
 	if tb.breadcrumb != "" {
-		crumbText = tview.Escape(tb.breadcrumb) + " "
-	}
-	crumbCell := tview.NewTableCell(crumbText).
-		SetAlign(tview.AlignRight).
-		SetExpansion(1)
-
-	if mono {
-		attrs := tcell.AttrNone
-		if tb.breadcrumb != "" {
-			attrs = tcell.AttrBold
+		escapedCrumb := tview.Escape(tb.breadcrumb) + " "
+		if mono {
+			tb.crumbView.SetTextColor(tcell.ColorDefault)
+			crumbMarkup = "[::b]" + escapedCrumb + "[::-]"
+		} else {
+			tb.crumbView.SetTextColor(pal.Accent)
+			crumbMarkup = fmt.Sprintf("[%s:%s:b]%s[-:-:-]", TagFg(pal.Accent), TagFg(pal.CanvasBg), escapedCrumb)
 		}
-		crumbCell.SetTextColor(tcell.ColorDefault).
-			SetBackgroundColor(tcell.ColorDefault).
-			SetAttributes(attrs)
+	} else if !mono {
+		tb.crumbView.SetTextColor(pal.StatusMuted)
 	} else {
-		crumbCell.SetTextColor(pal.CanvasFg).
-			SetBackgroundColor(pal.CanvasBg).
-			SetAttributes(tcell.AttrNone)
+		tb.crumbView.SetTextColor(tcell.ColorDefault)
 	}
-	tb.table.SetCell(0, len(tb.tabs), crumbCell)
+	tb.crumbView.SetText(crumbMarkup)
+
+	tb.root.Clear()
+	if tabsWidth > 0 {
+		tb.root.AddItem(tb.tabsView, tabsWidth, 0, false)
+	}
+	tb.root.AddItem(tb.crumbView, 0, 1, false)
 }

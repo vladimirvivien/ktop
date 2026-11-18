@@ -49,6 +49,53 @@ func TestTabBar_RenderAndSwitching(t *testing.T) {
 	}
 }
 
+func TestTabBar_ZeroGapAndThemedInactiveColors(t *testing.T) {
+	t.Cleanup(func() {
+		_, _ = ResolveAndApplyTheme("dark", "truecolor")
+	})
+
+	rt, err := ResolveAndApplyTheme("dark", "truecolor")
+	if err != nil {
+		t.Fatalf("ResolveAndApplyTheme failed: %v", err)
+	}
+
+	ts, err := NewTestScreen(100, 1)
+	if err != nil {
+		t.Fatalf("NewTestScreen failed: %v", err)
+	}
+	t.Cleanup(ts.Close)
+
+	tb := NewTabBar()
+	tb.SetTabs([]TabItem{
+		{ID: "overview", Title: "Overview", Key: '1'},
+		{ID: "workloads", Title: "Workloads", Key: '2'},
+	})
+	tb.SetActive(0)
+
+	ts.Draw(tb.GetView())
+	line := ts.Lines()[0]
+	if !strings.Contains(line, "[1] Overview  [2] Workloads") {
+		t.Fatalf("expected zero gap between adjacent tabs (single trailing + single leading pad), got %q", line)
+	}
+
+	cells, _, _ := ts.Screen().GetContents()
+	firstStart := strings.Index(line, "[1] Overview") - 1
+	secondStart := strings.Index(line, "[2] Workloads") - 1
+	if firstStart < 0 || secondStart != firstStart+len(" [1] Overview ") {
+		t.Fatalf("unexpected tab offsets first=%d second=%d in %q", firstStart, secondStart, line)
+	}
+
+	// Cell right before second tab must carry active HeaderBg; first cell of second tab must carry TabInactiveBg.
+	activeFG, activeBG, _ := cells[secondStart-1].Style.Decompose()
+	inactiveFG, inactiveBG, _ := cells[secondStart].Style.Decompose()
+	if activeFG != rt.Palette.HeaderFg || activeBG != rt.Palette.HeaderBg {
+		t.Fatalf("active tab style = (%v, %v), want (%v, %v)", activeFG, activeBG, rt.Palette.HeaderFg, rt.Palette.HeaderBg)
+	}
+	if inactiveFG != rt.Palette.TabInactiveFg || inactiveBG != rt.Palette.TabInactiveBg {
+		t.Fatalf("inactive tab style = (%v, %v), want (%v, %v)", inactiveFG, inactiveBG, rt.Palette.TabInactiveFg, rt.Palette.TabInactiveBg)
+	}
+}
+
 func TestTabBar_MonochromeZeroColorsAndActiveAttr(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = ResolveAndApplyTheme("dark", "truecolor")
