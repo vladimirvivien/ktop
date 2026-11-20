@@ -173,7 +173,7 @@ The main dashboard showing cluster health at a glance. Displays summary statisti
 
 ### Workloads
 
-Groups application controllers into a two-column layout of four sortable, filterable panels alongside a top Workload Summary rollup bar:
+Groups application controllers into a two-column layout of four sortable, filterable panels alongside a single-line Summary rollup bar:
 
 - **Deployments** (`NS`, `NAME`, `READY`, `UP`, `AVAIL`, `AGE`, `EFF`, `STATUS`)
 - **StatefulSets** (`NS`, `NAME`, `READY`, `AGE`, `EFF`, `STATUS`)

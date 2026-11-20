@@ -2,7 +2,6 @@ package workloads
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -15,12 +14,12 @@ type summaryPanel struct {
 	root    *tview.Flex
 	text    *tview.TextView
 	summary model.WorkloadSummaryModel
-	ns      string
 }
 
 func newSummaryPanel(title string) *summaryPanel {
 	tv := tview.NewTextView()
 	tv.SetDynamicColors(true)
+	tv.SetWrap(false)
 	tv.SetBorder(false)
 
 	root := tview.NewFlex().SetDirection(tview.FlexRow).
@@ -67,11 +66,6 @@ func (p *summaryPanel) DrawBody(data any) {
 	p.render()
 }
 
-func (p *summaryPanel) SetNamespaceFilter(ns string) {
-	p.ns = strings.TrimSpace(ns)
-	p.render()
-}
-
 func (p *summaryPanel) render() {
 	if p.text == nil {
 		return
@@ -113,11 +107,6 @@ func (p *summaryPanel) render() {
 		return okOpen + text + resetTag
 	}
 
-	nsLabel := "(all)"
-	if p.ns != "" {
-		nsLabel = p.ns
-	}
-
 	failedJobText := fmt.Sprintf("%d failed", p.summary.JobsFailed)
 	if p.summary.JobsFailed > 0 {
 		if mono {
@@ -129,19 +118,15 @@ func (p *summaryPanel) render() {
 		failedJobText = lblOpen + failedJobText + resetTag
 	}
 
-	line1 := fmt.Sprintf(
-		" %sDeployments:%s %s  │  %sStatefulSets:%s %s  │  %sDaemonSets:%s %s",
+	line := fmt.Sprintf(
+		" %sDeployments:%s %s │ %sStatefulSets:%s %s │ %sDaemonSets:%s %s │ %sJobs:%s %s%d running%s / %s%d completed%s / %s",
 		lblOpen, resetTag, countTag(p.summary.DeploymentsReady, p.summary.DeploymentsTotal),
 		lblOpen, resetTag, countTag(p.summary.StatefulSetsReady, p.summary.StatefulSetsTotal),
 		lblOpen, resetTag, countTag(p.summary.DaemonSetsReady, p.summary.DaemonSetsTotal),
-	)
-	line2 := fmt.Sprintf(
-		" %sJobs:%s %s%d running%s / %s%d completed%s / %s  │  %sNamespace:%s %s%s%s",
 		lblOpen, resetTag,
 		valOpen, p.summary.JobsRunning, resetTag,
 		okOpen, p.summary.JobsCompleted, resetTag,
 		failedJobText,
-		lblOpen, resetTag, valOpen, nsLabel, resetTag,
 	)
-	p.text.SetText(line1 + "\n" + line2)
+	p.text.SetText(line)
 }

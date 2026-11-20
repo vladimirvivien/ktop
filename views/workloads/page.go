@@ -52,7 +52,7 @@ func (p *Page) Layout(_ any) {
 		return
 	}
 
-	p.summary = newSummaryPanel(fmt.Sprintf(" %s  Workload Summary ", ui.Icons.Thermometer))
+	p.summary = newSummaryPanel(fmt.Sprintf(" %s  Summary ", ui.Icons.Thermometer))
 
 	p.deployments = newWorkloadTable(p.app, workloadTableConfig[model.DeploymentModel]{
 		title: "Deployments",
@@ -204,7 +204,7 @@ func (p *Page) Layout(_ any) {
 		AddItem(p.jobs.GetRootView(), 1, 1, 1, 1, 0, 0, false)
 
 	p.root = tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(p.summary.GetRootView(), 4, 0, false).
+		AddItem(p.summary.GetRootView(), 3, 0, false).
 		AddItem(grid, 0, 1, false)
 }
 
@@ -272,7 +272,6 @@ func (p *Page) SetNamespaceFilter(ns string) {
 	p.statefulsets.SetNamespaceFilter(p.namespaceFilter)
 	p.daemonsets.SetNamespaceFilter(p.namespaceFilter)
 	p.jobs.SetNamespaceFilter(p.namespaceFilter)
-	p.summary.SetNamespaceFilter(p.namespaceFilter)
 	p.summary.DrawBody(model.ComputeWorkloadSummary(p.lastSnap, p.namespaceFilter))
 }
 

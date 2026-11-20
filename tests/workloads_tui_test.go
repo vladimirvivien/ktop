@@ -167,16 +167,16 @@ func TestWorkloadsTUI_EndToEndNavigationAndDrillDown(t *testing.T) {
 		t.Fatalf("expected ActivePageID()='workloads', got %q", app.ActivePageID())
 	}
 	wScreen := ts.Text()
-	for _, want := range []string{"Workload Summary", "Deployments", "api", "StatefulSets", "pg", "DaemonSets", "proxy", "Jobs", "nightly"} {
+	for _, want := range []string{"Summary", "Deployments", "api", "StatefulSets", "pg", "DaemonSets", "proxy", "Jobs", "nightly"} {
 		if !strings.Contains(wScreen, want) {
 			t.Fatalf("expected %q on Workloads screen, got:\n%s", want, wScreen)
 		}
 	}
 
-	// First Tab on Workloads skips Workload Summary and lands directly on Deployments table.
+	// First Tab on Workloads skips Summary and lands directly on Deployments table.
 	sendAppKey(ts, app, tcell.KeyTab, 0, tcell.ModNone)
 	if app.FocusedPrimitive() != workloadsPanel.GetChildrenViews()[0] {
-		t.Fatalf("expected first Tab on Workloads to skip Workload Summary and focus Deployments table")
+		t.Fatalf("expected first Tab on Workloads to skip Summary and focus Deployments table")
 	}
 	sendAppKey(ts, app, tcell.KeyEnter, 0, tcell.ModNone)
 
@@ -203,7 +203,7 @@ func TestWorkloadsTUI_EndToEndNavigationAndDrillDown(t *testing.T) {
 	if app.IsInDetailView() {
 		t.Fatal("expected second ESC to return to Workloads root")
 	}
-	if !strings.Contains(ts.Text(), "Workload Summary") {
+	if !strings.Contains(ts.Text(), "Summary") {
 		t.Fatalf("expected Workloads root after unwinding, got:\n%s", ts.Text())
 	}
 }

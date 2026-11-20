@@ -68,7 +68,7 @@ func TestWorkloadsPage_RendersTablesSummaryAndDetail(t *testing.T) {
 	ts.Draw(app.RootPrimitive())
 	text := ts.Text()
 	for _, want := range []string{
-		"Workload Summary",
+		"Summary",
 		"1/2 ready",
 		"Deployments", "web", "72%", "api", "18%",
 		"StatefulSets", "pg",
@@ -78,6 +78,26 @@ func TestWorkloadsPage_RendersTablesSummaryAndDetail(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected %q on Workloads screen, got:\n%s", want, text)
 		}
+	}
+	if strings.Contains(text, "Workload Summary") {
+		t.Fatalf("expected Summary title instead of Workload Summary, got:\n%s", text)
+	}
+
+	// Verify Summary renders as a single line without a Namespace field.
+	var foundSingleLineSummary bool
+	for _, line := range strings.Split(text, "\n") {
+		if strings.Contains(line, "Deployments:") &&
+			strings.Contains(line, "StatefulSets:") &&
+			strings.Contains(line, "DaemonSets:") &&
+			strings.Contains(line, "Jobs:") {
+			foundSingleLineSummary = true
+			if strings.Contains(line, "Namespace:") {
+				t.Fatalf("expected Namespace omitted from Workloads Summary line, got %q", line)
+			}
+		}
+	}
+	if !foundSingleLineSummary {
+		t.Fatalf("expected single-line Workloads Summary containing Deployments, StatefulSets, DaemonSets, and Jobs, got:\n%s", text)
 	}
 
 	// Verify 2-column layout places Deployments alongside StatefulSets and DaemonSets alongside Jobs.
