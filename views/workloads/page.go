@@ -393,18 +393,13 @@ func renderDeploymentCell(d model.DeploymentModel, col string, rowColor tcell.Co
 	case "NAME":
 		return ui.NewDataCell(d.Name).SetTextColor(rowColor).SetMaxWidth(24)
 	case "READY":
-		text := fmt.Sprintf("%d/%d", d.Ready, d.Desired)
-		c := ui.GetTcellColor(ui.GetReadyColor(int(d.Ready), int(max(d.Desired, 1))))
-		if d.Desired == 0 {
-			c = rowColor
-		}
-		return ui.NewDataCell(text).SetTextColor(c)
+		return ui.NewDataCell(fmt.Sprintf("%d/%d", d.Ready, d.Desired)).SetTextColor(rowColor)
 	case "CPU":
-		return renderCPUUsageCell(d.Usage, rowColor)
+		return renderCPUUsageCell(d.Usage, metricValueColor(d.Status, rowColor))
 	case "MEM":
-		return renderMemUsageCell(d.Usage, rowColor)
+		return renderMemUsageCell(d.Usage, metricValueColor(d.Status, rowColor))
 	case "AGE":
-		return ui.NewDataCell(d.Age).SetTextColor(mutedCellColor())
+		return ui.NewDataCell(d.Age).SetTextColor(rowColor)
 	case "STATUS":
 		return ui.StyleStatusCell(ui.NewDataCell(d.Status), d.Status, "workload")
 	default:
@@ -419,18 +414,13 @@ func renderStatefulSetCell(s model.StatefulSetModel, col string, rowColor tcell.
 	case "NAME":
 		return ui.NewDataCell(s.Name).SetTextColor(rowColor).SetMaxWidth(24)
 	case "READY":
-		text := fmt.Sprintf("%d/%d", s.Ready, s.Desired)
-		c := ui.GetTcellColor(ui.GetReadyColor(int(s.Ready), int(max(s.Desired, 1))))
-		if s.Desired == 0 {
-			c = rowColor
-		}
-		return ui.NewDataCell(text).SetTextColor(c)
+		return ui.NewDataCell(fmt.Sprintf("%d/%d", s.Ready, s.Desired)).SetTextColor(rowColor)
 	case "CPU":
-		return renderCPUUsageCell(s.Usage, rowColor)
+		return renderCPUUsageCell(s.Usage, metricValueColor(s.Status, rowColor))
 	case "MEM":
-		return renderMemUsageCell(s.Usage, rowColor)
+		return renderMemUsageCell(s.Usage, metricValueColor(s.Status, rowColor))
 	case "AGE":
-		return ui.NewDataCell(s.Age).SetTextColor(mutedCellColor())
+		return ui.NewDataCell(s.Age).SetTextColor(rowColor)
 	case "STATUS":
 		return ui.StyleStatusCell(ui.NewDataCell(s.Status), s.Status, "workload")
 	default:
@@ -445,18 +435,13 @@ func renderDaemonSetCell(ds model.DaemonSetModel, col string, rowColor tcell.Col
 	case "NAME":
 		return ui.NewDataCell(ds.Name).SetTextColor(rowColor).SetMaxWidth(24)
 	case "READY":
-		text := fmt.Sprintf("%d/%d", ds.Ready, ds.Desired)
-		c := ui.GetTcellColor(ui.GetReadyColor(int(ds.Ready), int(max(ds.Desired, 1))))
-		if ds.Desired == 0 {
-			c = rowColor
-		}
-		return ui.NewDataCell(text).SetTextColor(c)
+		return ui.NewDataCell(fmt.Sprintf("%d/%d", ds.Ready, ds.Desired)).SetTextColor(rowColor)
 	case "CPU":
-		return renderCPUUsageCell(ds.Usage, rowColor)
+		return renderCPUUsageCell(ds.Usage, metricValueColor(ds.Status, rowColor))
 	case "MEM":
-		return renderMemUsageCell(ds.Usage, rowColor)
+		return renderMemUsageCell(ds.Usage, metricValueColor(ds.Status, rowColor))
 	case "AGE":
-		return ui.NewDataCell(ds.Age).SetTextColor(mutedCellColor())
+		return ui.NewDataCell(ds.Age).SetTextColor(rowColor)
 	case "STATUS":
 		return ui.StyleStatusCell(ui.NewDataCell(ds.Status), ds.Status, "workload")
 	default:
@@ -464,18 +449,28 @@ func renderDaemonSetCell(ds model.DaemonSetModel, col string, rowColor tcell.Col
 	}
 }
 
-func renderCPUUsageCell(u model.WorkloadUsage, rowColor tcell.Color) *tview.TableCell {
+func metricValueColor(status string, rowColor tcell.Color) tcell.Color {
+	if ui.IsMonochrome() {
+		return tcell.ColorDefault
+	}
+	if ui.GetStatusSeverity(status, "workload") == ui.StatusSeverityOK {
+		return ui.ActivePalette().DataSecondary
+	}
+	return rowColor
+}
+
+func renderCPUUsageCell(u model.WorkloadUsage, valueColor tcell.Color) *tview.TableCell {
 	if !u.HasCPU || u.CPU == nil {
 		return ui.NewDataCell("n/a").SetTextColor(mutedCellColor())
 	}
-	return ui.NewDataCell(ui.FormatCPU(u.CPU)).SetTextColor(rowColor)
+	return ui.NewDataCell(ui.FormatCPU(u.CPU)).SetTextColor(valueColor)
 }
 
-func renderMemUsageCell(u model.WorkloadUsage, rowColor tcell.Color) *tview.TableCell {
+func renderMemUsageCell(u model.WorkloadUsage, valueColor tcell.Color) *tview.TableCell {
 	if !u.HasMem || u.Mem == nil {
 		return ui.NewDataCell("n/a").SetTextColor(mutedCellColor())
 	}
-	return ui.NewDataCell(strings.TrimSpace(ui.FormatMemory(u.Mem))).SetTextColor(rowColor)
+	return ui.NewDataCell(strings.TrimSpace(ui.FormatMemory(u.Mem))).SetTextColor(valueColor)
 }
 
 func renderJobCell(j model.JobModel, col string, rowColor tcell.Color) *tview.TableCell {
@@ -487,7 +482,7 @@ func renderJobCell(j model.JobModel, col string, rowColor tcell.Color) *tview.Ta
 	case "COMPLETIONS":
 		return ui.NewDataCell(j.FormatCompletions()).SetTextColor(rowColor)
 	case "AGE":
-		return ui.NewDataCell(j.Age).SetTextColor(mutedCellColor())
+		return ui.NewDataCell(j.Age).SetTextColor(rowColor)
 	case "STATUS":
 		return ui.StyleStatusCell(ui.NewDataCell(j.Status), j.Status, "workload")
 	default:

@@ -80,11 +80,13 @@ func (p *summaryPanel) render() {
 		p.text.SetTextColor(tcell.ColorDefault)
 	}
 
-	lblOpen, valOpen, okOpen, warnOpen, errOpen, resetTag := "", "", "", "", "", ""
+	lblOpen, valOpen, mutedOpen, okOpen, infoOpen, warnOpen, errOpen, resetTag := "", "", "", "", "", "", "", ""
 	if !mono {
-		lblOpen = "[" + ui.TagFg(pal.StatusMuted) + "]"
+		lblOpen = "[" + ui.TagFg(pal.DataPrimary) + "]"
 		valOpen = "[" + ui.TagFg(pal.DataSecondary) + "]"
+		mutedOpen = "[" + ui.TagFg(pal.StatusMuted) + "]"
 		okOpen = "[" + ui.TagFg(pal.StatusOK) + "]"
+		infoOpen = "[" + ui.TagFg(pal.StatusInfo) + "]"
 		warnOpen = "[" + ui.TagFg(pal.StatusWarning) + "]"
 		errOpen = "[" + ui.TagFg(pal.StatusError) + "]"
 		resetTag = "[-]"
@@ -99,12 +101,30 @@ func (p *summaryPanel) render() {
 			return text
 		}
 		if total == 0 {
-			return lblOpen + "0/0" + resetTag
+			return mutedOpen + "0/0" + resetTag
 		}
 		if ready < total {
 			return warnOpen + text + resetTag
 		}
 		return okOpen + text + resetTag
+	}
+
+	runningJobText := fmt.Sprintf("%d running", p.summary.JobsRunning)
+	if !mono {
+		if p.summary.JobsRunning > 0 {
+			runningJobText = infoOpen + runningJobText + resetTag
+		} else {
+			runningJobText = mutedOpen + runningJobText + resetTag
+		}
+	}
+
+	completedJobText := fmt.Sprintf("%d completed", p.summary.JobsCompleted)
+	if !mono {
+		if p.summary.JobsCompleted > 0 {
+			completedJobText = okOpen + completedJobText + resetTag
+		} else {
+			completedJobText = mutedOpen + completedJobText + resetTag
+		}
 	}
 
 	failedJobText := fmt.Sprintf("%d failed", p.summary.JobsFailed)
@@ -115,17 +135,24 @@ func (p *summaryPanel) render() {
 			failedJobText = errOpen + failedJobText + resetTag
 		}
 	} else if !mono {
-		failedJobText = lblOpen + failedJobText + resetTag
+		failedJobText = mutedOpen + failedJobText + resetTag
+	}
+
+	sep := " │ "
+	slash := " / "
+	if !mono {
+		sep = " " + lblOpen + "│" + resetTag + " "
+		slash = " " + valOpen + "/" + resetTag + " "
 	}
 
 	line := fmt.Sprintf(
-		" %sDeployments:%s %s │ %sStatefulSets:%s %s │ %sDaemonSets:%s %s │ %sJobs:%s %s%d running%s / %s%d completed%s / %s",
-		lblOpen, resetTag, countTag(p.summary.DeploymentsReady, p.summary.DeploymentsTotal),
-		lblOpen, resetTag, countTag(p.summary.StatefulSetsReady, p.summary.StatefulSetsTotal),
-		lblOpen, resetTag, countTag(p.summary.DaemonSetsReady, p.summary.DaemonSetsTotal),
+		" %sDeployments:%s %s%s%sStatefulSets:%s %s%s%sDaemonSets:%s %s%s%sJobs:%s %s%s%s%s%s",
+		lblOpen, resetTag, countTag(p.summary.DeploymentsReady, p.summary.DeploymentsTotal), sep,
+		lblOpen, resetTag, countTag(p.summary.StatefulSetsReady, p.summary.StatefulSetsTotal), sep,
+		lblOpen, resetTag, countTag(p.summary.DaemonSetsReady, p.summary.DaemonSetsTotal), sep,
 		lblOpen, resetTag,
-		valOpen, p.summary.JobsRunning, resetTag,
-		okOpen, p.summary.JobsCompleted, resetTag,
+		runningJobText, slash,
+		completedJobText, slash,
 		failedJobText,
 	)
 	p.text.SetText(line)

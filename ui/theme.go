@@ -452,8 +452,10 @@ func GetStatusSeverity(status string, resourceType string) StatusSeverity {
 			return StatusSeverityOK
 		case "Progressing", "Running":
 			return StatusSeverityInfo
-		case "Suspended", "Scaled 0":
+		case "Suspended":
 			return StatusSeverityWarning
+		case "Scaled 0":
+			return StatusSeverityUnknown
 		case "Degraded", "Failed":
 			return StatusSeverityError
 		default:
@@ -524,8 +526,10 @@ func GetStatusIcon(status string, resourceType string) string {
 			return Icons.Healthy
 		case "Progressing", "Running":
 			return Icons.Info
-		case "Suspended", "Scaled 0":
+		case "Suspended":
 			return Icons.Warning
+		case "Scaled 0":
+			return Icons.Unknown
 		case "Degraded", "Failed":
 			return Icons.Error
 		default:

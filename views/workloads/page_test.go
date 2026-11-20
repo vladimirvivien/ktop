@@ -168,3 +168,74 @@ func TestWorkloadsPage_RendersTablesSummaryAndDetail(t *testing.T) {
 	}
 	_ = tcell.ColorDefault
 }
+
+func TestWorkloadsPage_ColorConsistencyWithOverview(t *testing.T) {
+	t.Cleanup(func() {
+		_, _ = ui.ResolveAndApplyTheme("dark", "truecolor")
+	})
+	rt, err := ui.ResolveAndApplyTheme("dark", "truecolor")
+	if err != nil {
+		t.Fatalf("ResolveAndApplyTheme failed: %v", err)
+	}
+	pal := rt.Palette
+
+	readyRowColor := ui.GetRowColorForStatus("Ready", "workload")
+	readyDep := model.DeploymentModel{
+		Namespace: "default", Name: "web", Desired: 2, Ready: 2, Age: "2d", Status: "Ready",
+		Usage: model.WorkloadUsage{
+			HasCPU: true, CPU: resource.NewMilliQuantity(120, resource.DecimalSI),
+			HasMem: true, Mem: resource.NewQuantity(64*1024*1024, resource.BinarySI),
+		},
+	}
+
+	if got := renderDeploymentCell(readyDep, "READY", readyRowColor).Color; got != pal.DataPrimary {
+		t.Fatalf("READY cell color = %v, want DataPrimary (%v)", got, pal.DataPrimary)
+	}
+	if got := renderDeploymentCell(readyDep, "AGE", readyRowColor).Color; got != pal.DataPrimary {
+		t.Fatalf("AGE cell color = %v, want DataPrimary (%v)", got, pal.DataPrimary)
+	}
+	if got := renderDeploymentCell(readyDep, "CPU", readyRowColor).Color; got != pal.DataSecondary {
+		t.Fatalf("CPU cell color = %v, want DataSecondary (%v)", got, pal.DataSecondary)
+	}
+	if got := renderDeploymentCell(readyDep, "MEM", readyRowColor).Color; got != pal.DataSecondary {
+		t.Fatalf("MEM cell color = %v, want DataSecondary (%v)", got, pal.DataSecondary)
+	}
+	if got := renderDeploymentCell(readyDep, "STATUS", readyRowColor).Color; got != pal.StatusOK {
+		t.Fatalf("STATUS cell color = %v, want StatusOK (%v)", got, pal.StatusOK)
+	}
+
+	// Scaled 0 recedes to muted gray instead of warning yellow.
+	if sev := ui.GetStatusSeverity("Scaled 0", "workload"); sev != ui.StatusSeverityUnknown {
+		t.Fatalf("Scaled 0 severity = %v, want StatusSeverityUnknown", sev)
+	}
+	if got := ui.GetRowColorForStatus("Scaled 0", "workload"); got != pal.StatusMuted {
+		t.Fatalf("Scaled 0 row color = %v, want StatusMuted (%v)", got, pal.StatusMuted)
+	}
+
+	// Running Job AGE matches its row color (StatusInfo) instead of muted gray.
+	runningRowColor := ui.GetRowColorForStatus("Running", "workload")
+	runningJob := model.JobModel{Namespace: "batch", Name: "etl", Age: "30s", Status: "Running"}
+	if got := renderJobCell(runningJob, "AGE", runningRowColor).Color; got != runningRowColor {
+		t.Fatalf("Running Job AGE color = %v, want rowColor (%v)", got, runningRowColor)
+	}
+
+	// Summary labels use DataPrimary matching Overview Cluster Summary.
+	sp := newSummaryPanel(" Summary ")
+	sp.DrawBody(model.WorkloadSummaryModel{DeploymentsReady: 2, DeploymentsTotal: 2, JobsRunning: 1, JobsCompleted: 1})
+	ts, err := ui.NewTestScreen(120, 3)
+	if err != nil {
+		t.Fatalf("NewTestScreen failed: %v", err)
+	}
+	t.Cleanup(ts.Close)
+	ts.Draw(sp.GetRootView())
+	cells, w, _ := ts.Screen().GetContents()
+	row1 := ts.Lines()[1]
+	depIdx := strings.Index(row1, "Deployments:")
+	if depIdx < 0 {
+		t.Fatalf("missing Deployments: label in summary row %q", row1)
+	}
+	labelFG, _, _ := cells[w+depIdx].Style.Decompose()
+	if labelFG != pal.DataPrimary {
+		t.Fatalf("Summary label color = %v, want DataPrimary (%v)", labelFG, pal.DataPrimary)
+	}
+}
