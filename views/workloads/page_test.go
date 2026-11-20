@@ -39,18 +39,26 @@ func TestWorkloadsPage_RendersTablesSummaryAndDetail(t *testing.T) {
 		Deployments: []model.DeploymentModel{
 			{
 				Namespace: "default", Name: "web", Desired: 3, Ready: 3, Updated: 3, Available: 3, Age: "2d", Status: "Ready",
+				Usage:      model.WorkloadUsage{HasCPU: true, CPU: resource.NewMilliQuantity(250, resource.DecimalSI), HasMem: true, Mem: resource.NewQuantity(128*1024*1024, resource.BinarySI)},
 				Efficiency: model.WorkloadEfficiency{HasEfficiency: true, EffPct: 72, HasCPUEfficiency: true, CPUEffPct: 60, HasMemEfficiency: true, MemEffPct: 72},
 			},
 			{
 				Namespace: "prod", Name: "api", Desired: 2, Ready: 1, Updated: 2, Available: 1, Age: "5h", Status: "Progressing",
+				Usage:      model.WorkloadUsage{HasCPU: true, CPU: resource.NewMilliQuantity(80, resource.DecimalSI), HasMem: true, Mem: resource.NewQuantity(64*1024*1024, resource.BinarySI)},
 				Efficiency: model.WorkloadEfficiency{HasEfficiency: true, EffPct: 18},
 			},
 		},
 		StatefulSets: []model.StatefulSetModel{
-			{Namespace: "prod", Name: "pg", Desired: 3, Ready: 3, Age: "10d", Status: "Ready"},
+			{
+				Namespace: "prod", Name: "pg", Desired: 3, Ready: 3, Age: "10d", Status: "Ready",
+				Usage: model.WorkloadUsage{HasCPU: true, CPU: resource.NewMilliQuantity(500, resource.DecimalSI), HasMem: true, Mem: resource.NewQuantity(512*1024*1024, resource.BinarySI)},
+			},
 		},
 		DaemonSets: []model.DaemonSetModel{
-			{Namespace: "kube-system", Name: "proxy", Desired: 3, Current: 3, Ready: 3, Age: "20d", Status: "Ready"},
+			{
+				Namespace: "kube-system", Name: "proxy", Desired: 3, Current: 3, Ready: 3, Age: "20d", Status: "Ready",
+				Usage: model.WorkloadUsage{HasCPU: true, CPU: resource.NewMilliQuantity(45, resource.DecimalSI), HasMem: true, Mem: resource.NewQuantity(32*1024*1024, resource.BinarySI)},
+			},
 		},
 		Jobs: []model.JobModel{
 			{Namespace: "batch", Name: "nightly", CompletionsDesired: 1, HasCompletions: true, Succeeded: 1, Age: "1h", Status: "Complete"},
@@ -70,17 +78,19 @@ func TestWorkloadsPage_RendersTablesSummaryAndDetail(t *testing.T) {
 	for _, want := range []string{
 		"Summary",
 		"1/2 ready",
-		"Deployments", "web", "72%", "api", "18%",
-		"StatefulSets", "pg",
-		"DaemonSets", "proxy",
+		"Deployments", "web", "250m", "128Mi", "api", "80m", "64Mi",
+		"StatefulSets", "pg", "500m", "512Mi",
+		"DaemonSets", "proxy", "3/3", "45m", "32Mi",
 		"Jobs", "nightly", "Complete",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("expected %q on Workloads screen, got:\n%s", want, text)
 		}
 	}
-	if strings.Contains(text, "Workload Summary") {
-		t.Fatalf("expected Summary title instead of Workload Summary, got:\n%s", text)
+	for _, unwanted := range []string{"Workload Summary", "UP ", "AVAIL", "DESIRED", "CURRENT", "EFF"} {
+		if strings.Contains(text, unwanted) {
+			t.Fatalf("did not expect %q on Workloads screen, got:\n%s", unwanted, text)
+		}
 	}
 
 	// Verify Summary renders as a single line without a Namespace field.

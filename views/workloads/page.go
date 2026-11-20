@@ -54,22 +54,22 @@ func (p *Page) Layout(_ any) {
 
 	p.summary = newSummaryPanel(fmt.Sprintf(" %s  Summary ", ui.Icons.Thermometer))
 
+	workloadCols := []string{"NS", "NAME", "READY", "CPU", "MEM", "AGE", "STATUS"}
+	workloadKeys := map[string]rune{
+		"NS":     'n',
+		"NAME":   'm',
+		"READY":  'r',
+		"CPU":    'c',
+		"MEM":    'e',
+		"AGE":    'a',
+		"STATUS": 's',
+	}
+
 	p.deployments = newWorkloadTable(p.app, workloadTableConfig[model.DeploymentModel]{
-		title: "Deployments",
-		icon:  ui.Icons.Rocket,
-		columns: []string{
-			"NS", "NAME", "READY", "UP", "AVAIL", "AGE", "EFF", "STATUS",
-		},
-		columnToKey: map[string]rune{
-			"NS":     'n',
-			"NAME":   'm',
-			"READY":  'r',
-			"UP":     'u',
-			"AVAIL":  'v',
-			"AGE":    'a',
-			"EFF":    'e',
-			"STATUS": 's',
-		},
+		title:          "Deployments",
+		icon:           ui.Icons.Rocket,
+		columns:        workloadCols,
+		columnToKey:    workloadKeys,
 		defaultSortCol: "NS",
 		defaultSortAsc: true,
 		sortFn:         model.SortDeploymentModelsBy,
@@ -88,19 +88,10 @@ func (p *Page) Layout(_ any) {
 	})
 
 	p.statefulsets = newWorkloadTable(p.app, workloadTableConfig[model.StatefulSetModel]{
-		title: "StatefulSets",
-		icon:  ui.Icons.Package,
-		columns: []string{
-			"NS", "NAME", "READY", "AGE", "EFF", "STATUS",
-		},
-		columnToKey: map[string]rune{
-			"NS":     'n',
-			"NAME":   'm',
-			"READY":  'r',
-			"AGE":    'a',
-			"EFF":    'e',
-			"STATUS": 's',
-		},
+		title:          "StatefulSets",
+		icon:           ui.Icons.Package,
+		columns:        workloadCols,
+		columnToKey:    workloadKeys,
 		defaultSortCol: "NS",
 		defaultSortAsc: true,
 		sortFn:         model.SortStatefulSetModelsBy,
@@ -119,21 +110,10 @@ func (p *Page) Layout(_ any) {
 	})
 
 	p.daemonsets = newWorkloadTable(p.app, workloadTableConfig[model.DaemonSetModel]{
-		title: "DaemonSets",
-		icon:  ui.Icons.Controller,
-		columns: []string{
-			"NS", "NAME", "DESIRED", "CURRENT", "READY", "AGE", "EFF", "STATUS",
-		},
-		columnToKey: map[string]rune{
-			"NS":      'n',
-			"NAME":    'm',
-			"DESIRED": 'd',
-			"CURRENT": 'c',
-			"READY":   'r',
-			"AGE":     'a',
-			"EFF":     'e',
-			"STATUS":  's',
-		},
+		title:          "DaemonSets",
+		icon:           ui.Icons.Controller,
+		columns:        workloadCols,
+		columnToKey:    workloadKeys,
 		defaultSortCol: "NS",
 		defaultSortAsc: true,
 		sortFn:         model.SortDaemonSetModelsBy,
@@ -141,7 +121,7 @@ func (p *Page) Layout(_ any) {
 		nameFn:         func(ds model.DaemonSetModel) string { return ds.Name },
 		statusFn:       func(ds model.DaemonSetModel) string { return ds.Status },
 		filterCellsFn: func(ds model.DaemonSetModel) []string {
-			return []string{ds.Namespace, ds.Name, ds.Status}
+			return []string{ds.Namespace, ds.Name, ds.Status, fmt.Sprintf("%d/%d", ds.Ready, ds.Desired)}
 		},
 		cellFn: renderDaemonSetCell,
 		onSelect: func(ds model.DaemonSetModel) {
@@ -419,14 +399,12 @@ func renderDeploymentCell(d model.DeploymentModel, col string, rowColor tcell.Co
 			c = rowColor
 		}
 		return ui.NewDataCell(text).SetTextColor(c)
-	case "UP":
-		return ui.NewDataCell(fmt.Sprintf("%d", d.Updated)).SetTextColor(rowColor)
-	case "AVAIL":
-		return ui.NewDataCell(fmt.Sprintf("%d", d.Available)).SetTextColor(rowColor)
+	case "CPU":
+		return renderCPUUsageCell(d.Usage, rowColor)
+	case "MEM":
+		return renderMemUsageCell(d.Usage, rowColor)
 	case "AGE":
 		return ui.NewDataCell(d.Age).SetTextColor(mutedCellColor())
-	case "EFF":
-		return ui.NewDataCell(ui.FormatEfficiencyCell(d.Efficiency.EffPct, d.Efficiency.HasEfficiency)).SetTextColor(rowColor)
 	case "STATUS":
 		return ui.StyleStatusCell(ui.NewDataCell(d.Status), d.Status, "workload")
 	default:
@@ -447,10 +425,12 @@ func renderStatefulSetCell(s model.StatefulSetModel, col string, rowColor tcell.
 			c = rowColor
 		}
 		return ui.NewDataCell(text).SetTextColor(c)
+	case "CPU":
+		return renderCPUUsageCell(s.Usage, rowColor)
+	case "MEM":
+		return renderMemUsageCell(s.Usage, rowColor)
 	case "AGE":
 		return ui.NewDataCell(s.Age).SetTextColor(mutedCellColor())
-	case "EFF":
-		return ui.NewDataCell(ui.FormatEfficiencyCell(s.Efficiency.EffPct, s.Efficiency.HasEfficiency)).SetTextColor(rowColor)
 	case "STATUS":
 		return ui.StyleStatusCell(ui.NewDataCell(s.Status), s.Status, "workload")
 	default:
@@ -464,26 +444,38 @@ func renderDaemonSetCell(ds model.DaemonSetModel, col string, rowColor tcell.Col
 		return ui.NewDataCell(ds.Namespace).SetTextColor(rowColor).SetMaxWidth(14)
 	case "NAME":
 		return ui.NewDataCell(ds.Name).SetTextColor(rowColor).SetMaxWidth(24)
-	case "DESIRED":
-		return ui.NewDataCell(fmt.Sprintf("%d", ds.Desired)).SetTextColor(rowColor)
-	case "CURRENT":
-		return ui.NewDataCell(fmt.Sprintf("%d", ds.Current)).SetTextColor(rowColor)
 	case "READY":
-		text := fmt.Sprintf("%d", ds.Ready)
+		text := fmt.Sprintf("%d/%d", ds.Ready, ds.Desired)
 		c := ui.GetTcellColor(ui.GetReadyColor(int(ds.Ready), int(max(ds.Desired, 1))))
 		if ds.Desired == 0 {
 			c = rowColor
 		}
 		return ui.NewDataCell(text).SetTextColor(c)
+	case "CPU":
+		return renderCPUUsageCell(ds.Usage, rowColor)
+	case "MEM":
+		return renderMemUsageCell(ds.Usage, rowColor)
 	case "AGE":
 		return ui.NewDataCell(ds.Age).SetTextColor(mutedCellColor())
-	case "EFF":
-		return ui.NewDataCell(ui.FormatEfficiencyCell(ds.Efficiency.EffPct, ds.Efficiency.HasEfficiency)).SetTextColor(rowColor)
 	case "STATUS":
 		return ui.StyleStatusCell(ui.NewDataCell(ds.Status), ds.Status, "workload")
 	default:
 		return ui.NewDataCell("").SetTextColor(rowColor)
 	}
+}
+
+func renderCPUUsageCell(u model.WorkloadUsage, rowColor tcell.Color) *tview.TableCell {
+	if !u.HasCPU || u.CPU == nil {
+		return ui.NewDataCell("n/a").SetTextColor(mutedCellColor())
+	}
+	return ui.NewDataCell(ui.FormatCPU(u.CPU)).SetTextColor(rowColor)
+}
+
+func renderMemUsageCell(u model.WorkloadUsage, rowColor tcell.Color) *tview.TableCell {
+	if !u.HasMem || u.Mem == nil {
+		return ui.NewDataCell("n/a").SetTextColor(mutedCellColor())
+	}
+	return ui.NewDataCell(strings.TrimSpace(ui.FormatMemory(u.Mem))).SetTextColor(rowColor)
 }
 
 func renderJobCell(j model.JobModel, col string, rowColor tcell.Color) *tview.TableCell {

@@ -67,6 +67,7 @@ func (c *Controller) GetWorkloadsSnapshot(ctx context.Context) (model.WorkloadsS
 			for _, d := range deps {
 				dm := model.NewDeploymentModel(d)
 				owned := podIndex.matchPods(d.Namespace, "Deployment", d.UID, d.Name, d.Spec.Selector, rsByDeployment[d.UID])
+				dm.Usage = model.ComputePodsUsage(owned, hasMetrics)
 				dm.Efficiency = model.ComputePodsEfficiency(owned, hasMetrics)
 				snap.Deployments = append(snap.Deployments, dm)
 			}
@@ -79,6 +80,7 @@ func (c *Controller) GetWorkloadsSnapshot(ctx context.Context) (model.WorkloadsS
 			for _, s := range stsList {
 				sm := model.NewStatefulSetModel(s)
 				owned := podIndex.matchPods(s.Namespace, "StatefulSet", s.UID, s.Name, s.Spec.Selector, nil)
+				sm.Usage = model.ComputePodsUsage(owned, hasMetrics)
 				sm.Efficiency = model.ComputePodsEfficiency(owned, hasMetrics)
 				snap.StatefulSets = append(snap.StatefulSets, sm)
 			}
@@ -91,6 +93,7 @@ func (c *Controller) GetWorkloadsSnapshot(ctx context.Context) (model.WorkloadsS
 			for _, ds := range dsList {
 				dsm := model.NewDaemonSetModel(ds)
 				owned := podIndex.matchPods(ds.Namespace, "DaemonSet", ds.UID, ds.Name, ds.Spec.Selector, nil)
+				dsm.Usage = model.ComputePodsUsage(owned, hasMetrics)
 				dsm.Efficiency = model.ComputePodsEfficiency(owned, hasMetrics)
 				snap.DaemonSets = append(snap.DaemonSets, dsm)
 			}
@@ -103,6 +106,7 @@ func (c *Controller) GetWorkloadsSnapshot(ctx context.Context) (model.WorkloadsS
 			for _, job := range jobs {
 				jm := model.NewJobModel(job)
 				owned := podIndex.matchPods(job.Namespace, "Job", job.UID, job.Name, job.Spec.Selector, nil)
+				jm.Usage = model.ComputePodsUsage(owned, hasMetrics)
 				jm.Efficiency = model.ComputePodsEfficiency(owned, hasMetrics)
 				snap.Jobs = append(snap.Jobs, jm)
 			}

@@ -117,6 +117,20 @@ func TestComputePodsEfficiency(t *testing.T) {
 	if math.Abs(eff.EffPct-60.0) > 0.01 {
 		t.Fatalf("EffPct = %.2f, want 60.0", eff.EffPct)
 	}
+
+	if got := ComputePodsUsage(pods, false); got.HasCPU || got.HasMem {
+		t.Fatalf("expected zero usage when metrics unavailable, got %+v", got)
+	}
+	usage := ComputePodsUsage(pods, true)
+	if !usage.HasCPU || !usage.HasMem {
+		t.Fatalf("expected HasCPU and HasMem true, got %+v", usage)
+	}
+	if usage.CPU.MilliValue() != 1200 {
+		t.Fatalf("CPU = %dm, want 1200m", usage.CPU.MilliValue())
+	}
+	if usage.Mem.Value() != 768 {
+		t.Fatalf("Mem = %d, want 768", usage.Mem.Value())
+	}
 }
 
 func TestComputeWorkloadSummaryWithNamespaceFilter(t *testing.T) {
@@ -176,12 +190,28 @@ func TestNewJobModelAndSorting(t *testing.T) {
 	}
 
 	deps := []DeploymentModel{
-		{Namespace: "default", Name: "z", Desired: 1, Ready: 1, Status: "Ready", Efficiency: WorkloadEfficiency{HasEfficiency: true, EffPct: 80}},
-		{Namespace: "default", Name: "a", Desired: 2, Ready: 0, Status: "Degraded", Efficiency: WorkloadEfficiency{HasEfficiency: true, EffPct: 10}},
+		{
+			Namespace: "default", Name: "z", Desired: 1, Ready: 1, Status: "Ready",
+			Usage:      WorkloadUsage{HasCPU: true, CPU: resource.NewMilliQuantity(400, resource.DecimalSI), HasMem: true, Mem: resource.NewQuantity(128*1024*1024, resource.BinarySI)},
+			Efficiency: WorkloadEfficiency{HasEfficiency: true, EffPct: 80},
+		},
+		{
+			Namespace: "default", Name: "a", Desired: 2, Ready: 0, Status: "Degraded",
+			Usage:      WorkloadUsage{HasCPU: true, CPU: resource.NewMilliQuantity(100, resource.DecimalSI), HasMem: true, Mem: resource.NewQuantity(512*1024*1024, resource.BinarySI)},
+			Efficiency: WorkloadEfficiency{HasEfficiency: true, EffPct: 10},
+		},
 	}
 	SortDeploymentModelsBy(deps, "STATUS", true)
 	if deps[0].Name != "a" {
 		t.Fatalf("expected Degraded deployment sorted first, got %s", deps[0].Name)
+	}
+	SortDeploymentModelsBy(deps, "CPU", false)
+	if deps[0].Name != "z" {
+		t.Fatalf("expected highest CPU descending first, got %s", deps[0].Name)
+	}
+	SortDeploymentModelsBy(deps, "MEM", false)
+	if deps[0].Name != "a" {
+		t.Fatalf("expected highest MEM descending first, got %s", deps[0].Name)
 	}
 	SortDeploymentModelsBy(deps, "EFF", false)
 	if deps[0].Name != "z" {

@@ -64,6 +64,14 @@ type WorkloadEfficiency struct {
 	MemEffPct        float64
 }
 
+// WorkloadUsage summarizes aggregated live CPU and memory usage across active owned pods.
+type WorkloadUsage struct {
+	CPU    *resource.Quantity
+	Mem    *resource.Quantity
+	HasCPU bool
+	HasMem bool
+}
+
 // WorkloadConditionInfo provides a normalized view of a workload status condition.
 type WorkloadConditionInfo struct {
 	Type    string
@@ -98,6 +106,7 @@ type DeploymentModel struct {
 	Age                string
 	CreationTime       metav1.Time
 	Status             string
+	Usage              WorkloadUsage
 	Efficiency         WorkloadEfficiency
 	Strategy           string
 	Generation         int64
@@ -119,6 +128,7 @@ type StatefulSetModel struct {
 	Age                string
 	CreationTime       metav1.Time
 	Status             string
+	Usage              WorkloadUsage
 	Efficiency         WorkloadEfficiency
 	ServiceName        string
 	UpdateStrategy     string
@@ -143,6 +153,7 @@ type DaemonSetModel struct {
 	Age                string
 	CreationTime       metav1.Time
 	Status             string
+	Usage              WorkloadUsage
 	Efficiency         WorkloadEfficiency
 	UpdateStrategy     string
 	Generation         int64
@@ -167,6 +178,7 @@ type JobModel struct {
 	CreationTime       metav1.Time
 	Status             string
 	Owner              string
+	Usage              WorkloadUsage
 	Efficiency         WorkloadEfficiency
 	Selector           map[string]string
 	Labels             map[string]string
@@ -536,6 +548,45 @@ func ComputePodsEfficiency(pods []*PodModel, hasMetrics bool) WorkloadEfficiency
 	return eff
 }
 
+// ComputePodsUsage sums live CPU and memory usage across a workload's active owned pods.
+func ComputePodsUsage(pods []*PodModel, hasMetrics bool) WorkloadUsage {
+	if !hasMetrics || len(pods) == 0 {
+		return WorkloadUsage{}
+	}
+
+	var cpuMillis int64
+	var memBytes int64
+	var hasCPU, hasMem bool
+
+	for _, pod := range pods {
+		if pod == nil {
+			continue
+		}
+		if pod.Status == "Completed" || pod.Status == "Succeeded" {
+			continue
+		}
+		if pod.PodUsageCpuQty != nil {
+			cpuMillis += pod.PodUsageCpuQty.MilliValue()
+			hasCPU = true
+		}
+		if pod.PodUsageMemQty != nil {
+			memBytes += pod.PodUsageMemQty.Value()
+			hasMem = true
+		}
+	}
+
+	var usage WorkloadUsage
+	if hasCPU {
+		usage.HasCPU = true
+		usage.CPU = resource.NewMilliQuantity(cpuMillis, resource.DecimalSI)
+	}
+	if hasMem {
+		usage.HasMem = true
+		usage.Mem = resource.NewQuantity(memBytes, resource.BinarySI)
+	}
+	return usage
+}
+
 // ComputeWorkloadSummary computes top-level counts from snap, optionally filtered by namespace substring.
 func ComputeWorkloadSummary(snap WorkloadsSnapshot, nsFilter string) WorkloadSummaryModel {
 	var summary WorkloadSummaryModel
@@ -641,6 +692,40 @@ func compareEfficiency(a, b WorkloadEfficiency, nameA, nameB string) bool {
 	return a.EffPct < b.EffPct
 }
 
+func compareUsageCPU(a, b WorkloadUsage, nameA, nameB string) bool {
+	if a.HasCPU != b.HasCPU {
+		return a.HasCPU
+	}
+	var va, vb int64
+	if a.CPU != nil {
+		va = a.CPU.MilliValue()
+	}
+	if b.CPU != nil {
+		vb = b.CPU.MilliValue()
+	}
+	if va == vb {
+		return nameA < nameB
+	}
+	return va < vb
+}
+
+func compareUsageMem(a, b WorkloadUsage, nameA, nameB string) bool {
+	if a.HasMem != b.HasMem {
+		return a.HasMem
+	}
+	var va, vb int64
+	if a.Mem != nil {
+		va = a.Mem.Value()
+	}
+	if b.Mem != nil {
+		vb = b.Mem.Value()
+	}
+	if va == vb {
+		return nameA < nameB
+	}
+	return va < vb
+}
+
 func workloadStatusPriority(status string) int {
 	switch status {
 	case "Degraded", "Failed":
@@ -680,6 +765,10 @@ func SortDeploymentModelsBy(items []DeploymentModel, column string, ascending bo
 				return a.Name < b.Name
 			}
 			return a.Available < b.Available
+		case "CPU":
+			return compareUsageCPU(a.Usage, b.Usage, a.Name, b.Name)
+		case "MEM":
+			return compareUsageMem(a.Usage, b.Usage, a.Name, b.Name)
 		case "AGE":
 			if a.CreationTime.Equal(&b.CreationTime) {
 				return a.Name < b.Name
@@ -715,6 +804,10 @@ func SortStatefulSetModelsBy(items []StatefulSetModel, column string, ascending 
 				return a.Name < b.Name
 			}
 			return ra < rb
+		case "CPU":
+			return compareUsageCPU(a.Usage, b.Usage, a.Name, b.Name)
+		case "MEM":
+			return compareUsageMem(a.Usage, b.Usage, a.Name, b.Name)
 		case "AGE":
 			if a.CreationTime.Equal(&b.CreationTime) {
 				return a.Name < b.Name
@@ -754,10 +847,16 @@ func SortDaemonSetModelsBy(items []DaemonSetModel, column string, ascending bool
 			}
 			return a.Current < b.Current
 		case "READY":
-			if a.Ready == b.Ready {
+			ra := float64(a.Ready) / float64(max(a.Desired, 1))
+			rb := float64(b.Ready) / float64(max(b.Desired, 1))
+			if ra == rb {
 				return a.Name < b.Name
 			}
-			return a.Ready < b.Ready
+			return ra < rb
+		case "CPU":
+			return compareUsageCPU(a.Usage, b.Usage, a.Name, b.Name)
+		case "MEM":
+			return compareUsageMem(a.Usage, b.Usage, a.Name, b.Name)
 		case "AGE":
 			if a.CreationTime.Equal(&b.CreationTime) {
 				return a.Name < b.Name

@@ -175,20 +175,14 @@ The main dashboard showing cluster health at a glance. Displays summary statisti
 
 Groups application controllers into a two-column layout of four sortable, filterable panels alongside a single-line Summary rollup bar:
 
-- **Deployments** (`NS`, `NAME`, `READY`, `UP`, `AVAIL`, `AGE`, `EFF`, `STATUS`)
-- **StatefulSets** (`NS`, `NAME`, `READY`, `AGE`, `EFF`, `STATUS`)
-- **DaemonSets** (`NS`, `NAME`, `DESIRED`, `CURRENT`, `READY`, `AGE`, `EFF`, `STATUS`)
+- **Deployments** (`NS`, `NAME`, `READY`, `CPU`, `MEM`, `AGE`, `STATUS`)
+- **StatefulSets** (`NS`, `NAME`, `READY`, `CPU`, `MEM`, `AGE`, `STATUS`)
+- **DaemonSets** (`NS`, `NAME`, `READY`, `CPU`, `MEM`, `AGE`, `STATUS`)
 - **Jobs** (`NS`, `NAME`, `COMPLETIONS`, `AGE`, `STATUS`)
 
-The `EFF` column compares actual CPU/memory usage against pod resource requests across owned pods to highlight sizing health:
+The `CPU` and `MEM` columns sum live CPU and memory usage across each workload's active owned pods.
 
-- `< 25%` (red): severely over-provisioned
-- `25%–50%` (yellow): over-provisioned
-- `50%–90%` (green): well-sized
-- `90%–100%` (orange): near limit
-- `> 100%` (red): throttled or OOM risk
-
-Press `Tab` to move across Workload sections and `Enter` on any row to open **Workload Detail**, which displays aggregate CPU/memory trends, selector/label metadata, rollout conditions, scoped events, and owned pods (`Enter` drills directly into Pod Detail).
+Press `Tab` to move across Workload sections and `Enter` on any row to open **Workload Detail**, which displays aggregate CPU/memory trends, request-vs-usage efficiency, selector/label metadata, rollout conditions, scoped events, and owned pods (`Enter` drills directly into Pod Detail).
 
 ### Node Detail
 
