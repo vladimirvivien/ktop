@@ -16,7 +16,7 @@ type appPanel struct {
 	tviewApp        *tview.Application
 	title           string
 	header          *tview.Table
-	tabBar          *ui.TabBar
+	tabBar          *ui.TabFrame
 	pages           *tview.Pages
 	footerComponent *ui.Footer // Context-aware navigation footer
 	modals          []tview.Primitive
@@ -44,7 +44,7 @@ func newPanel(app *tview.Application) *appPanel {
 	p := &appPanel{
 		title:           "ktop",
 		tviewApp:        app,
-		tabBar:          ui.NewTabBar(),
+		tabBar:          ui.NewTabFrame(nil),
 		namespaceFilter: &ui.FilterState{},
 	}
 	return p
@@ -61,18 +61,19 @@ func (p *appPanel) Layout(data any) {
 
 	p.header.SetBorder(true)
 	ui.StyleTable(p.header)
-	if p.tabBar == nil {
-		p.tabBar = ui.NewTabBar()
-	}
 	p.pages = tview.NewPages()
+	if p.tabBar == nil {
+		p.tabBar = ui.NewTabFrame(p.pages)
+	} else {
+		p.tabBar.SetContent(p.pages)
+	}
 
 	// Initialize context-aware navigation footer
 	p.footerComponent = ui.NewFooter()
 
 	mainLayout := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(p.header, 3, 1, true).
-		AddItem(p.tabBar.GetView(), 1, 0, false).
-		AddItem(p.pages, 0, 1, true).
+		AddItem(p.tabBar.GetView(), 0, 1, true).
 		AddItem(p.footerComponent.GetView(), 3, 0, false)
 
 	p.root = tview.NewPages()

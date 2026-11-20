@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
+	"github.com/rivo/tview"
 )
 
 func TestTabBar_RenderAndSwitching(t *testing.T) {
@@ -145,5 +146,125 @@ func TestTabBar_MonochromeZeroColorsAndActiveAttr(t *testing.T) {
 	_, _, inactiveAttrs := cells[inactiveIdx+1].Style.Decompose()
 	if inactiveAttrs&tcell.AttrReverse != 0 {
 		t.Fatalf("expected inactive monochrome tab not to use AttrReverse, got %v", inactiveAttrs)
+	}
+}
+
+func TestTabFrame_BorderTabsBreadcrumbAndContent(t *testing.T) {
+	t.Cleanup(func() {
+		_, _ = ResolveAndApplyTheme("dark", "truecolor")
+	})
+	rt, err := ResolveAndApplyTheme("dark", "truecolor")
+	if err != nil {
+		t.Fatalf("ResolveAndApplyTheme failed: %v", err)
+	}
+
+	ts, err := NewTestScreen(100, 6)
+	if err != nil {
+		t.Fatalf("NewTestScreen failed: %v", err)
+	}
+	t.Cleanup(ts.Close)
+
+	content := tview.NewTextView().SetText("Inner Page Content")
+	tf := NewTabFrame(content)
+	tf.SetTabs([]TabItem{
+		{ID: "overview", Title: "Overview", Key: '1'},
+		{ID: "workloads", Title: "Workloads", Key: '2'},
+	})
+	tf.SetActive(0)
+	tf.SetBreadcrumb("Overview › node/worker-1")
+
+	ts.Draw(tf)
+	lines := ts.Lines()
+	top := lines[0]
+	bottom := lines[5]
+
+	if !strings.HasPrefix(top, "┌─ [1] Overview  [2] Workloads ") {
+		t.Fatalf("expected top border to begin with corner + contiguous tabs, got %q", top)
+	}
+	if !strings.HasSuffix(top, " Overview › node/worker-1 ─┐") {
+		t.Fatalf("expected right-aligned breadcrumb on top border, got %q", top)
+	}
+	if !strings.HasPrefix(bottom, "└") || !strings.HasSuffix(bottom, "┘") {
+		t.Fatalf("expected bottom border corners, got %q", bottom)
+	}
+	if !strings.Contains(lines[1], "Inner Page Content") {
+		t.Fatalf("expected inner content rendered inside frame row 1, got %q", lines[1])
+	}
+
+	cells, _, _ := ts.Screen().GetContents()
+	// Row 0 cell 0 is '┌' with BorderNormal color.
+	borderFG, _, _ := cells[0].Style.Decompose()
+	if borderFG != rt.Palette.BorderNormal {
+		t.Fatalf("border color = %v, want %v", borderFG, rt.Palette.BorderNormal)
+	}
+
+	// Row 0 cell 2 starts active tab " [1] Overview " (len 14), cell 16 starts inactive tab " [2] Workloads ".
+	activeFG, activeBG, _ := cells[15].Style.Decompose()
+	inactiveFG, inactiveBG, _ := cells[16].Style.Decompose()
+	if activeFG != rt.Palette.TabActiveFg || activeBG != rt.Palette.TabActiveBg {
+		t.Fatalf("active tab style = (%v, %v), want (%v, %v)", activeFG, activeBG, rt.Palette.TabActiveFg, rt.Palette.TabActiveBg)
+	}
+	if inactiveFG != rt.Palette.TabInactiveFg || inactiveBG != rt.Palette.TabInactiveBg {
+		t.Fatalf("inactive tab style = (%v, %v), want (%v, %v)", inactiveFG, inactiveBG, rt.Palette.TabInactiveFg, rt.Palette.TabInactiveBg)
+	}
+}
+
+func TestTabFrame_MonochromeZeroColorsAndFocusDelegation(t *testing.T) {
+	t.Cleanup(func() {
+		_, _ = ResolveAndApplyTheme("dark", "truecolor")
+	})
+	if _, err := ResolveAndApplyTheme("monochrome", "none"); err != nil {
+		t.Fatalf("ResolveAndApplyTheme failed: %v", err)
+	}
+
+	ts, err := NewTestScreen(100, 5)
+	if err != nil {
+		t.Fatalf("NewTestScreen failed: %v", err)
+	}
+	t.Cleanup(ts.Close)
+
+	child := tview.NewTextView().SetText("Body")
+	tf := NewTabFrame(child)
+	tf.SetTabs([]TabItem{
+		{ID: "overview", Title: "Overview", Key: '1'},
+		{ID: "workloads", Title: "Workloads", Key: '2'},
+	})
+	tf.SetActive(1)
+	tf.SetBreadcrumb("Workloads › deploy/default/api")
+
+	ts.Draw(tf)
+	cells, w, h := ts.Screen().GetContents()
+	for i := 0; i < w*h; i++ {
+		fg, bg, _ := cells[i].Style.Decompose()
+		if fg != tcell.ColorDefault || bg != tcell.ColorDefault {
+			t.Fatalf("cell %d emitted non-default monochrome colors fg=%v bg=%v", i, fg, bg)
+		}
+	}
+
+	// Active tab "[2] Workloads" starts at column 2 + len(" [1] Overview ") = 16.
+	_, _, activeAttrs := cells[17].Style.Decompose()
+	if activeAttrs&tcell.AttrReverse == 0 || activeAttrs&tcell.AttrBold == 0 {
+		t.Fatalf("expected active monochrome tab to use AttrReverse|AttrBold, got %v", activeAttrs)
+	}
+	_, _, inactiveAttrs := cells[3].Style.Decompose()
+	if inactiveAttrs&tcell.AttrReverse != 0 {
+		t.Fatalf("expected inactive monochrome tab not to use AttrReverse, got %v", inactiveAttrs)
+	}
+
+	// Verify Focus delegates to wrapped child primitive.
+	var focused tview.Primitive
+	tf.Focus(func(p tview.Primitive) {
+		focused = p
+		p.Focus(func(tview.Primitive) {})
+	})
+	if focused != child {
+		t.Fatalf("expected Focus to delegate to child primitive")
+	}
+	if !tf.HasFocus() {
+		t.Fatalf("expected TabFrame.HasFocus() to be true when child has focus")
+	}
+	tf.Blur()
+	if tf.HasFocus() {
+		t.Fatalf("expected TabFrame.HasFocus() to be false after Blur()")
 	}
 }

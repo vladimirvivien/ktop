@@ -102,30 +102,22 @@ func (tb *TabBar) Refresh() {
 	tb.render()
 }
 
-func (tb *TabBar) render() {
+func buildTabsMarkup(tabs []TabItem, activeIdx int) (string, int) {
 	mono := IsMonochrome()
 	pal := ActivePalette()
-	bg := pal.CanvasBg
-	if mono {
-		bg = tcell.ColorDefault
-	}
-
-	tb.root.SetBackgroundColor(bg)
-	tb.tabsView.SetBackgroundColor(bg)
-	tb.crumbView.SetBackgroundColor(bg)
 
 	var tabsMarkup strings.Builder
 	tabsWidth := 0
 
-	for i, tab := range tb.tabs {
+	for i, tab := range tabs {
 		label := fmt.Sprintf(" %s ", tab.Title)
 		if tab.Key != 0 {
 			label = fmt.Sprintf(" [%c] %s ", tab.Key, tab.Title)
 		}
-		tabsWidth += tview.TaggedStringWidth(tview.Escape(label))
 		escaped := tview.Escape(label)
+		tabsWidth += tview.TaggedStringWidth(escaped)
 
-		if i == tb.activeIdx {
+		if i == activeIdx {
 			if mono {
 				tabsMarkup.WriteString("[::rb]" + escaped + "[::-]")
 			} else {
@@ -140,11 +132,28 @@ func (tb *TabBar) render() {
 		}
 	}
 
+	return tabsMarkup.String(), tabsWidth
+}
+
+func (tb *TabBar) render() {
+	mono := IsMonochrome()
+	pal := ActivePalette()
+	bg := pal.CanvasBg
+	if mono {
+		bg = tcell.ColorDefault
+	}
+
+	tb.root.SetBackgroundColor(bg)
+	tb.tabsView.SetBackgroundColor(bg)
+	tb.crumbView.SetBackgroundColor(bg)
+
+	tabsMarkup, tabsWidth := buildTabsMarkup(tb.tabs, tb.activeIdx)
+
 	tb.tabsView.SetTextColor(tcell.ColorDefault)
 	if !mono {
 		tb.tabsView.SetTextColor(pal.CanvasFg)
 	}
-	tb.tabsView.SetText(tabsMarkup.String())
+	tb.tabsView.SetText(tabsMarkup)
 
 	crumbMarkup := ""
 	if tb.breadcrumb != "" {
@@ -168,4 +177,191 @@ func (tb *TabBar) render() {
 		tb.root.AddItem(tb.tabsView, tabsWidth, 0, false)
 	}
 	tb.root.AddItem(tb.crumbView, 0, 1, false)
+}
+
+// TabFrame wraps a content primitive in a bordered container whose top border
+// displays navigation tabs on the left and an optional drill-down breadcrumb on the right.
+type TabFrame struct {
+	*tview.Box
+	content    tview.Primitive
+	tabs       []TabItem
+	activeIdx  int
+	breadcrumb string
+}
+
+// NewTabFrame creates a bordered tab container wrapping content.
+func NewTabFrame(content tview.Primitive) *TabFrame {
+	box := tview.NewBox().SetBorder(true)
+	return &TabFrame{
+		Box:     box,
+		content: content,
+	}
+}
+
+// GetView returns the TabFrame as a tview.Primitive for layout composition.
+func (tf *TabFrame) GetView() tview.Primitive {
+	return tf
+}
+
+// SetContent replaces the wrapped child primitive rendered inside the frame.
+func (tf *TabFrame) SetContent(content tview.Primitive) {
+	tf.content = content
+}
+
+// SetTabs replaces the displayed tabs and clamps the active tab index.
+func (tf *TabFrame) SetTabs(tabs []TabItem) {
+	tf.tabs = slices.Clone(tabs)
+	if len(tf.tabs) == 0 {
+		tf.activeIdx = 0
+	} else if tf.activeIdx < 0 || tf.activeIdx >= len(tf.tabs) {
+		tf.activeIdx = 0
+	}
+}
+
+// Tabs returns a copy of the configured tabs.
+func (tf *TabFrame) Tabs() []TabItem {
+	return slices.Clone(tf.tabs)
+}
+
+// SetActive updates the active tab index.
+func (tf *TabFrame) SetActive(index int) {
+	if index < 0 || index >= len(tf.tabs) {
+		return
+	}
+	tf.activeIdx = index
+}
+
+// ActiveIndex returns the currently selected tab index.
+func (tf *TabFrame) ActiveIndex() int {
+	return tf.activeIdx
+}
+
+// SetBreadcrumb sets the right-aligned drill-down breadcrumb trail.
+func (tf *TabFrame) SetBreadcrumb(breadcrumb string) {
+	tf.breadcrumb = strings.TrimSpace(breadcrumb)
+}
+
+// Breadcrumb returns the current breadcrumb text.
+func (tf *TabFrame) Breadcrumb() string {
+	return tf.breadcrumb
+}
+
+// Refresh is a no-op hook kept for parity with TabBar; Draw reads the active palette live.
+func (tf *TabFrame) Refresh() {}
+
+// Draw renders the outer border, overlays tabs and breadcrumb onto the top border line,
+// and draws the wrapped content primitive inside the inner rectangle.
+func (tf *TabFrame) Draw(screen tcell.Screen) {
+	mono := IsMonochrome()
+	pal := ActivePalette()
+	defaultFg := pal.CanvasFg
+	if mono {
+		defaultFg = tcell.ColorDefault
+		tf.Box.SetBackgroundColor(tcell.ColorDefault)
+		tf.Box.SetBorderColor(tcell.ColorDefault)
+	} else {
+		tf.Box.SetBackgroundColor(pal.CanvasBg)
+		tf.Box.SetBorderColor(pal.BorderNormal)
+	}
+
+	// Draw via Box directly so the outer frame keeps single-line unfocused borders
+	// while inner page panels indicate keyboard focus.
+	tf.Box.Draw(screen)
+
+	x, y, w, h := tf.GetRect()
+	if w >= 4 && h >= 2 {
+		leftX := x + 2
+		rightLimit := x + w - 2
+		avail := rightLimit - leftX
+
+		tabsEnd := leftX
+		if avail > 0 && len(tf.tabs) > 0 {
+			tabsMarkup, tabsWidth := buildTabsMarkup(tf.tabs, tf.activeIdx)
+			drawW := min(tabsWidth, avail)
+			tview.Print(screen, tabsMarkup, leftX, y, drawW, tview.AlignLeft, defaultFg)
+			tabsEnd = leftX + drawW
+		}
+
+		if tf.breadcrumb != "" {
+			crumbStart := tabsEnd
+			if len(tf.tabs) > 0 {
+				crumbStart++ // Keep at least one border dash between tabs and breadcrumb.
+			}
+			crumbAvail := rightLimit - crumbStart
+			if crumbAvail > 0 {
+				escapedCrumb := " " + tview.Escape(tf.breadcrumb) + " "
+				crumbWidth := tview.TaggedStringWidth(escapedCrumb)
+				var crumbMarkup string
+				crumbFg := pal.Accent
+				if mono {
+					crumbFg = tcell.ColorDefault
+					crumbMarkup = "[::b]" + escapedCrumb + "[::-]"
+				} else {
+					crumbMarkup = fmt.Sprintf("[%s:%s:b]%s[-:-:-]", TagFg(pal.Accent), TagFg(pal.CanvasBg), escapedCrumb)
+				}
+				drawX := max(crumbStart, rightLimit-crumbWidth)
+				drawW := rightLimit - drawX
+				tview.Print(screen, crumbMarkup, drawX, y, drawW, tview.AlignLeft, crumbFg)
+			}
+		}
+	}
+
+	if tf.content != nil {
+		ix, iy, iw, ih := tf.GetInnerRect()
+		if iw > 0 && ih > 0 {
+			tf.content.SetRect(ix, iy, iw, ih)
+			tf.content.Draw(screen)
+		}
+	}
+}
+
+// Focus delegates focus to the wrapped content primitive.
+func (tf *TabFrame) Focus(delegate func(p tview.Primitive)) {
+	if tf.content != nil {
+		delegate(tf.content)
+		return
+	}
+	tf.Box.Focus(delegate)
+}
+
+// Blur delegates blur to the wrapped content primitive.
+func (tf *TabFrame) Blur() {
+	if tf.content != nil {
+		tf.content.Blur()
+	}
+	tf.Box.Blur()
+}
+
+// HasFocus reports whether the wrapped content primitive or frame has focus.
+func (tf *TabFrame) HasFocus() bool {
+	if tf.content != nil && tf.content.HasFocus() {
+		return true
+	}
+	return tf.Box.HasFocus()
+}
+
+// InputHandler delegates keyboard input to the wrapped content primitive.
+func (tf *TabFrame) InputHandler() func(event *tcell.EventKey, setFocus func(p tview.Primitive)) {
+	return tf.WrapInputHandler(func(event *tcell.EventKey, setFocus func(p tview.Primitive)) {
+		if tf.content != nil {
+			if handler := tf.content.InputHandler(); handler != nil {
+				handler(event, setFocus)
+			}
+		}
+	})
+}
+
+// MouseHandler delegates mouse events inside the frame to the wrapped content primitive.
+func (tf *TabFrame) MouseHandler() func(action tview.MouseAction, event *tcell.EventMouse, setFocus func(p tview.Primitive)) (consumed bool, capture tview.Primitive) {
+	return tf.WrapMouseHandler(func(action tview.MouseAction, event *tcell.EventMouse, setFocus func(p tview.Primitive)) (consumed bool, capture tview.Primitive) {
+		if !tf.InRect(event.Position()) {
+			return false, nil
+		}
+		if tf.content != nil {
+			if handler := tf.content.MouseHandler(); handler != nil {
+				return handler(action, event, setFocus)
+			}
+		}
+		return false, nil
+	})
 }

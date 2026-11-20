@@ -167,11 +167,20 @@ func renderThemeViews(t *testing.T, snap *snapshot.Snapshot) []struct {
 	tabBar.SetActive(0)
 	tabBar.SetBreadcrumb("Overview › pod/default/worker-1")
 
+	tabFrame := ui.NewTabFrame(sum.GetRootView())
+	tabFrame.SetTabs([]ui.TabItem{
+		{ID: "overview", Title: "Overview", Key: '1'},
+		{ID: "workloads", Title: "Workloads", Key: '2'},
+	})
+	tabFrame.SetActive(0)
+	tabFrame.SetBreadcrumb("Overview › pod/default/worker-1")
+
 	return []struct {
 		name      string
 		primitive tview.Primitive
 	}{
 		{"TabBar", tabBar.GetView()},
+		{"TabFrame", tabFrame.GetView()},
 		{"SummaryPanel", sum.GetRootView()},
 		{"NodePanel", nodePanel.GetRootView()},
 		{"PodPanel", podPanel.GetRootView()},

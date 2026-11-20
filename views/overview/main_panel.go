@@ -217,8 +217,8 @@ func (p *MainPanel) calculatePanelHeights(terminalHeight int, isPrometheus bool)
 		if isPrometheus {
 			summaryHeight = 13
 		}
-		// Available = terminal - header(3) - tabbar(1) - footer(3) - summary
-		available := terminalHeight - 7 - summaryHeight
+		// Available = terminal - header(3) - tabframe borders(2) - footer(3) - summary
+		available := terminalHeight - 8 - summaryHeight
 		// Nodes gets 45% of remaining, Pods gets the rest
 		nodeHeight = available * 45 / 100
 		return // Already handled Prometheus bonus above
