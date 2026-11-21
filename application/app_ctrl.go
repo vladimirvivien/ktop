@@ -324,6 +324,11 @@ func (app *Application) restoreActivePageFocus() {
 	}
 	if app.IsInDetailView() {
 		if panel := app.getActiveDetailPanel(); panel != nil {
+			if restorer, ok := panel.(interface{ RestoreFocus() }); ok {
+				app.panel.setHeaderFocused(false)
+				restorer.RestoreFocus()
+				return
+			}
 			if rootProvider, ok := panel.(interface{ GetRootView() tview.Primitive }); ok {
 				app.panel.setHeaderFocused(false)
 				app.Focus(rootProvider.GetRootView())
@@ -1296,7 +1301,7 @@ func (app *Application) updateFooterContext() {
 	case PagePodDetail:
 		ctx = ui.PodDetailContext{FocusedPanel: "events"}
 	case PageWorkloadDetail:
-		focused := "pods"
+		focused := "detail"
 		if detail := app.getActiveDetailPanel(); detail != nil {
 			if fp, ok := detail.(interface{ GetFocusedPanelName() string }); ok {
 				focused = fp.GetFocusedPanelName()

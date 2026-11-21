@@ -135,25 +135,43 @@ func TestWorkloadsPage_RendersTablesSummaryAndDetail(t *testing.T) {
 		t.Fatalf("expected prod workload counts after filter, got:\n%s", filteredText)
 	}
 
-	// Verify DetailPanel renders workload details, owned pods, and events.
+	// Verify DetailPanel renders kind-specific title, reworked Info box, Deployment Detail, owned pods, and events.
 	detail := NewDetailPanel()
 	detail.SetFocused(true)
 	detail.InitFocus()
+	var yamlOpened bool
+	detail.SetOnViewYAML(func(d *model.WorkloadDetailData) {
+		if d != nil && d.Name == "web" {
+			yamlOpened = true
+		}
+	})
 	detail.DrawBody(&model.WorkloadDetailData{
-		Kind:              model.WorkloadKindDeployment,
-		Namespace:         "default",
-		Name:              "web",
-		Status:            "Ready",
-		ReadyText:         "3/3 ready",
-		Strategy:          "RollingUpdate",
-		Age:               "2d",
-		Efficiency:        snap.Deployments[0].Efficiency,
-		Selector:          map[string]string{"app": "web"},
-		Labels:            map[string]string{"tier": "frontend"},
-		TotalRequestedCPU: resource.NewMilliQuantity(500, resource.DecimalSI),
-		TotalRequestedMem: resource.NewQuantity(256*1024*1024, resource.DecimalSI),
+		Kind:               model.WorkloadKindDeployment,
+		Namespace:          "default",
+		Name:               "web",
+		Status:             "Ready",
+		Desired:            3,
+		Ready:              3,
+		Updated:            3,
+		Available:          3,
+		Strategy:           "RollingUpdate",
+		StrategyDetail:     "RollingUpdate (25% surge / 25% unavail)",
+		Revision:           "4",
+		ActiveReplicaSet:   "web-7d9f8c",
+		Images:             []string{"nginx:1.27"},
+		Age:                "2d",
+		Generation:         4,
+		ObservedGeneration: 4,
+		Efficiency:         snap.Deployments[0].Efficiency,
+		Selector:           map[string]string{"app": "web"},
+		Labels:             map[string]string{"tier": "frontend"},
+		TotalUsageCPU:      resource.NewMilliQuantity(250, resource.DecimalSI),
+		TotalRequestedCPU:  resource.NewMilliQuantity(500, resource.DecimalSI),
+		TotalLimitCPU:      resource.NewMilliQuantity(1000, resource.DecimalSI),
+		TotalUsageMem:      resource.NewQuantity(128*1024*1024, resource.BinarySI),
+		TotalRequestedMem:  resource.NewQuantity(256*1024*1024, resource.BinarySI),
 		OwnedPods: []*model.PodModel{
-			{Namespace: "default", Name: "web-pod-1", Status: "Running", ReadyContainers: 1, TotalContainers: 1, TimeSince: "2d"},
+			{Namespace: "default", Name: "web-pod-1", Node: "worker-1", Status: "Running", ReadyContainers: 1, TotalContainers: 1, TimeSince: "2d"},
 		},
 		Events: []corev1.Event{
 			{Reason: "ScalingReplicaSet", Type: "Normal", Message: "Scaled up replica set web-1 to 3", LastTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute))},
@@ -161,12 +179,36 @@ func TestWorkloadsPage_RendersTablesSummaryAndDetail(t *testing.T) {
 	})
 	ts.Draw(detail.GetRootView())
 	detailText := ts.Text()
-	for _, want := range []string{"web-pod-1", "ScalingReplicaSet", "RollingUpdate", "72%"} {
+	for _, want := range []string{
+		"Deployments > web",
+		"Deployment Detail",
+		"Desired: 3",
+		"Ready: 3",
+		"Updated: 3",
+		"Available: 3",
+		"RollingUpdate (25% surge / 25% unavail)",
+		"#4 (web-7d9f8c)",
+		"nginx:1.27",
+		"250m used / 500m req / 1000m lim",
+		"web-pod-1",
+		"worker-1",
+		"ScalingReplicaSet",
+	} {
 		if !strings.Contains(detailText, want) {
-			t.Fatalf("expected %q in Workload Detail view, got:\n%s", want, detailText)
+			t.Fatalf("expected %q in Deployment Detail view, got:\n%s", want, detailText)
 		}
 	}
-	_ = tcell.ColorDefault
+	if strings.Contains(detailText, "Workload Detail") || strings.Contains(detailText, "Workloads >") {
+		t.Fatalf("did not expect generic Workload Detail heading, got:\n%s", detailText)
+	}
+
+	// Verify Enter while Deployment Detail is active triggers YAML viewer callback.
+	if handler := detail.leftDetailTable.GetInputCapture(); handler != nil {
+		handler(tcell.NewEventKey(tcell.KeyEnter, 0, tcell.ModNone))
+	}
+	if !yamlOpened {
+		t.Fatal("expected Enter on active Deployment Detail to invoke YAML modal callback")
+	}
 }
 
 func TestWorkloadsPage_ColorConsistencyWithOverview(t *testing.T) {

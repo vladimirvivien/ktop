@@ -152,6 +152,10 @@ func renderThemeViews(t *testing.T, snap *snapshot.Snapshot) []struct {
 	})
 
 	help := ui.NewHelpModal(ui.HelpModalConfig{CurrentPage: "Overview"}).GetRootView()
+	yamlModal := ui.NewYAMLModal(ui.YAMLModalConfig{
+		Title:   "Deployment YAML: default/api",
+		Content: "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: api\n",
+	}).GetRootView()
 	colModal := ui.NewColumnSelectorModal(ui.ColumnSelectorConfig{
 		Title:          "Nodes",
 		AllColumns:     []string{"NAME", "STATUS", "CPU"},
@@ -187,6 +191,7 @@ func renderThemeViews(t *testing.T, snap *snapshot.Snapshot) []struct {
 		{"NodeDetailPanel", nd.GetRootView()},
 		{"PodDetailPanel", pd.GetRootView()},
 		{"HelpModal", help},
+		{"YAMLModal", yamlModal},
 		{"ColumnSelectorModal", colModal},
 		{"ErrorToast", toast},
 	}

@@ -2,7 +2,6 @@ package container
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
@@ -112,100 +111,11 @@ func (p *SpecPanel) renderSpec() {
 	}
 
 	// Add syntax highlighting
-	highlighted := highlightYAML(string(yamlBytes))
+	highlighted := ui.HighlightYAML(string(yamlBytes))
 	p.specView.SetText(highlighted)
 
 	// Scroll to top
 	p.specView.ScrollToBeginning()
-}
-
-// highlightYAML adds tview color codes to YAML content
-func highlightYAML(content string) string {
-	var result strings.Builder
-	mono := ui.IsMonochrome()
-	var mutedOpen, accentOpen, valOpen, closeTag string
-	if !mono {
-		pal := ui.ActivePalette()
-		mutedOpen = "[" + ui.TagFg(pal.StatusMuted) + "]"
-		accentOpen = "[" + ui.TagFg(pal.Accent) + "]"
-		valOpen = "[" + ui.TagFg(pal.DataSecondary) + "]"
-		closeTag = "[-]"
-	}
-
-	for _, line := range strings.Split(content, "\n") {
-		trimmed := strings.TrimSpace(line)
-
-		// Skip empty lines
-		if trimmed == "" {
-			result.WriteString("\n")
-			continue
-		}
-
-		// Comments in muted color
-		if strings.HasPrefix(trimmed, "#") {
-			result.WriteString(mutedOpen)
-			result.WriteString(line)
-			result.WriteString(closeTag)
-			result.WriteString("\n")
-			continue
-		}
-
-		// List items (lines starting with -)
-		if strings.HasPrefix(trimmed, "-") {
-			// Find leading whitespace
-			indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
-			rest := strings.TrimPrefix(trimmed, "- ")
-
-			// Check if rest has a key: value
-			if idx := strings.Index(rest, ":"); idx > 0 {
-				key := rest[:idx]
-				value := rest[idx:]
-				result.WriteString(indent)
-				result.WriteString(valOpen)
-				result.WriteString("- ")
-				result.WriteString(accentOpen)
-				result.WriteString(key)
-				result.WriteString(valOpen)
-				result.WriteString(value)
-				result.WriteString(closeTag)
-				result.WriteString("\n")
-			} else {
-				result.WriteString(indent)
-				result.WriteString(valOpen)
-				result.WriteString("- ")
-				result.WriteString(rest)
-				result.WriteString(closeTag)
-				result.WriteString("\n")
-			}
-			continue
-		}
-
-		// Key: value pairs
-		if idx := strings.Index(line, ":"); idx > 0 {
-			// Preserve leading whitespace
-			indent := line[:len(line)-len(strings.TrimLeft(line, " "))]
-			keyValue := strings.TrimLeft(line, " ")
-			colonIdx := strings.Index(keyValue, ":")
-
-			key := keyValue[:colonIdx]
-			value := keyValue[colonIdx:]
-
-			result.WriteString(indent)
-			result.WriteString(accentOpen)
-			result.WriteString(key)
-			result.WriteString(valOpen)
-			result.WriteString(value)
-			result.WriteString(closeTag)
-			result.WriteString("\n")
-			continue
-		}
-
-		// Default: just output the line
-		result.WriteString(line)
-		result.WriteString("\n")
-	}
-
-	return result.String()
 }
 
 func (p *SpecPanel) setupInputCapture() {

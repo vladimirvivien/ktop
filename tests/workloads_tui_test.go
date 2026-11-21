@@ -181,14 +181,32 @@ func TestWorkloadsTUI_EndToEndNavigationAndDrillDown(t *testing.T) {
 	sendAppKey(ts, app, tcell.KeyEnter, 0, tcell.ModNone)
 
 	detailScreen := ts.Text()
-	for _, want := range []string{"Workloads › deploy/default/api", "api-abc-1", "ScalingReplicaSet"} {
+	for _, want := range []string{"Workloads › deploy/default/api", "Deployments > api", "Deployment Detail", "Desired: 2", "Ready: 2", "api-abc-1", "ScalingReplicaSet"} {
 		if !strings.Contains(detailScreen, want) {
-			t.Fatalf("expected %q on Workload Detail screen, got:\n%s", want, detailScreen)
+			t.Fatalf("expected %q on Deployment Detail screen, got:\n%s", want, detailScreen)
 		}
 	}
 
-	// Press Enter on owned pod "api-abc-1" -> verify breadcrumb + Pod Detail opens.
-	// Note: seed overview's cachedPodModels first by refreshing overview snapshot path or checking breadcrumb/stack.
+	// Deployment Detail is active on entry; pressing Enter opens the full YAML modal.
+	sendAppKey(ts, app, tcell.KeyEnter, 0, tcell.ModNone)
+	if !app.HasActiveModalPage() {
+		t.Fatal("expected Enter on active Deployment Detail to open YAML modal")
+	}
+	yamlScreen := ts.Text()
+	for _, want := range []string{"Deployment YAML: default/api", "apiVersion: apps/v1", "kind: Deployment"} {
+		if !strings.Contains(yamlScreen, want) {
+			t.Fatalf("expected %q in Deployment YAML modal, got:\n%s", want, yamlScreen)
+		}
+	}
+
+	// ESC dismisses the YAML modal and returns focus to Deployment Detail.
+	sendAppKey(ts, app, tcell.KeyEsc, 0, tcell.ModNone)
+	if app.HasActiveModalPage() {
+		t.Fatal("expected ESC to dismiss YAML modal")
+	}
+
+	// Tab moves focus from Deployment Detail -> Owned Pods; Enter opens Pod Detail.
+	sendAppKey(ts, app, tcell.KeyTab, 0, tcell.ModNone)
 	sendAppKey(ts, app, tcell.KeyEnter, 0, tcell.ModNone)
 	if got := application.FormatBreadcrumb("Workloads", app.GetNavigationStack().Breadcrumb()); got != "Workloads › deploy/default/api › pod/default/api-abc-1" {
 		t.Fatalf("unexpected breadcrumb after pod drill-down: %q", got)

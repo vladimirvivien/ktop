@@ -198,8 +198,14 @@ func TestWorkloadsController_SnapshotAndDetail(t *testing.T) {
 	if len(detail.Events) != 1 || detail.Events[0].Reason != "ScalingReplicaSet" {
 		t.Fatalf("expected Deployment event ScalingReplicaSet, got %+v", detail.Events)
 	}
-	if len(detail.MetricsHistory) != 1 {
-		t.Fatalf("expected 1 aggregated history sample, got %d", len(detail.MetricsHistory))
+	if detail.Desired != 2 || detail.Ready != 2 || detail.Updated != 2 || detail.Available != 2 {
+		t.Fatalf("unexpected Deployment replica breakdown: %+v", detail)
+	}
+	if detail.ActiveReplicaSet != "api-abc" {
+		t.Fatalf("expected ActiveReplicaSet api-abc, got %q", detail.ActiveReplicaSet)
+	}
+	if detail.RawObject == nil {
+		t.Fatal("expected RawObject populated for YAML inspection")
 	}
 }
 

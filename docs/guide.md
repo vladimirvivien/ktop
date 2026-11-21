@@ -182,7 +182,7 @@ Groups application controllers into a two-column layout of four sortable, filter
 
 The `CPU` and `MEM` columns sum live CPU and memory usage across each workload's active owned pods.
 
-Press `Tab` to move across Workload sections and `Enter` on any row to open **Workload Detail**, which displays aggregate CPU/memory trends, request-vs-usage efficiency, selector/label metadata, rollout conditions, scoped events, and owned pods (`Enter` drills directly into Pod Detail).
+Press `Tab` to move across Workload sections and `Enter` on any row to open its detail view (`Deployment Detail`, `StatefulSet Detail`, `DaemonSet Detail`, or `Job Detail`), displaying replica/rollout state, container images, aggregated CPU/memory usage vs. requests/limits, rollout conditions, scoped events, and owned pods. Press `Enter` while the detail panel is active to inspect the full object YAML in a scrollable modal (`y` copies YAML to clipboard), or `Tab` to **Owned Pods** and press `Enter` to drill into Pod Detail.
 
 ### Node Detail
 

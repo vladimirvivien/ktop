@@ -5,29 +5,25 @@ import (
 	"maps"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/model"
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // PodSelectedCallback is called when an owned pod row is selected (Enter pressed).
 type PodSelectedCallback func(namespace, podName string)
 
-// DetailPanel displays detailed status, efficiency, events, and owned pods for a workload.
+// DetailPanel displays detailed rollout/spec metadata, owned pods, and events for a workload.
 type DetailPanel struct {
 	root        *tview.Flex
 	data        *model.WorkloadDetailData
 	laidout     bool
 	layoutBuilt bool
 
-	currentWorkloadKey   string
-	lastHeightCategory   int
-	lastSparklineHeight  int
-	lastInfoHeaderHeight int
+	lastHeightCategory int
 
 	focusedChildIdx int
 	focusableItems  []tview.Primitive
@@ -36,7 +32,6 @@ type DetailPanel struct {
 	setAppFocus     func(p tview.Primitive)
 
 	infoHeaderPanel     *tview.Flex
-	sparklinePanel      *tview.Flex
 	workloadDetailPanel *tview.Flex
 	podsPanel           *tview.Flex
 	eventsPanel         *tview.Flex
@@ -52,16 +47,15 @@ type DetailPanel struct {
 	filteredPods  []*model.PodModel
 	eventsTable   *tview.Table
 
-	sparklineRow *ui.SparklineRow
-
 	onPodSelected         PodSelectedCallback
 	onBack                func()
 	onFooterContextChange func(focusedPanel string)
 	onYank                func(target string)
+	onViewYAML            func(detail *model.WorkloadDetailData)
 	getTerminalHeight     func() int
 }
 
-// NewDetailPanel creates a Workload Detail panel.
+// NewDetailPanel creates a workload detail subpage panel.
 func NewDetailPanel() *DetailPanel {
 	p := &DetailPanel{}
 	p.Layout(nil)
@@ -93,6 +87,11 @@ func (p *DetailPanel) SetOnYank(cb func(target string)) {
 	p.onYank = cb
 }
 
+// SetOnViewYAML registers the callback invoked when Enter is pressed while the Detail panel is active.
+func (p *DetailPanel) SetOnViewYAML(cb func(detail *model.WorkloadDetailData)) {
+	p.onViewYAML = cb
+}
+
 // SetGetTerminalHeightFunc registers a provider for current terminal height.
 func (p *DetailPanel) SetGetTerminalHeightFunc(fn func() int) {
 	p.getTerminalHeight = fn
@@ -101,9 +100,9 @@ func (p *DetailPanel) SetGetTerminalHeightFunc(fn func() int) {
 // GetTitle returns the panel title.
 func (p *DetailPanel) GetTitle() string {
 	if p.data != nil {
-		return fmt.Sprintf("%s: %s/%s", p.data.Kind, p.data.Namespace, p.data.Name)
+		return fmt.Sprintf("%s > %s", p.data.Kind.PluralTitle(), p.data.Name)
 	}
-	return "Workload Detail"
+	return "Deployment Detail"
 }
 
 // Layout initializes sub-components for the workload detail page.
@@ -112,20 +111,15 @@ func (p *DetailPanel) Layout(_ any) {
 		return
 	}
 
-	p.sparklineRow = ui.NewSparklineRow(false)
-
 	p.infoHeaderPanel = tview.NewFlex().SetDirection(tview.FlexColumn)
 	p.infoHeaderPanel.SetBorder(true)
 	p.infoHeaderPanel.SetTitle(" Info ")
 	p.infoHeaderPanel.SetTitleAlign(tview.AlignLeft)
 	ui.SetFlexFocused(p.infoHeaderPanel, false)
 
-	p.sparklinePanel = tview.NewFlex().SetDirection(tview.FlexColumn)
-	p.sparklinePanel.AddItem(p.sparklineRow, 0, 1, false)
-
 	p.workloadDetailPanel = tview.NewFlex().SetDirection(tview.FlexColumn)
 	p.workloadDetailPanel.SetBorder(true)
-	p.workloadDetailPanel.SetTitle(" Workload Detail ")
+	p.workloadDetailPanel.SetTitle(" Deployment Detail ")
 	p.workloadDetailPanel.SetTitleAlign(tview.AlignLeft)
 	ui.SetFlexFocused(p.workloadDetailPanel, false)
 
@@ -134,6 +128,15 @@ func (p *DetailPanel) Layout(_ any) {
 	p.leftDetailTable.SetBorders(false)
 	p.leftDetailTable.SetSelectable(false, false)
 	ui.StyleTable(p.leftDetailTable)
+	p.leftDetailTable.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		if event.Key() == tcell.KeyEnter {
+			if p.data != nil && p.onViewYAML != nil {
+				p.onViewYAML(p.data)
+			}
+			return nil
+		}
+		return p.handleNavKey(event)
+	})
 
 	p.middleDetailTable = tview.NewTable()
 	p.middleDetailTable.SetBorder(false)
@@ -156,8 +159,8 @@ func (p *DetailPanel) Layout(_ any) {
 		AddItem(p.annotationsTextView, 0, 1, false)
 
 	p.workloadDetailPanel.
-		AddItem(p.leftDetailTable, 0, 1, false).
-		AddItem(p.middleDetailTable, 0, 1, false).
+		AddItem(p.leftDetailTable, 0, 2, true).
+		AddItem(p.middleDetailTable, 0, 2, false).
 		AddItem(rightCol, 0, 1, false)
 
 	// Owned Pods panel
@@ -175,14 +178,14 @@ func (p *DetailPanel) Layout(_ any) {
 	ui.StyleTable(p.podsTable)
 
 	podColKeys := map[string]rune{
-		"NAMESPACE": 'n',
-		"POD":       'p',
-		"STATUS":    's',
-		"READY":     'd',
-		"RST":       'r',
-		"CPU":       'c',
-		"MEM":       'm',
-		"AGE":       'a',
+		"POD":    'p',
+		"NODE":   'o',
+		"STATUS": 's',
+		"READY":  'd',
+		"RST":    'r',
+		"CPU":    'c',
+		"MEM":    'm',
+		"AGE":    'a',
 	}
 	p.podsTableCtrl = ui.NewTableController(p.podsTable, ui.TableControllerConfig{
 		DefaultSortColumn: "POD",
@@ -213,7 +216,12 @@ func (p *DetailPanel) Layout(_ any) {
 		},
 	})
 	p.podsTable.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		return p.podsTableCtrl.HandleInput(event)
+		if p.podsTableCtrl != nil {
+			if rem := p.podsTableCtrl.HandleInput(event); rem == nil {
+				return nil
+			}
+		}
+		return p.handleNavKey(event)
 	})
 	p.podsPanel.AddItem(p.podsTable, 0, 1, true)
 
@@ -230,10 +238,13 @@ func (p *DetailPanel) Layout(_ any) {
 	p.eventsTable.SetBorder(false)
 	p.eventsTable.SetBorders(false)
 	ui.StyleTable(p.eventsTable)
+	p.eventsTable.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		return p.handleNavKey(event)
+	})
 	p.eventsPanel.AddItem(p.eventsTable, 0, 1, true)
 
 	p.bottomRow = tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(p.podsPanel, 0, 1, true).
+		AddItem(p.podsPanel, 0, 1, false).
 		AddItem(p.eventsPanel, 0, 1, false)
 
 	p.root = tview.NewFlex().SetDirection(tview.FlexRow)
@@ -241,35 +252,38 @@ func (p *DetailPanel) Layout(_ any) {
 	p.root.SetTitleAlign(tview.AlignCenter)
 
 	p.root.AddItem(p.infoHeaderPanel, 3, 0, false)
-	p.root.AddItem(p.sparklinePanel, 4, 0, false)
-	p.root.AddItem(p.workloadDetailPanel, 12, 0, false)
-	p.root.AddItem(p.bottomRow, 0, 1, true)
+	p.root.AddItem(p.workloadDetailPanel, 13, 0, true)
+	p.root.AddItem(p.bottomRow, 0, 1, false)
 
-	p.focusableItems = []tview.Primitive{p.podsTable, p.eventsTable}
-	p.focusablePanels = []*tview.Flex{p.podsPanel, p.eventsPanel}
-	p.panelNames = []string{"pods", "events"}
+	p.focusableItems = []tview.Primitive{p.leftDetailTable, p.podsTable, p.eventsTable}
+	p.focusablePanels = []*tview.Flex{p.workloadDetailPanel, p.podsPanel, p.eventsPanel}
+	p.panelNames = []string{"detail", "pods", "events"}
 	p.focusedChildIdx = 0
 
 	p.root.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		if p.podsTableCtrl != nil && p.podsTableCtrl.IsFilterEditing() {
 			return event
 		}
-		switch event.Key() {
-		case tcell.KeyTab:
-			p.cycleFocus(false)
-			return nil
-		case tcell.KeyBacktab:
-			p.cycleFocus(true)
-			return nil
-		case tcell.KeyEscape:
-			if p.HandleEscape() {
-				return nil
-			}
-		}
-		return event
+		return p.handleNavKey(event)
 	})
 
 	p.laidout = true
+}
+
+func (p *DetailPanel) handleNavKey(event *tcell.EventKey) *tcell.EventKey {
+	switch event.Key() {
+	case tcell.KeyTab:
+		p.cycleFocus(false)
+		return nil
+	case tcell.KeyBacktab:
+		p.cycleFocus(true)
+		return nil
+	case tcell.KeyEscape:
+		if p.HandleEscape() {
+			return nil
+		}
+	}
+	return event
 }
 
 func (p *DetailPanel) DrawHeader(_ any) {}
@@ -302,31 +316,27 @@ func (p *DetailPanel) DrawBody(data any) {
 	}
 	p.checkAndRebuildLayout()
 
-	newKey := fmt.Sprintf("%s/%s/%s", detail.Kind, detail.Namespace, detail.Name)
-	if newKey != p.currentWorkloadKey {
-		p.sparklineRow.Reset()
-		p.currentWorkloadKey = newKey
-		for _, sample := range detail.MetricsHistory {
-			p.sparklineRow.UpdateCPU(sample.CPURatio, "")
-			p.sparklineRow.UpdateMEM(sample.MemRatio, "")
-		}
-	}
+	p.root.SetTitle(fmt.Sprintf(" %s %s > [::b]%s[::] ", kindIcon(detail.Kind), detail.Kind.PluralTitle(), detail.Name))
+	p.workloadDetailPanel.SetTitle(fmt.Sprintf(" %s Detail ", detail.Kind))
 
-	p.root.SetTitle(fmt.Sprintf(" %s Workloads > [::b]%s: %s/%s[::] ", ui.Icons.Rocket, detail.Kind, detail.Namespace, detail.Name))
-
-	if p.effectiveHeight() > 31 {
-		p.drawInfoHeader()
-	}
-	p.drawSparklines()
+	p.drawInfoHeader()
 	p.drawMetadataSection()
 	p.drawPodsTable()
 	p.drawEventsTable()
 }
 
-// InitFocus activates focus on the Owned Pods table when first opened.
+// InitFocus activates focus on the <Kind> Detail panel when first opened.
 func (p *DetailPanel) InitFocus() {
 	p.focusedChildIdx = 0
+	p.RestoreFocus()
+}
+
+// RestoreFocus re-applies visual focus and tview focus to the currently active sub-panel.
+func (p *DetailPanel) RestoreFocus() {
 	p.updateFocusVisuals()
+	if p.onFooterContextChange != nil {
+		p.onFooterContextChange(p.GetFocusedPanelName())
+	}
 }
 
 // SetFocused implements ui.FocusablePanel.
@@ -337,12 +347,12 @@ func (p *DetailPanel) SetFocused(focused bool) {
 	}
 }
 
-// GetFocusedPanelName returns "pods" or "events".
+// GetFocusedPanelName returns "detail", "pods", or "events".
 func (p *DetailPanel) GetFocusedPanelName() string {
 	if p.focusedChildIdx >= 0 && p.focusedChildIdx < len(p.panelNames) {
 		return p.panelNames[p.focusedChildIdx]
 	}
-	return "pods"
+	return "detail"
 }
 
 // IsFilterEditing reports whether the owned-pods table filter bar is editing.
@@ -372,18 +382,15 @@ func (p *DetailPanel) cycleFocus(reverse bool) {
 		return
 	}
 	p.focusedChildIdx = ui.CycleFocus(p.focusedChildIdx, len(p.focusableItems), reverse)
-	p.updateFocusVisuals()
-	if p.onFooterContextChange != nil {
-		p.onFooterContextChange(p.GetFocusedPanelName())
-	}
+	p.RestoreFocus()
 }
 
 func (p *DetailPanel) updateFocusVisuals() {
 	for i, panel := range p.focusablePanels {
 		ui.SetFlexFocused(panel, i == p.focusedChildIdx)
 	}
-	p.podsTable.SetSelectable(p.focusedChildIdx == 0, false)
-	if p.focusedChildIdx == 0 {
+	p.podsTable.SetSelectable(p.focusedChildIdx == 1, false)
+	if p.focusedChildIdx == 1 {
 		p.podsTable.SetSelectedStyle(ui.SelectedRowStyle())
 		if p.podsTable.GetRowCount() > 1 {
 			r, c := p.podsTable.GetSelection()
@@ -392,8 +399,8 @@ func (p *DetailPanel) updateFocusVisuals() {
 			}
 		}
 	}
-	p.eventsTable.SetSelectable(p.focusedChildIdx == 1, false)
-	if p.focusedChildIdx == 1 {
+	p.eventsTable.SetSelectable(p.focusedChildIdx == 2, false)
+	if p.focusedChildIdx == 2 {
 		p.eventsTable.SetSelectedStyle(ui.SelectedRowStyle())
 		if p.eventsTable.GetRowCount() > 1 {
 			r, c := p.eventsTable.GetSelection()
@@ -416,67 +423,130 @@ func (p *DetailPanel) drawInfoHeader() {
 
 	pal := ui.ActivePalette()
 	mono := ui.IsMonochrome()
-	keyOpen, valOpen, resetTag := "", "", ""
+	lblOpen, valOpen, okOpen, warnOpen, errOpen, mutedOpen, resetTag := "", "", "", "", "", "", ""
 	if !mono {
-		keyOpen = "[" + ui.TagFg(pal.StatusMuted) + "]"
+		lblOpen = "[" + ui.TagFg(pal.DataPrimary) + "]"
 		valOpen = "[" + ui.TagFg(pal.DataSecondary) + "]"
+		okOpen = "[" + ui.TagFg(pal.StatusOK) + "]"
+		warnOpen = "[" + ui.TagFg(pal.StatusWarning) + "]"
+		errOpen = "[" + ui.TagFg(pal.StatusError) + "]"
+		mutedOpen = "[" + ui.TagFg(pal.StatusMuted) + "]"
 		resetTag = "[-]"
 	}
 
-	effSummary := ui.FormatEfficiencyCell(p.data.Efficiency.EffPct, p.data.Efficiency.HasEfficiency)
-	if p.data.Efficiency.HasCPUEfficiency || p.data.Efficiency.HasMemEfficiency {
-		effSummary = fmt.Sprintf("%s %s(CPU %.0f%% / MEM %.0f%%)%s",
-			effSummary, keyOpen, p.data.Efficiency.CPUEffPct, p.data.Efficiency.MemEffPct, resetTag)
+	statusVal := p.data.Status
+	if mono {
+		if ui.GetStatusSeverity(p.data.Status, "workload") == ui.StatusSeverityError {
+			statusVal = ui.ErrorMarkup(p.data.Status)
+		}
+	} else {
+		statusColor := ui.GetStatusColor(p.data.Status, "workload")
+		statusVal = fmt.Sprintf("[%s]%s%s", statusColor, p.data.Status, resetTag)
 	}
 
-	items := []string{
-		fmt.Sprintf("%sStatus:%s %s%s", keyOpen, valOpen, p.data.Status, resetTag),
-		fmt.Sprintf("%sReplicas:%s %s%s", keyOpen, valOpen, p.data.ReadyText, resetTag),
-		fmt.Sprintf("%sAge:%s %s%s", keyOpen, valOpen, p.data.Age, resetTag),
-		fmt.Sprintf("%sEFF:%s %s", keyOpen, resetTag, effSummary),
+	field := func(label, val string) string {
+		return fmt.Sprintf("%s%s:%s %s", lblOpen, label, resetTag, val)
 	}
-	if p.data.Strategy != "" {
-		items = append(items, fmt.Sprintf("%sStrategy:%s %s%s", keyOpen, valOpen, p.data.Strategy, resetTag))
-	} else if p.data.Owner != "" {
-		items = append(items, fmt.Sprintf("%sOwner:%s %s%s", keyOpen, valOpen, p.data.Owner, resetTag))
+	numVal := func(n int32, colorOpen string) string {
+		if mono {
+			return fmt.Sprintf("%d", n)
+		}
+		return fmt.Sprintf("%s%d%s", colorOpen, n, resetTag)
+	}
+
+	readyColor := okOpen
+	if p.data.Desired == 0 {
+		readyColor = mutedOpen
+	} else if p.data.Ready < p.data.Desired {
+		readyColor = warnOpen
+	}
+
+	items := []string{field("Status", statusVal)}
+
+	switch p.data.Kind {
+	case model.WorkloadKindDeployment:
+		items = append(items,
+			field("Desired", numVal(p.data.Desired, valOpen)),
+			field("Ready", numVal(p.data.Ready, readyColor)),
+			field("Updated", numVal(p.data.Updated, valOpen)),
+			field("Available", numVal(p.data.Available, valOpen)),
+		)
+		if p.data.Unavailable > 0 {
+			unavailText := numVal(p.data.Unavailable, errOpen)
+			if mono {
+				unavailText = ui.ErrorMarkup(fmt.Sprintf("%d", p.data.Unavailable))
+			}
+			items = append(items, field("Unavailable", unavailText))
+		}
+		if p.data.Paused {
+			if mono {
+				items = append(items, "[::b]PAUSED[::-]")
+			} else {
+				items = append(items, warnOpen+"PAUSED"+resetTag)
+			}
+		}
+	case model.WorkloadKindStatefulSet:
+		items = append(items,
+			field("Desired", numVal(p.data.Desired, valOpen)),
+			field("Ready", numVal(p.data.Ready, readyColor)),
+			field("Current", numVal(p.data.Current, valOpen)),
+			field("Updated", numVal(p.data.Updated, valOpen)),
+		)
+	case model.WorkloadKindDaemonSet:
+		items = append(items,
+			field("Desired", numVal(p.data.Desired, valOpen)),
+			field("Ready", numVal(p.data.Ready, readyColor)),
+			field("Current", numVal(p.data.Current, valOpen)),
+			field("Updated", numVal(p.data.Updated, valOpen)),
+		)
+		if p.data.Misscheduled > 0 {
+			items = append(items, field("Misscheduled", numVal(p.data.Misscheduled, warnOpen)))
+		}
+	case model.WorkloadKindJob:
+		comp := p.data.CompletionsText
+		if comp == "" {
+			comp = p.data.ReadyText
+		}
+		items = append(items,
+			field("Completions", valOpen+comp+resetTag),
+			field("Active", numVal(p.data.Active, valOpen)),
+			field("Succeeded", numVal(p.data.Succeeded, okOpen)),
+		)
+		failedColor := mutedOpen
+		if p.data.Failed > 0 {
+			failedColor = errOpen
+		}
+		items = append(items, field("Failed", numVal(p.data.Failed, failedColor)))
+		if p.data.Paused {
+			items = append(items, warnOpen+"SUSPENDED"+resetTag)
+		}
+	default:
+		if p.data.ReadyText != "" {
+			items = append(items, field("Replicas", valOpen+p.data.ReadyText+resetTag))
+		}
+	}
+
+	if p.data.Age != "" {
+		items = append(items, field("Age", valOpen+p.data.Age+resetTag))
+	}
+
+	sep := " │ "
+	if !mono {
+		sep = " " + lblOpen + "│" + resetTag + " "
 	}
 
 	tv := tview.NewTextView()
 	tv.SetDynamicColors(true)
-	tv.SetText("  " + strings.Join(items, "  │  "))
+	tv.SetWrap(false)
+	if mono {
+		tv.SetBackgroundColor(tcell.ColorDefault)
+		tv.SetTextColor(tcell.ColorDefault)
+	} else {
+		tv.SetBackgroundColor(pal.CanvasBg)
+		tv.SetTextColor(pal.DataSecondary)
+	}
+	tv.SetText(" " + strings.Join(items, sep))
 	p.infoHeaderPanel.AddItem(tv, 0, 1, false)
-}
-
-func (p *DetailPanel) drawSparklines() {
-	if p.data == nil {
-		return
-	}
-
-	prometheusMode := p.data.MetricsSourceType == metrics.SourceTypePrometheus
-	p.sparklineRow.SetPrometheusMode(prometheusMode)
-
-	var cpuRatio, memRatio float64
-	reqCPU, reqMem := p.data.TotalRequestedCPU, p.data.TotalRequestedMem
-	useCPU, useMem := p.data.TotalUsageCPU, p.data.TotalUsageMem
-
-	if useCPU != nil && reqCPU != nil && reqCPU.MilliValue() > 0 {
-		cpuRatio = min(float64(useCPU.MilliValue())/float64(reqCPU.MilliValue()), 1.0)
-	}
-	if useMem != nil && reqMem != nil && reqMem.Value() > 0 {
-		memRatio = min(float64(useMem.Value())/float64(reqMem.Value()), 1.0)
-	}
-
-	cpuLabel := fmt.Sprintf(" CPU %s / %s req %s ", ui.FormatCPU(useCPU), ui.FormatCPU(reqCPU), p.sparklineRow.CPUTrend(cpuRatio*100))
-	if useCPU == nil {
-		cpuLabel = fmt.Sprintf(" CPU req %s ", ui.FormatCPU(reqCPU))
-	}
-	memLabel := fmt.Sprintf(" MEM %s / %s req %s ", strings.TrimSpace(ui.FormatMemory(useMem)), strings.TrimSpace(ui.FormatMemory(reqMem)), p.sparklineRow.MEMTrend(memRatio*100))
-	if useMem == nil {
-		memLabel = fmt.Sprintf(" MEM req %s ", strings.TrimSpace(ui.FormatMemory(reqMem)))
-	}
-
-	p.sparklineRow.UpdateCPU(cpuRatio, cpuLabel)
-	p.sparklineRow.UpdateMEM(memRatio, memLabel)
 }
 
 func (p *DetailPanel) drawMetadataSection() {
@@ -496,86 +566,226 @@ func (p *DetailPanel) drawMetadataSection() {
 	sectionColor := pal.Accent
 	mutedColor := pal.StatusMuted
 	okColor := pal.StatusOK
+	warnColor := pal.StatusWarning
 	errColor := pal.StatusError
+	valColor := pal.DataSecondary
 	sectionOpen := "[::b]"
-	mutedOpen, closeTag := "", ""
+	keyOpen, closeTag := "", ""
 	if mono {
 		sectionColor = tcell.ColorDefault
 		mutedColor = tcell.ColorDefault
 		okColor = tcell.ColorDefault
+		warnColor = tcell.ColorDefault
 		errColor = tcell.ColorDefault
+		valColor = tcell.ColorDefault
+		p.labelsTextView.SetBackgroundColor(tcell.ColorDefault)
+		p.labelsTextView.SetTextColor(tcell.ColorDefault)
+		p.annotationsTextView.SetBackgroundColor(tcell.ColorDefault)
+		p.annotationsTextView.SetTextColor(tcell.ColorDefault)
 	} else {
 		sectionOpen = "[" + ui.TagFg(pal.Accent) + "::b]"
-		mutedOpen = "[" + ui.TagFg(pal.StatusMuted) + "]"
+		keyOpen = "[" + ui.TagFg(pal.DataPrimary) + "]"
 		closeTag = "[-]"
+		p.labelsTextView.SetBackgroundColor(pal.CanvasBg)
+		p.labelsTextView.SetTextColor(pal.DataSecondary)
+		p.annotationsTextView.SetBackgroundColor(pal.CanvasBg)
+		p.annotationsTextView.SetTextColor(pal.DataSecondary)
 	}
 
-	// Column 1: Workload Metadata & Selector
-	row := 0
-	p.leftDetailTable.SetCell(row, 0, ui.NewDataCell("[::b]Overview[::-]").SetTextColor(sectionColor).SetSelectable(false))
-	row++
-	ui.AddDetailRow(p.leftDetailTable, row, "Namespace", p.data.Namespace)
-	row++
-	ui.AddDetailRow(p.leftDetailTable, row, "Kind", string(p.data.Kind))
-	row++
-	if p.data.ServiceName != "" {
-		ui.AddDetailRow(p.leftDetailTable, row, "Service", p.data.ServiceName)
-		row++
-	}
-	if p.data.Generation > 0 {
-		ui.AddDetailRow(p.leftDetailTable, row, "Generation", fmt.Sprintf("%d (obs %d)", p.data.Generation, p.data.ObservedGeneration))
-		row++
-	}
-	if len(p.data.Selector) > 0 {
-		pairs := make([]string, 0, len(p.data.Selector))
-		for _, k := range slices.Sorted(maps.Keys(p.data.Selector)) {
-			pairs = append(pairs, k+"="+p.data.Selector[k])
+	addRow := func(tbl *tview.Table, row int, label, value string, color tcell.Color) {
+		lblColor := pal.DataPrimary
+		if mono {
+			lblColor = tcell.ColorDefault
 		}
-		ui.AddDetailRow(p.leftDetailTable, row, "Selector", ui.Truncate(strings.Join(pairs, ","), 36))
+		tbl.SetCell(row, 0, ui.NewDataCell(fmt.Sprintf("%-12s", label)).SetTextColor(lblColor).SetSelectable(false))
+		tbl.SetCell(row, 1, ui.NewDataCell(value).SetTextColor(color).SetSelectable(false))
 	}
 
-	// Column 2: Conditions
-	row = 0
-	p.middleDetailTable.SetCell(row, 0, ui.NewDataCell("[::b]Conditions[::-]").SetTextColor(sectionColor).SetSelectable(false))
+	// Column 1: Spec, Rollout & Resource Totals
+	row := 0
+	p.leftDetailTable.SetCell(row, 0, ui.NewDataCell("[::b]Spec & Rollout[::-]").SetTextColor(sectionColor).SetSelectable(false))
 	row++
+	addRow(p.leftDetailTable, row, "Namespace", p.data.Namespace, valColor)
+	row++
+
+	strategy := p.data.StrategyDetail
+	if strategy == "" {
+		strategy = p.data.Strategy
+	}
+	if strategy != "" {
+		addRow(p.leftDetailTable, row, "Strategy", ui.Truncate(strategy, 42), valColor)
+		row++
+	} else if p.data.Owner != "" {
+		addRow(p.leftDetailTable, row, "Owner", p.data.Owner, valColor)
+		row++
+	}
+
+	if p.data.Revision != "" || p.data.ActiveReplicaSet != "" {
+		revText := p.data.ActiveReplicaSet
+		if p.data.Revision != "" && p.data.ActiveReplicaSet != "" {
+			revText = fmt.Sprintf("#%s (%s)", p.data.Revision, p.data.ActiveReplicaSet)
+		} else if p.data.Revision != "" {
+			revText = "#" + p.data.Revision
+		}
+		addRow(p.leftDetailTable, row, "Revision", ui.Truncate(revText, 42), valColor)
+		row++
+	}
+	if p.data.ServiceName != "" {
+		addRow(p.leftDetailTable, row, "Service", p.data.ServiceName, valColor)
+		row++
+	}
+	if p.data.PodManagement != "" {
+		addRow(p.leftDetailTable, row, "PodMgmt", p.data.PodManagement, valColor)
+		row++
+	}
+	if len(p.data.VolumeClaims) > 0 {
+		addRow(p.leftDetailTable, row, "Volumes", ui.Truncate(strings.Join(p.data.VolumeClaims, ", "), 42), valColor)
+		row++
+	}
+	if p.data.Parallelism != nil || p.data.BackoffLimit != nil {
+		var parts []string
+		if p.data.Parallelism != nil {
+			parts = append(parts, fmt.Sprintf("parallel=%d", *p.data.Parallelism))
+		}
+		if p.data.BackoffLimit != nil {
+			parts = append(parts, fmt.Sprintf("backoff=%d", *p.data.BackoffLimit))
+		}
+		addRow(p.leftDetailTable, row, "Policy", strings.Join(parts, ", "), valColor)
+		row++
+	}
+	if p.data.JobDuration != "" {
+		addRow(p.leftDetailTable, row, "Duration", p.data.JobDuration, valColor)
+		row++
+	}
+	if len(p.data.Images) > 0 {
+		addRow(p.leftDetailTable, row, "Images", ui.Truncate(strings.Join(p.data.Images, ", "), 42), valColor)
+		row++
+	}
+
+	cpuSummary := formatResourceTriple(p.data.TotalUsageCPU, p.data.TotalRequestedCPU, p.data.TotalLimitCPU, true)
+	addRow(p.leftDetailTable, row, "CPU", cpuSummary, valColor)
+	row++
+	memSummary := formatResourceTriple(p.data.TotalUsageMem, p.data.TotalRequestedMem, p.data.TotalLimitMem, false)
+	addRow(p.leftDetailTable, row, "MEM", memSummary, valColor)
+	row++
+
+	if len(p.data.Selector) > 0 {
+		addRow(p.leftDetailTable, row, "Selector", ui.Truncate(formatSortedPairs(p.data.Selector), 42), valColor)
+		row++
+	}
+	if len(p.data.NodeSelector) > 0 {
+		addRow(p.leftDetailTable, row, "NodeSel", ui.Truncate(formatSortedPairs(p.data.NodeSelector), 42), valColor)
+		row++
+	}
+	if p.data.ServiceAccount != "" {
+		addRow(p.leftDetailTable, row, "SvcAccount", p.data.ServiceAccount, valColor)
+		row++
+	}
+
+	// Column 2: Rollout State & Conditions
+	row = 0
+	p.middleDetailTable.SetCell(row, 0, ui.NewDataCell("[::b]Conditions & Status[::-]").SetTextColor(sectionColor).SetSelectable(false))
+	row++
+	if p.data.Generation > 0 {
+		genColor := valColor
+		if p.data.ObservedGeneration > 0 && p.data.ObservedGeneration != p.data.Generation {
+			genColor = warnColor
+		}
+		addRow(p.middleDetailTable, row, "Generation", fmt.Sprintf("%d (observed %d)", p.data.Generation, p.data.ObservedGeneration), genColor)
+		row++
+	}
+	if p.data.RevHistoryLimit != nil {
+		addRow(p.middleDetailTable, row, "RevHistory", fmt.Sprintf("%d", *p.data.RevHistoryLimit), valColor)
+		row++
+	}
+	if p.data.Efficiency.HasEfficiency {
+		effText := fmt.Sprintf("%.0f%%", p.data.Efficiency.EffPct)
+		if p.data.Efficiency.HasCPUEfficiency && p.data.Efficiency.HasMemEfficiency {
+			effText = fmt.Sprintf("CPU %.0f%% / MEM %.0f%%", p.data.Efficiency.CPUEffPct, p.data.Efficiency.MemEffPct)
+		}
+		addRow(p.middleDetailTable, row, "Req Usage", effText, valColor)
+		row++
+	}
+
 	if len(p.data.Conditions) == 0 {
-		p.middleDetailTable.SetCell(row, 0, ui.NewDataCell("None").SetTextColor(mutedColor).SetSelectable(false))
+		p.middleDetailTable.SetCell(row, 0, ui.NewDataCell("No conditions").SetTextColor(mutedColor).SetSelectable(false))
 	} else {
 		for _, cond := range p.data.Conditions {
-			valColor := okColor
+			condColor := okColor
 			statusText := cond.Status
 			attrs := tcell.AttrNone
 			if !cond.Healthy {
-				valColor = errColor
+				condColor = errColor
 				if mono {
 					statusText = "! " + statusText
 					attrs = tcell.AttrBold | tcell.AttrUnderline
 				}
 			}
-			p.middleDetailTable.SetCell(row, 0, ui.NewDataCell(fmt.Sprintf("%-18s", cond.Type)).SetTextColor(mutedColor).SetSelectable(false))
+			lblColor := pal.DataPrimary
+			if mono {
+				lblColor = tcell.ColorDefault
+			}
+			p.middleDetailTable.SetCell(row, 0, ui.NewDataCell(fmt.Sprintf("%-16s", cond.Type)).SetTextColor(lblColor).SetSelectable(false))
 			detailVal := statusText
 			if cond.Reason != "" {
 				detailVal = fmt.Sprintf("%s (%s)", statusText, cond.Reason)
 			}
-			p.middleDetailTable.SetCell(row, 1, ui.NewDataCell(ui.Truncate(detailVal, 34)).SetTextColor(valColor).SetAttributes(attrs).SetSelectable(false))
+			p.middleDetailTable.SetCell(row, 1, ui.NewDataCell(ui.Truncate(detailVal, 36)).SetTextColor(condColor).SetAttributes(attrs).SetSelectable(false))
 			row++
+			if !cond.Healthy && cond.Message != "" {
+				p.middleDetailTable.SetCell(row, 0, ui.NewDataCell("").SetSelectable(false))
+				p.middleDetailTable.SetCell(row, 1, ui.NewDataCell(ui.Truncate(cond.Message, 40)).SetTextColor(mutedColor).SetSelectable(false))
+				row++
+			}
 		}
 	}
 
 	// Column 3: Labels & Annotations
-	p.labelsTextView.SetText(formatKeyValueSection(sectionOpen+"Labels[::-]", p.data.Labels, mutedOpen, closeTag))
-	p.annotationsTextView.SetText(formatKeyValueSection(sectionOpen+"Annotations[::-]", p.data.Annotations, mutedOpen, closeTag))
+	p.labelsTextView.SetText(formatKeyValueSection(sectionOpen+"Labels[::-]", p.data.Labels, keyOpen, closeTag))
+	p.annotationsTextView.SetText(formatKeyValueSection(sectionOpen+"Annotations[::-]", p.data.Annotations, keyOpen, closeTag))
 }
 
-func formatKeyValueSection(heading string, m map[string]string, mutedOpen, closeTag string) string {
+func formatResourceTriple(used, req, lim *resource.Quantity, isCPU bool) string {
+	fmtQty := func(q *resource.Quantity) string {
+		if isCPU {
+			return ui.FormatCPU(q)
+		}
+		return strings.TrimSpace(ui.FormatMemory(q))
+	}
+
+	var parts []string
+	if used != nil {
+		parts = append(parts, fmtQty(used)+" used")
+	}
+	if req != nil && ((isCPU && req.MilliValue() > 0) || (!isCPU && req.Value() > 0)) {
+		parts = append(parts, fmtQty(req)+" req")
+	}
+	if lim != nil && ((isCPU && lim.MilliValue() > 0) || (!isCPU && lim.Value() > 0)) {
+		parts = append(parts, fmtQty(lim)+" lim")
+	}
+	if len(parts) == 0 {
+		return "n/a"
+	}
+	return strings.Join(parts, " / ")
+}
+
+func formatSortedPairs(m map[string]string) string {
+	pairs := make([]string, 0, len(m))
+	for _, k := range slices.Sorted(maps.Keys(m)) {
+		pairs = append(pairs, k+"="+m[k])
+	}
+	return strings.Join(pairs, ",")
+}
+
+func formatKeyValueSection(heading string, m map[string]string, keyOpen, closeTag string) string {
 	var b strings.Builder
 	b.WriteString(heading + "\n")
 	if len(m) == 0 {
-		b.WriteString(mutedOpen + "None" + closeTag)
+		b.WriteString("None")
 		return b.String()
 	}
 	for _, k := range slices.Sorted(maps.Keys(m)) {
-		b.WriteString(fmt.Sprintf("%s%s:%s %s\n", mutedOpen, ui.TruncateKey(k), closeTag, ui.Truncate(m[k], 28)))
+		b.WriteString(fmt.Sprintf("%s%s:%s %s\n", keyOpen, ui.TruncateKey(k), closeTag, ui.Truncate(m[k], 28)))
 	}
 	return b.String()
 }
@@ -588,13 +798,17 @@ func (p *DetailPanel) drawPodsTable() {
 	p.podsTable.Clear()
 	ui.StyleTable(p.podsTable)
 
-	cols := []string{"NAMESPACE", "POD", "STATUS", "READY", "RST", "CPU", "MEM", "AGE"}
+	cols := []string{"POD", "NODE", "STATUS", "READY", "RST", "CPU", "MEM", "AGE"}
 	p.podsTableCtrl.SetVisibleColumns(cols)
 	for i, col := range cols {
+		exp := 0
+		if col == "POD" {
+			exp = 1
+		}
 		p.podsTable.SetCell(0, i,
 			ui.StyleHeaderCell(tview.NewTableCell(p.podsTableCtrl.FormatColumnHeader(col)).
 				SetAlign(tview.AlignLeft).
-				SetExpansion(100).
+				SetExpansion(exp).
 				SetSelectable(false)),
 		)
 	}
@@ -609,7 +823,7 @@ func (p *DetailPanel) drawPodsTable() {
 			if pod == nil {
 				continue
 			}
-			if filter.MatchesRow([]string{pod.Namespace, pod.Name, pod.Status, pod.IP}) {
+			if filter.MatchesRow([]string{pod.Name, pod.Node, pod.Status, pod.IP}) {
 				filtered = append(filtered, pod)
 			}
 		}
@@ -625,14 +839,12 @@ func (p *DetailPanel) drawPodsTable() {
 
 	pal := ui.ActivePalette()
 	mono := ui.IsMonochrome()
-	cellColor := pal.DataSecondary
-	mutedColor := pal.StatusMuted
+	valColor := pal.DataSecondary
 	okColor := pal.StatusOK
 	warnColor := pal.StatusWarning
 	errColor := pal.StatusError
 	if mono {
-		cellColor = tcell.ColorDefault
-		mutedColor = tcell.ColorDefault
+		valColor = tcell.ColorDefault
 		okColor = tcell.ColorDefault
 		warnColor = tcell.ColorDefault
 		errColor = tcell.ColorDefault
@@ -640,6 +852,7 @@ func (p *DetailPanel) drawPodsTable() {
 
 	for i, pod := range filtered {
 		row := i + 1
+		rowColor := ui.GetRowColorForStatus(pod.Status, "pod")
 		ready := fmt.Sprintf("%d/%d", pod.ReadyContainers, pod.TotalContainers)
 		rstColor := okColor
 		if pod.Restarts > 5 {
@@ -648,17 +861,35 @@ func (p *DetailPanel) drawPodsTable() {
 			rstColor = warnColor
 		}
 
-		p.podsTable.SetCell(row, 0, ui.NewDataCell(pod.Namespace).SetTextColor(cellColor))
-		p.podsTable.SetCell(row, 1, ui.NewDataCell(pod.Name).SetTextColor(cellColor).SetMaxWidth(32))
+		metricColor := valColor
+		if !mono && ui.GetStatusSeverity(pod.Status, "pod") != ui.StatusSeverityOK {
+			metricColor = rowColor
+		}
+
+		cpuText := "n/a"
+		cpuColor := mutedCellColor()
+		if pod.PodUsageCpuQty != nil {
+			cpuText = ui.FormatCPU(pod.PodUsageCpuQty)
+			cpuColor = metricColor
+		}
+		memText := "n/a"
+		memColor := mutedCellColor()
+		if pod.PodUsageMemQty != nil {
+			memText = strings.TrimSpace(ui.FormatMemory(pod.PodUsageMemQty))
+			memColor = metricColor
+		}
+
+		p.podsTable.SetCell(row, 0, ui.NewDataCell(pod.Name).SetTextColor(rowColor).SetMaxWidth(32))
+		p.podsTable.SetCell(row, 1, ui.NewDataCell(pod.Node).SetTextColor(rowColor).SetMaxWidth(18))
 		p.podsTable.SetCell(row, 2, ui.StyleStatusCell(ui.NewDataCell(pod.Status), pod.Status, "pod"))
-		p.podsTable.SetCell(row, 3, ui.NewDataCell(ready).SetTextColor(cellColor))
+		p.podsTable.SetCell(row, 3, ui.NewDataCell(ready).SetTextColor(rowColor))
 		p.podsTable.SetCell(row, 4, ui.NewDataCell(fmt.Sprintf("%d", pod.Restarts)).SetTextColor(rstColor))
-		p.podsTable.SetCell(row, 5, ui.NewDataCell(ui.FormatCPU(pod.PodUsageCpuQty)).SetTextColor(cellColor))
-		p.podsTable.SetCell(row, 6, ui.NewDataCell(ui.FormatMemory(pod.PodUsageMemQty)).SetTextColor(cellColor))
-		p.podsTable.SetCell(row, 7, ui.NewDataCell(pod.TimeSince).SetTextColor(mutedColor))
+		p.podsTable.SetCell(row, 5, ui.NewDataCell(cpuText).SetTextColor(cpuColor))
+		p.podsTable.SetCell(row, 6, ui.NewDataCell(memText).SetTextColor(memColor))
+		p.podsTable.SetCell(row, 7, ui.NewDataCell(pod.TimeSince).SetTextColor(rowColor))
 	}
 
-	if len(filtered) > 0 && p.focusedChildIdx == 0 {
+	if len(filtered) > 0 && p.focusedChildIdx == 1 {
 		if selRow < 1 {
 			selRow = 1
 		} else if selRow > len(filtered) {
@@ -730,24 +961,29 @@ func (p *DetailPanel) drawEventsTable() {
 	}
 }
 
-type workloadDetailHeights struct {
-	infoHeader     int
-	sparklines     int
-	workloadDetail int
+func kindIcon(kind model.WorkloadKind) string {
+	switch kind {
+	case model.WorkloadKindDeployment:
+		return ui.Icons.Rocket
+	case model.WorkloadKindStatefulSet:
+		return ui.Icons.Package
+	case model.WorkloadKindDaemonSet:
+		return ui.Icons.Controller
+	case model.WorkloadKindJob:
+		return ui.Icons.Clock
+	default:
+		return ui.Icons.Rocket
+	}
 }
 
-func (p *DetailPanel) calculatePanelHeights(terminalHeight int) workloadDetailHeights {
-	if terminalHeight <= 31 {
-		return workloadDetailHeights{infoHeader: 0, sparklines: 3, workloadDetail: 8}
+func (p *DetailPanel) detailSectionHeight(terminalHeight int) int {
+	if terminalHeight <= 28 {
+		return 9
 	}
-	switch ui.GetHeightCategory(terminalHeight) {
-	case ui.HeightCategorySmall:
-		return workloadDetailHeights{infoHeader: 3, sparklines: 4, workloadDetail: 10}
-	case ui.HeightCategoryMedium:
-		return workloadDetailHeights{infoHeader: 3, sparklines: 4, workloadDetail: 12}
-	default:
-		return workloadDetailHeights{infoHeader: 3, sparklines: 4, workloadDetail: 12}
+	if ui.GetHeightCategory(terminalHeight) == ui.HeightCategorySmall {
+		return 11
 	}
+	return 13
 }
 
 func (p *DetailPanel) renderedHeight() (int, bool) {
@@ -759,25 +995,12 @@ func (p *DetailPanel) renderedHeight() (int, bool) {
 	return height, true
 }
 
-func (p *DetailPanel) effectiveHeight() int {
-	if h, ok := p.renderedHeight(); ok {
-		return h
-	}
-	if p.getTerminalHeight != nil {
-		if th := p.getTerminalHeight(); th > 0 {
-			return th
-		}
-	}
-	return 50
-}
-
 func (p *DetailPanel) buildLayout() {
 	height, ok := p.renderedHeight()
 	if !ok {
 		return
 	}
-	h := p.calculatePanelHeights(height)
-	p.applyLayout(height, h)
+	p.applyLayout(height)
 	p.layoutBuilt = true
 }
 
@@ -789,33 +1012,16 @@ func (p *DetailPanel) checkAndRebuildLayout() {
 	if !ok {
 		return
 	}
-	cat := ui.GetHeightCategory(height)
-	h := p.calculatePanelHeights(height)
-	if cat == p.lastHeightCategory &&
-		h.sparklines == p.lastSparklineHeight &&
-		h.infoHeader == p.lastInfoHeaderHeight {
+	if ui.GetHeightCategory(height) == p.lastHeightCategory {
 		return
 	}
-	sparkChanged := h.sparklines != p.lastSparklineHeight
-	p.applyLayout(height, h)
-	if sparkChanged {
-		p.sparklineRow.Reset()
-	}
+	p.applyLayout(height)
 }
 
-func (p *DetailPanel) applyLayout(height int, h workloadDetailHeights) {
+func (p *DetailPanel) applyLayout(height int) {
 	p.root.Clear()
-	if h.infoHeader > 0 {
-		p.root.AddItem(p.infoHeaderPanel, h.infoHeader, 0, false)
-	}
-	p.root.AddItem(p.sparklinePanel, h.sparklines, 0, false)
-	p.root.AddItem(p.workloadDetailPanel, h.workloadDetail, 0, false)
-	p.root.AddItem(p.bottomRow, 0, 1, true)
-
+	p.root.AddItem(p.infoHeaderPanel, 3, 0, false)
+	p.root.AddItem(p.workloadDetailPanel, p.detailSectionHeight(height), 0, true)
+	p.root.AddItem(p.bottomRow, 0, 1, false)
 	p.lastHeightCategory = ui.GetHeightCategory(height)
-	p.lastSparklineHeight = h.sparklines
-	p.lastInfoHeaderHeight = h.infoHeader
 }
-
-// unused time import guard
-var _ = time.Second

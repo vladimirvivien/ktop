@@ -93,12 +93,20 @@ func (c WorkloadsContext) GetItems() []FooterItem {
 
 // WorkloadDetailContext provides footer items for Workload Detail view.
 type WorkloadDetailContext struct {
-	FocusedPanel string // "pods" or "events"
+	FocusedPanel string // "detail", "pods", or "events"
 }
 
 // GetItems returns footer items based on the focused Workload Detail subpanel.
 func (c WorkloadDetailContext) GetItems() []FooterItem {
 	switch c.FocusedPanel {
+	case "detail":
+		return []FooterItem{
+			{Key: "[Enter]", Action: "yaml"},
+			{Key: "[Tab]", Action: "next"},
+			{Key: "[?]", Action: "help"},
+			{Key: "[ESC]", Action: "back"},
+			{Key: "[Ctrl+C]", Action: "quit"},
+		}
 	case "events":
 		return []FooterItem{
 			{Key: "[↑/↓]", Action: "scroll"},

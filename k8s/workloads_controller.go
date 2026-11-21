@@ -8,6 +8,7 @@ import (
 
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/views/model"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -117,7 +118,7 @@ func (c *Controller) GetWorkloadsSnapshot(ctx context.Context) (model.WorkloadsS
 }
 
 // BuildWorkloadDetailData builds live detail state, owned pods, events, and
-// aggregate replica sparkline history for a single workload.
+// resource totals for a single workload instance.
 func (c *Controller) BuildWorkloadDetailData(ctx context.Context, kind model.WorkloadKind, namespace, name string) (*model.WorkloadDetailData, error) {
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
@@ -128,6 +129,7 @@ func (c *Controller) BuildWorkloadDetailData(ctx context.Context, kind model.Wor
 
 	var detail *model.WorkloadDetailData
 	var owned []*model.PodModel
+	var podTemplateSpec corev1.PodSpec
 
 	switch kind {
 	case model.WorkloadKindDeployment:
@@ -136,15 +138,36 @@ func (c *Controller) BuildWorkloadDetailData(ctx context.Context, kind model.Wor
 			return nil, err
 		}
 		dm := model.NewDeploymentModel(d)
-		owned = podIndex.matchPods(d.Namespace, "Deployment", d.UID, d.Name, d.Spec.Selector, rsByDeployment[d.UID])
+		rsUIDs := rsByDeployment[d.UID]
+		owned = podIndex.matchPods(d.Namespace, "Deployment", d.UID, d.Name, d.Spec.Selector, rsUIDs)
 		eff := model.ComputePodsEfficiency(owned, hasMetrics)
+		podTemplateSpec = d.Spec.Template.Spec
+
+		rawCopy := d.DeepCopy()
+		rawCopy.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: "Deployment"}
+
+		revision := ""
+		if d.Annotations != nil {
+			revision = d.Annotations["deployment.kubernetes.io/revision"]
+		}
+
 		detail = &model.WorkloadDetailData{
 			Kind:               kind,
 			Namespace:          dm.Namespace,
 			Name:               dm.Name,
 			Status:             dm.Status,
-			ReadyText:          fmt.Sprintf("%d/%d ready (updated %d, available %d)", dm.Ready, dm.Desired, dm.Updated, dm.Available),
+			ReadyText:          fmt.Sprintf("%d/%d ready", dm.Ready, dm.Desired),
+			Desired:            dm.Desired,
+			Ready:              dm.Ready,
+			Updated:            dm.Updated,
+			Available:          dm.Available,
+			Unavailable:        dm.Unavailable,
+			Paused:             d.Spec.Paused,
 			Strategy:           dm.Strategy,
+			StrategyDetail:     formatDeploymentStrategy(d.Spec.Strategy),
+			Revision:           revision,
+			ActiveReplicaSet:   c.findActiveReplicaSetName(d.Namespace, rsUIDs, revision),
+			RevHistoryLimit:    d.Spec.RevisionHistoryLimit,
 			Age:                dm.Age,
 			Generation:         dm.Generation,
 			ObservedGeneration: dm.ObservedGeneration,
@@ -153,6 +176,7 @@ func (c *Controller) BuildWorkloadDetailData(ctx context.Context, kind model.Wor
 			Labels:             dm.Labels,
 			Annotations:        dm.Annotations,
 			Conditions:         dm.Conditions,
+			RawObject:          rawCopy,
 		}
 
 	case model.WorkloadKindStatefulSet:
@@ -163,14 +187,36 @@ func (c *Controller) BuildWorkloadDetailData(ctx context.Context, kind model.Wor
 		sm := model.NewStatefulSetModel(s)
 		owned = podIndex.matchPods(s.Namespace, "StatefulSet", s.UID, s.Name, s.Spec.Selector, nil)
 		eff := model.ComputePodsEfficiency(owned, hasMetrics)
+		podTemplateSpec = s.Spec.Template.Spec
+
+		rawCopy := s.DeepCopy()
+		rawCopy.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: "StatefulSet"}
+
+		pvcs := make([]string, 0, len(s.Spec.VolumeClaimTemplates))
+		for _, pvc := range s.Spec.VolumeClaimTemplates {
+			if storage, ok := pvc.Spec.Resources.Requests[corev1.ResourceStorage]; ok {
+				pvcs = append(pvcs, fmt.Sprintf("%s (%s)", pvc.Name, storage.String()))
+			} else {
+				pvcs = append(pvcs, pvc.Name)
+			}
+		}
+
 		detail = &model.WorkloadDetailData{
 			Kind:               kind,
 			Namespace:          sm.Namespace,
 			Name:               sm.Name,
 			Status:             sm.Status,
-			ReadyText:          fmt.Sprintf("%d/%d ready (current %d, updated %d)", sm.Ready, sm.Desired, sm.Current, sm.Updated),
+			ReadyText:          fmt.Sprintf("%d/%d ready", sm.Ready, sm.Desired),
+			Desired:            sm.Desired,
+			Ready:              sm.Ready,
+			Current:            sm.Current,
+			Updated:            sm.Updated,
 			Strategy:           sm.UpdateStrategy,
+			StrategyDetail:     formatStatefulSetStrategy(s.Spec.UpdateStrategy),
+			RevHistoryLimit:    s.Spec.RevisionHistoryLimit,
 			ServiceName:        sm.ServiceName,
+			PodManagement:      string(s.Spec.PodManagementPolicy),
+			VolumeClaims:       pvcs,
 			Age:                sm.Age,
 			Generation:         sm.Generation,
 			ObservedGeneration: sm.ObservedGeneration,
@@ -179,6 +225,7 @@ func (c *Controller) BuildWorkloadDetailData(ctx context.Context, kind model.Wor
 			Labels:             sm.Labels,
 			Annotations:        sm.Annotations,
 			Conditions:         sm.Conditions,
+			RawObject:          rawCopy,
 		}
 
 	case model.WorkloadKindDaemonSet:
@@ -189,13 +236,26 @@ func (c *Controller) BuildWorkloadDetailData(ctx context.Context, kind model.Wor
 		dsm := model.NewDaemonSetModel(ds)
 		owned = podIndex.matchPods(ds.Namespace, "DaemonSet", ds.UID, ds.Name, ds.Spec.Selector, nil)
 		eff := model.ComputePodsEfficiency(owned, hasMetrics)
+		podTemplateSpec = ds.Spec.Template.Spec
+
+		rawCopy := ds.DeepCopy()
+		rawCopy.TypeMeta = metav1.TypeMeta{APIVersion: "apps/v1", Kind: "DaemonSet"}
+
 		detail = &model.WorkloadDetailData{
 			Kind:               kind,
 			Namespace:          dsm.Namespace,
 			Name:               dsm.Name,
 			Status:             dsm.Status,
-			ReadyText:          fmt.Sprintf("%d/%d ready (current %d, up-to-date %d)", dsm.Ready, dsm.Desired, dsm.Current, dsm.UpToDate),
+			ReadyText:          fmt.Sprintf("%d/%d ready", dsm.Ready, dsm.Desired),
+			Desired:            dsm.Desired,
+			Ready:              dsm.Ready,
+			Current:            dsm.Current,
+			Updated:            dsm.UpToDate,
+			Available:          dsm.Available,
+			Misscheduled:       dsm.Misscheduled,
 			Strategy:           dsm.UpdateStrategy,
+			StrategyDetail:     formatDaemonSetStrategy(ds.Spec.UpdateStrategy),
+			RevHistoryLimit:    ds.Spec.RevisionHistoryLimit,
 			Age:                dsm.Age,
 			Generation:         dsm.Generation,
 			ObservedGeneration: dsm.ObservedGeneration,
@@ -204,6 +264,7 @@ func (c *Controller) BuildWorkloadDetailData(ctx context.Context, kind model.Wor
 			Labels:             dsm.Labels,
 			Annotations:        dsm.Annotations,
 			Conditions:         dsm.Conditions,
+			RawObject:          rawCopy,
 		}
 
 	case model.WorkloadKindJob:
@@ -214,19 +275,44 @@ func (c *Controller) BuildWorkloadDetailData(ctx context.Context, kind model.Wor
 		jm := model.NewJobModel(job)
 		owned = podIndex.matchPods(job.Namespace, "Job", job.UID, job.Name, job.Spec.Selector, nil)
 		eff := model.ComputePodsEfficiency(owned, hasMetrics)
+		podTemplateSpec = job.Spec.Template.Spec
+
+		rawCopy := job.DeepCopy()
+		rawCopy.TypeMeta = metav1.TypeMeta{APIVersion: "batch/v1", Kind: "Job"}
+
+		var jobDur string
+		if job.Status.StartTime != nil {
+			end := time.Now()
+			if job.Status.CompletionTime != nil {
+				end = job.Status.CompletionTime.Time
+			}
+			if d := end.Sub(job.Status.StartTime.Time); d >= 0 {
+				jobDur = d.Round(time.Second).String()
+			}
+		}
+
 		detail = &model.WorkloadDetailData{
-			Kind:        kind,
-			Namespace:   jm.Namespace,
-			Name:        jm.Name,
-			Status:      jm.Status,
-			ReadyText:   fmt.Sprintf("%s completions (active %d, failed %d)", jm.FormatCompletions(), jm.Active, jm.Failed),
-			Owner:       jm.Owner,
-			Age:         jm.Age,
-			Efficiency:  eff,
-			Selector:    jm.Selector,
-			Labels:      jm.Labels,
-			Annotations: jm.Annotations,
-			Conditions:  jm.Conditions,
+			Kind:            kind,
+			Namespace:       jm.Namespace,
+			Name:            jm.Name,
+			Status:          jm.Status,
+			ReadyText:       fmt.Sprintf("%s completions", jm.FormatCompletions()),
+			CompletionsText: jm.FormatCompletions(),
+			Active:          jm.Active,
+			Succeeded:       jm.Succeeded,
+			Failed:          jm.Failed,
+			Paused:          jm.Suspended,
+			Owner:           jm.Owner,
+			Parallelism:     job.Spec.Parallelism,
+			BackoffLimit:    job.Spec.BackoffLimit,
+			JobDuration:     jobDur,
+			Age:             jm.Age,
+			Efficiency:      eff,
+			Selector:        jm.Selector,
+			Labels:          jm.Labels,
+			Annotations:     jm.Annotations,
+			Conditions:      jm.Conditions,
+			RawObject:       rawCopy,
 		}
 
 	default:
@@ -234,20 +320,130 @@ func (c *Controller) BuildWorkloadDetailData(ctx context.Context, kind model.Wor
 	}
 
 	detail.OwnedPods = owned
+	detail.Images, detail.ServiceAccount, detail.NodeSelector, detail.TotalLimitCPU, detail.TotalLimitMem = extractPodTemplateMeta(podTemplateSpec, countActivePods(owned))
 	detail.TotalRequestedCPU, detail.TotalRequestedMem, detail.TotalUsageCPU, detail.TotalUsageMem = sumOwnedPodResources(owned, hasMetrics)
 
 	if events, err := c.GetEventsForObject(ctx, namespace, string(kind), name); err == nil {
 		detail.Events = events
 	}
 
-	if c.metricsSource != nil {
-		detail.MetricsSourceType = c.metricsSource.GetSourceInfo().Type
-		if c.metricsSource.SupportsHistory() && len(owned) > 0 {
-			detail.MetricsHistory = c.aggregatePodHistory(ctx, owned, detail.TotalRequestedCPU, detail.TotalRequestedMem)
+	return detail, nil
+}
+
+func formatDeploymentStrategy(s appsv1.DeploymentStrategy) string {
+	t := string(s.Type)
+	if t == "" {
+		t = "RollingUpdate"
+	}
+	if s.RollingUpdate != nil {
+		var parts []string
+		if s.RollingUpdate.MaxSurge != nil {
+			parts = append(parts, s.RollingUpdate.MaxSurge.String()+" surge")
+		}
+		if s.RollingUpdate.MaxUnavailable != nil {
+			parts = append(parts, s.RollingUpdate.MaxUnavailable.String()+" unavail")
+		}
+		if len(parts) > 0 {
+			return fmt.Sprintf("%s (%s)", t, strings.Join(parts, " / "))
+		}
+	}
+	return t
+}
+
+func formatStatefulSetStrategy(s appsv1.StatefulSetUpdateStrategy) string {
+	t := string(s.Type)
+	if t == "" {
+		t = "RollingUpdate"
+	}
+	if s.RollingUpdate != nil && s.RollingUpdate.Partition != nil {
+		return fmt.Sprintf("%s (partition %d)", t, *s.RollingUpdate.Partition)
+	}
+	return t
+}
+
+func formatDaemonSetStrategy(s appsv1.DaemonSetUpdateStrategy) string {
+	t := string(s.Type)
+	if t == "" {
+		t = "RollingUpdate"
+	}
+	if s.RollingUpdate != nil && s.RollingUpdate.MaxUnavailable != nil {
+		return fmt.Sprintf("%s (%s unavail)", t, s.RollingUpdate.MaxUnavailable.String())
+	}
+	return t
+}
+
+func (c *Controller) findActiveReplicaSetName(namespace string, rsUIDs map[types.UID]struct{}, targetRevision string) string {
+	if c.replicaSetInformer == nil || len(rsUIDs) == 0 {
+		return ""
+	}
+	list, err := c.replicaSetInformer.Lister().ReplicaSets(namespace).List(labels.Everything())
+	if err != nil {
+		return ""
+	}
+	var best *appsv1.ReplicaSet
+	for _, rs := range list {
+		if _, ok := rsUIDs[rs.UID]; !ok {
+			continue
+		}
+		if targetRevision != "" && rs.Annotations["deployment.kubernetes.io/revision"] == targetRevision {
+			return rs.Name
+		}
+		if best == nil || rs.Status.Replicas > best.Status.Replicas ||
+			(rs.Status.Replicas == best.Status.Replicas && rs.CreationTimestamp.After(best.CreationTimestamp.Time)) {
+			best = rs
+		}
+	}
+	if best != nil {
+		return best.Name
+	}
+	return ""
+}
+
+func countActivePods(pods []*model.PodModel) int {
+	n := 0
+	for _, pod := range pods {
+		if pod != nil && pod.Status != "Completed" && pod.Status != "Succeeded" {
+			n++
+		}
+	}
+	return n
+}
+
+func extractPodTemplateMeta(spec corev1.PodSpec, activePodCount int) (images []string, serviceAccount string, nodeSelector map[string]string, limCPU, limMem *resource.Quantity) {
+	seen := make(map[string]struct{}, len(spec.Containers))
+	var podLimCPU, podLimMem resource.Quantity
+	var hasLimCPU, hasLimMem bool
+
+	for _, ctr := range spec.Containers {
+		if ctr.Image != "" {
+			if _, ok := seen[ctr.Image]; !ok {
+				seen[ctr.Image] = struct{}{}
+				images = append(images, ctr.Image)
+			}
+		}
+		if cpu, ok := ctr.Resources.Limits[corev1.ResourceCPU]; ok && cpu.MilliValue() > 0 {
+			podLimCPU.Add(cpu)
+			hasLimCPU = true
+		}
+		if mem, ok := ctr.Resources.Limits[corev1.ResourceMemory]; ok && mem.Value() > 0 {
+			podLimMem.Add(mem)
+			hasLimMem = true
 		}
 	}
 
-	return detail, nil
+	serviceAccount = spec.ServiceAccountName
+	if len(spec.NodeSelector) > 0 {
+		nodeSelector = spec.NodeSelector
+	}
+
+	scale := max(activePodCount, 1)
+	if hasLimCPU {
+		limCPU = resource.NewMilliQuantity(podLimCPU.MilliValue()*int64(scale), resource.DecimalSI)
+	}
+	if hasLimMem {
+		limMem = resource.NewQuantity(podLimMem.Value()*int64(scale), resource.BinarySI)
+	}
+	return images, serviceAccount, nodeSelector, limCPU, limMem
 }
 
 func sumOwnedPodResources(pods []*model.PodModel, hasMetrics bool) (reqCPU, reqMem, usageCPU, usageMem *resource.Quantity) {
@@ -275,101 +471,6 @@ func sumOwnedPodResources(pods []*model.PodModel, hasMetrics bool) (reqCPU, reqM
 		}
 	}
 	return
-}
-
-func (c *Controller) aggregatePodHistory(ctx context.Context, pods []*model.PodModel, totalReqCPU, totalReqMem *resource.Quantity) []model.MetricSample {
-	const (
-		historyDuration = 5 * time.Minute
-		maxPoints       = 15
-	)
-	cpuSums := make([]float64, maxPoints)
-	memSums := make([]float64, maxPoints)
-	timestamps := make([]int64, maxPoints)
-	validLen := 0
-
-	for _, pod := range pods {
-		if pod == nil {
-			continue
-		}
-		cpuHist, errCPU := c.metricsSource.GetPodHistory(ctx, pod.Namespace, pod.Name, metrics.HistoryQuery{
-			Resource:  metrics.ResourceCPU,
-			Duration:  historyDuration,
-			MaxPoints: maxPoints,
-		})
-		memHist, errMem := c.metricsSource.GetPodHistory(ctx, pod.Namespace, pod.Name, metrics.HistoryQuery{
-			Resource:  metrics.ResourceMemory,
-			Duration:  historyDuration,
-			MaxPoints: maxPoints,
-		})
-		if errCPU != nil || cpuHist == nil || errMem != nil || memHist == nil {
-			continue
-		}
-
-		n := min(len(cpuHist.DataPoints), len(memHist.DataPoints), maxPoints)
-		if n == 0 {
-			continue
-		}
-		if n > validLen {
-			validLen = n
-		}
-		for i := 0; i < n; i++ {
-			// Align tail-most samples so shorter pod histories contribute to recent buckets.
-			cpuIdx := len(cpuHist.DataPoints) - n + i
-			memIdx := len(memHist.DataPoints) - n + i
-			bucket := maxPoints - n + i
-			cpuSums[bucket] += cpuHist.DataPoints[cpuIdx].Value
-			memSums[bucket] += memHist.DataPoints[memIdx].Value
-			if timestamps[bucket] == 0 {
-				timestamps[bucket] = cpuHist.DataPoints[cpuIdx].Timestamp.UnixMilli()
-			}
-		}
-	}
-
-	if validLen == 0 {
-		return nil
-	}
-
-	denomCPU := float64(1000)
-	if totalReqCPU != nil && totalReqCPU.MilliValue() > 0 {
-		denomCPU = float64(totalReqCPU.MilliValue())
-	} else {
-		// Without requests, normalize against max observed sample so trends stay legible.
-		peak := 0.0
-		for _, v := range cpuSums {
-			if v > peak {
-				peak = v
-			}
-		}
-		if peak > 0 {
-			denomCPU = peak
-		}
-	}
-
-	denomMem := float64(1 << 30)
-	if totalReqMem != nil && totalReqMem.Value() > 0 {
-		denomMem = float64(totalReqMem.Value())
-	} else {
-		peak := 0.0
-		for _, v := range memSums {
-			if v > peak {
-				peak = v
-			}
-		}
-		if peak > 0 {
-			denomMem = peak
-		}
-	}
-
-	start := maxPoints - validLen
-	samples := make([]model.MetricSample, 0, validLen)
-	for i := start; i < maxPoints; i++ {
-		samples = append(samples, model.MetricSample{
-			Timestamp: timestamps[i],
-			CPURatio:  min(cpuSums[i]/denomCPU, 1.0),
-			MemRatio:  min(memSums[i]/denomMem, 1.0),
-		})
-	}
-	return samples
 }
 
 type workloadPodEntry struct {

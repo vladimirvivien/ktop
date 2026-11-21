@@ -279,6 +279,28 @@ func (p *Page) ensureDetailPanel() {
 			p.app.ShowToast(fmt.Sprintf("Copied %q to clipboard", target), ui.ToastSuccess, 2_000_000_000)
 		}
 	})
+	p.detailPanel.SetOnViewYAML(func(detail *model.WorkloadDetailData) {
+		if p.app == nil || detail == nil {
+			return
+		}
+		yamlText, err := ui.FormatObjectYAML(detail.RawObject)
+		if err != nil {
+			p.app.ShowToast(fmt.Sprintf("Unable to render YAML: %v", err), ui.ToastError, 3_000_000_000)
+			return
+		}
+		const modalID = "workload-yaml-modal"
+		modal := ui.NewYAMLModal(ui.YAMLModalConfig{
+			Title:   fmt.Sprintf("%s YAML: %s/%s", detail.Kind, detail.Namespace, detail.Name),
+			Content: yamlText,
+			OnClose: func() {
+				p.app.DismissModalPage(modalID)
+			},
+			OnYank: func(_ string) {
+				p.app.ShowToast(fmt.Sprintf("Copied %s %s/%s YAML to clipboard", detail.Kind, detail.Namespace, detail.Name), ui.ToastSuccess, 2_000_000_000)
+			},
+		})
+		p.app.ShowModalPage(modalID, modal.GetRootView())
+	})
 	p.detailPanel.SetGetTerminalHeightFunc(func() int {
 		if p.app != nil {
 			return p.app.GetTerminalHeight()

@@ -38,6 +38,22 @@ func (k WorkloadKind) ShortPrefix() string {
 	}
 }
 
+// PluralTitle returns the plural section heading for a workload kind.
+func (k WorkloadKind) PluralTitle() string {
+	switch k {
+	case WorkloadKindDeployment:
+		return "Deployments"
+	case WorkloadKindStatefulSet:
+		return "StatefulSets"
+	case WorkloadKindDaemonSet:
+		return "DaemonSets"
+	case WorkloadKindJob:
+		return "Jobs"
+	default:
+		return string(k)
+	}
+}
+
 // ParseWorkloadKind normalizes a workload kind or short prefix string.
 func ParseWorkloadKind(raw string) WorkloadKind {
 	switch strings.ToLower(strings.TrimSpace(raw)) {
@@ -202,9 +218,33 @@ type WorkloadDetailData struct {
 	Name               string
 	Status             string
 	ReadyText          string
+	Desired            int32
+	Ready              int32
+	Updated            int32
+	Available          int32
+	Unavailable        int32
+	Current            int32
+	Misscheduled       int32
+	CompletionsText    string
+	Active             int32
+	Succeeded          int32
+	Failed             int32
+	Paused             bool
 	Strategy           string
+	StrategyDetail     string
+	Revision           string
+	ActiveReplicaSet   string
+	RevHistoryLimit    *int32
 	ServiceName        string
+	PodManagement      string
+	VolumeClaims       []string
+	NodeSelector       map[string]string
 	Owner              string
+	Parallelism        *int32
+	BackoffLimit       *int32
+	JobDuration        string
+	Images             []string
+	ServiceAccount     string
 	Age                string
 	Generation         int64
 	ObservedGeneration int64
@@ -215,12 +255,13 @@ type WorkloadDetailData struct {
 	Conditions         []WorkloadConditionInfo
 	OwnedPods          []*PodModel
 	Events             []corev1.Event
-	MetricsHistory     []MetricSample
-	MetricsSourceType  string
 	TotalRequestedCPU  *resource.Quantity
 	TotalRequestedMem  *resource.Quantity
+	TotalLimitCPU      *resource.Quantity
+	TotalLimitMem      *resource.Quantity
 	TotalUsageCPU      *resource.Quantity
 	TotalUsageMem      *resource.Quantity
+	RawObject          any
 }
 
 // NewDeploymentModel constructs a DeploymentModel from a Kubernetes Deployment.
