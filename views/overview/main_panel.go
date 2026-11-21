@@ -527,8 +527,8 @@ func (p *MainPanel) showInspectorYAML(title, yamlText, returnPage string) {
 			p.podInspectorPages.RemovePage("yaml")
 			if returnPage == "logs" && p.containerDetailPanel != nil {
 				p.podInspectorPages.SwitchToPage("logs")
-				p.app.Focus(p.containerDetailPanel.GetRootView())
-				p.app.SetFooterContext(ui.ContainerDetailContext{FocusedPanel: p.containerDetailPanel.GetFocusedPanelName()})
+				p.containerDetailPanel.SetFocused(true)
+				p.containerDetailPanel.InitFocus()
 				return
 			}
 			p.returnToPodModal()
@@ -556,8 +556,8 @@ func (p *MainPanel) showContainerLogs(namespace, podName, containerName string) 
 		p.podInspectorOpen = true
 		p.app.ShowModalPage(podInspectorModalID, p.podInspectorOverlay)
 	}
-	p.app.Focus(p.containerDetailPanel.GetRootView())
-	p.app.SetFooterContext(ui.ContainerDetailContext{FocusedPanel: p.containerDetailPanel.GetFocusedPanelName()})
+	p.containerDetailPanel.SetFocused(true)
+	p.containerDetailPanel.InitFocus()
 }
 
 // showNodeDetail navigates to the node detail view

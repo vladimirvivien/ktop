@@ -235,6 +235,22 @@ func TestWorkloadsTUI_EndToEndNavigationAndDrillDown(t *testing.T) {
 		t.Fatal("expected ESC from Pod YAML to return to Pod Detail inside the same modal")
 	}
 
+	// Pressing Enter on container row transitions inline to Container Logs; ESC returns to Pod Detail.
+	sendAppKey(ts, app, tcell.KeyEnter, 0, tcell.ModNone)
+	if !app.HasActiveModalPage() {
+		t.Fatal("expected Container Logs to stay inside the active Pod Inspector modal")
+	}
+	if !strings.Contains(ts.Text(), "Container Detail") {
+		t.Fatalf("expected Container Logs view inside modal, got:\n%s", ts.Text())
+	}
+	sendAppKey(ts, app, tcell.KeyEsc, 0, tcell.ModNone)
+	if !app.HasActiveModalPage() {
+		t.Fatal("expected ESC from Container Logs to return to Pod Detail inside the modal")
+	}
+	if !strings.Contains(ts.Text(), "Pod: default/api-abc-1") {
+		t.Fatalf("expected Pod Detail restored after ESC from Container Logs, got:\n%s", ts.Text())
+	}
+
 	// ESC from Pod Detail closes the Pod Inspector modal and returns directly to Deployment Detail.
 	sendAppKey(ts, app, tcell.KeyEsc, 0, tcell.ModNone)
 	if app.HasActiveModalPage() {

@@ -287,6 +287,9 @@ func (p *DetailPanel) buildLayout() {
 	p.focusablePanels = []*tview.Flex{p.containerDetailPanel, nil} // logsView is TextView, not Flex
 	p.focusedChildIdx = 1                                          // Default focus on logs
 
+	p.containerDetailPanel.SetInputCapture(p.handlePanelInput)
+	p.logsView.SetInputCapture(p.handlePanelInput)
+
 	// Initialize focus visuals
 	p.updateFocusVisuals()
 }
@@ -796,46 +799,71 @@ func (p *DetailPanel) updateLogsTitleWithCount(count int) {
 }
 
 func (p *DetailPanel) setupInputCapture() {
-	p.root.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// Note: ESC is handled at the app level via HandleEscape()
-		// which properly checks filterMode before navigating back
+	p.root.SetInputCapture(p.handlePanelInput)
+}
 
-		// When in filter mode, pass all keys to the filter input (except ESC which is handled at app level)
+func (p *DetailPanel) handlePanelInput(event *tcell.EventKey) *tcell.EventKey {
+	if event.Key() == tcell.KeyEscape {
 		if p.filterMode {
-			return event
+			p.exitFilterMode()
+			return nil
 		}
+		if p.onBack != nil {
+			p.onBack()
+			return nil
+		}
+		return nil
+	}
 
-		switch event.Key() {
-		case tcell.KeyRune:
-			switch event.Rune() {
-			case 's', 'S':
-				p.toggleFollow()
-				return nil
-			case 't', 'T':
-				p.toggleTimestamps()
-				return nil
-			case 'w', 'W':
-				p.toggleWrap()
-				return nil
-			case 'g':
-				p.logsView.ScrollToBeginning()
-				return nil
-			case 'G':
-				p.logsView.ScrollToEnd()
-				return nil
-			case 'm', 'M':
-				p.loadMoreLogs()
-				return nil
-			case '/':
-				p.enterFilterMode()
-				return nil
-			case 'x', 'X':
-				p.toggleLogsExpand()
+	if p.filterMode {
+		return event
+	}
+
+	switch event.Key() {
+	case tcell.KeyTab, tcell.KeyBacktab:
+		p.cycleFocus()
+		return nil
+	case tcell.KeyEnter:
+		if p.focusedChildIdx == 0 {
+			p.showSpec()
+			return nil
+		}
+	case tcell.KeyRune:
+		if p.focusedChildIdx == 0 {
+			if event.Rune() == 's' || event.Rune() == 'S' {
+				p.showSpec()
 				return nil
 			}
+			return event
 		}
-		return event
-	})
+		switch event.Rune() {
+		case 's', 'S':
+			p.toggleFollow()
+			return nil
+		case 't', 'T':
+			p.toggleTimestamps()
+			return nil
+		case 'w', 'W':
+			p.toggleWrap()
+			return nil
+		case 'g':
+			p.logsView.ScrollToBeginning()
+			return nil
+		case 'G':
+			p.logsView.ScrollToEnd()
+			return nil
+		case 'm', 'M':
+			p.loadMoreLogs()
+			return nil
+		case '/':
+			p.enterFilterMode()
+			return nil
+		case 'x', 'X':
+			p.toggleLogsExpand()
+			return nil
+		}
+	}
+	return event
 }
 
 func (p *DetailPanel) toggleFollow() {
@@ -1376,9 +1404,21 @@ func (p *DetailPanel) SetTailLines(lines int64) {
 	p.tailLines = lines
 }
 
+// InitFocus focuses the active child panel (default: Logs view).
+func (p *DetailPanel) InitFocus() {
+	if p.focusedChildIdx < 0 || p.focusedChildIdx >= len(p.focusableItems) {
+		p.focusedChildIdx = len(p.focusableItems) - 1
+	}
+	p.updateFocusVisuals()
+	if p.setAppFocus != nil && p.focusedChildIdx >= 0 && p.focusedChildIdx < len(p.focusableItems) {
+		p.setAppFocus(p.focusableItems[p.focusedChildIdx])
+	}
+	p.notifyFooterContextChange()
+}
+
 // Focus returns focus handling hint
 func (p *DetailPanel) Focus() {
-	// logsView handles focus
+	p.InitFocus()
 }
 
 // RefreshData refreshes the container data without restarting log stream
