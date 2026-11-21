@@ -919,6 +919,12 @@ func (p *DetailPanel) InitFocus() {
 	p.updateFocusVisuals()
 }
 
+// RestoreFocus re-applies focus to the active child panel after modal dismissal.
+func (p *DetailPanel) RestoreFocus() {
+	p.updateFocusVisuals()
+	p.notifyFooterContextChange()
+}
+
 // cycleFocus moves focus to the next focusable child
 func (p *DetailPanel) cycleFocus() {
 	if len(p.focusableItems) == 0 {

@@ -23,7 +23,10 @@ import (
 	v1 "k8s.io/api/core/v1"
 	// metrics package imported for SourceTypePrometheus constant
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
+
+const podInspectorModalID = "pod-inspector"
 
 type MainPanel struct {
 	app                 *application.Application
@@ -45,11 +48,15 @@ type MainPanel struct {
 	cachedPodModels     []model.PodModel  // Cached pod models for immediate re-filtering
 	cachedNodeModels    []model.NodeModel // Cached node models for detail view
 
-	// Detail panels
+	// Detail panels & shared Pod/Container Inspector modal
 	nodeDetailPanel      *nodedetail.DetailPanel
 	podDetailPanel       *poddetail.DetailPanel
 	containerDetailPanel *containerdetail.DetailPanel
-	containerSpecPanel   *containerdetail.SpecPanel
+	podInspectorOverlay  *ui.OverlayFrame
+	podInspectorPages    *tview.Pages
+	podInspectorOpen     bool
+	activeModalPodNS     string
+	activeModalPodName   string
 
 	// Centralized view state manager - single source of truth for current page/resource
 	// Thread-safe, replaces individual tracking variables
@@ -333,16 +340,8 @@ func (p *MainPanel) IsFilterEditing() bool {
 	return false
 }
 
-// GetActiveDetailPanel returns the currently active detail panel as an EscapablePanel.
-// Returns nil if no detail panel is active or the panel doesn't implement EscapablePanel.
+// GetActiveDetailPanel returns the currently active depth-1 detail subpage panel if any.
 func (p *MainPanel) GetActiveDetailPanel() ui.EscapablePanel {
-	// Check which detail view is currently active based on viewState
-	if _, _, _, ok := p.viewState.GetContainerLogs(); ok && p.containerDetailPanel != nil {
-		return p.containerDetailPanel
-	}
-	if _, _, ok := p.viewState.GetPodDetail(); ok && p.podDetailPanel != nil {
-		return p.podDetailPanel
-	}
 	if _, ok := p.viewState.GetNodeDetail(); ok && p.nodeDetailPanel != nil {
 		return p.nodeDetailPanel
 	}
@@ -363,9 +362,7 @@ func (p *MainPanel) Run(ctx context.Context) error {
 		p.app.SetContainerLogsCallback(p.showContainerLogs)
 		p.app.SetDetailResetCallback(func() {
 			p.viewState.SetOverview()
-			if p.containerDetailPanel != nil {
-				p.containerDetailPanel.Cleanup()
-			}
+			p.closePodInspector()
 		})
 
 		if client := p.app.GetK8sClient(); client != nil {
@@ -403,45 +400,84 @@ func (p *MainPanel) ensureNodeDetailPanel() {
 	p.app.AddDetailPage("node_detail", p.nodeDetailPanel.GetRootView())
 }
 
-// ensurePodDetailPanel creates the pod detail panel if not already created
+func (p *MainPanel) ensurePodInspectorModal() {
+	if p.podInspectorPages != nil {
+		return
+	}
+	p.podInspectorPages = tview.NewPages()
+	// Leave top header+tabs (4 rows), bottom footer (3 rows), and side parent edges (3 cols) visible.
+	p.podInspectorOverlay = ui.NewOverlayFrame(p.podInspectorPages, 4, 3, 3, 3)
+}
+
+func (p *MainPanel) closePodInspector() {
+	if p.containerDetailPanel != nil {
+		p.containerDetailPanel.Cleanup()
+	}
+	p.viewState.ClearModal()
+	if p.podInspectorOpen {
+		p.podInspectorOpen = false
+		if p.podInspectorPages != nil {
+			p.podInspectorPages.RemovePage("yaml")
+		}
+		if p.app != nil {
+			p.app.DismissModalPage(podInspectorModalID)
+		}
+	}
+}
+
+// ensurePodDetailPanel creates the pod detail panel hosted inside the shared Pod Inspector modal.
 func (p *MainPanel) ensurePodDetailPanel() {
 	if p.podDetailPanel != nil {
 		return
 	}
+	p.ensurePodInspectorModal()
 	p.podDetailPanel = poddetail.NewDetailPanel()
 	p.podDetailPanel.SetOnBack(func() {
-		p.viewState.SetOverview() // Clear tracking on back navigation
-		p.app.NavigateBack()
-	})
-	p.podDetailPanel.SetOnNodeNavigate(func(nodeName string) {
-		p.app.NavigateToNodeDetail(nodeName)
+		p.closePodInspector()
 	})
 	p.podDetailPanel.SetOnContainerSelected(func(namespace, podName, containerName string) {
 		p.app.NavigateToContainerLogs(namespace, podName, containerName)
 	})
-	// Set up focus callback for tab cycling within the detail panel
+	p.podDetailPanel.SetOnShowYAML(func(pod *v1.Pod) {
+		if pod == nil {
+			return
+		}
+		podCopy := pod.DeepCopy()
+		podCopy.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"}
+		yamlText, err := ui.FormatObjectYAML(podCopy)
+		if err != nil {
+			p.app.ShowToast(fmt.Sprintf("Unable to render Pod YAML: %v", err), ui.ToastError, 3*time.Second)
+			return
+		}
+		p.showInspectorYAML(fmt.Sprintf("Pod YAML: %s/%s", pod.Namespace, pod.Name), yamlText, "pod")
+	})
 	p.podDetailPanel.SetAppFocus(func(prim tview.Primitive) {
 		p.app.Focus(prim)
 	})
-	// Set up footer context callback for focus changes
 	p.podDetailPanel.SetOnFooterContextChange(func(focusedPanel string) {
 		p.app.SetFooterContext(ui.PodDetailContext{FocusedPanel: focusedPanel})
 	})
-	p.app.AddDetailPage("pod_detail", p.podDetailPanel.GetRootView())
+	p.podInspectorPages.AddPage("pod", p.podDetailPanel.GetRootView(), true, false)
 }
 
-// ensureContainerDetailPanel creates the container detail panel if not already created
+// ensureContainerDetailPanel creates the container logs panel hosted inside the shared Pod Inspector modal.
 func (p *MainPanel) ensureContainerDetailPanel() {
 	if p.containerDetailPanel != nil {
 		return
 	}
+	p.ensurePodInspectorModal()
 	p.containerDetailPanel = containerdetail.NewDetailPanel()
 	p.containerDetailPanel.SetOnBack(func() {
-		p.containerDetailPanel.Cleanup() // Stop any active streams
-		p.app.NavigateBack()
+		p.containerDetailPanel.Cleanup()
+		p.returnToPodModal()
 	})
 	p.containerDetailPanel.SetOnShowSpec(func(namespace, podName, containerName string, containerSpec *v1.Container) {
-		p.showContainerSpec(namespace, podName, containerName, containerSpec)
+		yamlText, err := ui.FormatObjectYAML(containerSpec)
+		if err != nil {
+			p.app.ShowToast(fmt.Sprintf("Unable to render Container Spec: %v", err), ui.ToastError, 3*time.Second)
+			return
+		}
+		p.showInspectorYAML(fmt.Sprintf("Container Spec: %s (%s/%s)", containerName, namespace, podName), yamlText, "logs")
 	})
 	p.containerDetailPanel.SetAppFocus(func(prim tview.Primitive) {
 		p.app.Focus(prim)
@@ -467,46 +503,60 @@ func (p *MainPanel) ensureContainerDetailPanel() {
 	p.containerDetailPanel.SetOnFooterContextChange(func(focusedPanel string) {
 		p.app.SetFooterContext(ui.ContainerDetailContext{FocusedPanel: focusedPanel})
 	})
-	p.app.AddDetailPage("container_detail", p.containerDetailPanel.GetRootView())
+	p.podInspectorPages.AddPage("logs", p.containerDetailPanel.GetRootView(), true, false)
 }
 
-// ensureContainerSpecPanel creates the container spec panel if not already created
-func (p *MainPanel) ensureContainerSpecPanel() {
-	if p.containerSpecPanel != nil {
+func (p *MainPanel) returnToPodModal() {
+	if p.podDetailPanel == nil || !p.podInspectorOpen {
+		p.closePodInspector()
 		return
 	}
-	p.containerSpecPanel = containerdetail.NewSpecPanel()
-	p.containerSpecPanel.SetOnBack(func() {
-		p.app.NavigateBack()
+	p.viewState.SetPodModal(p.activeModalPodNS, p.activeModalPodName)
+	p.podInspectorPages.SwitchToPage("pod")
+	p.podDetailPanel.SetFocused(true)
+	p.podDetailPanel.InitFocus()
+	p.app.SetFooterContext(ui.PodDetailContext{FocusedPanel: "containers"})
+}
+
+func (p *MainPanel) showInspectorYAML(title, yamlText, returnPage string) {
+	p.ensurePodInspectorModal()
+	box, textView := ui.NewYAMLBox(ui.YAMLModalConfig{
+		Title:   title,
+		Content: yamlText,
+		OnClose: func() {
+			p.podInspectorPages.RemovePage("yaml")
+			if returnPage == "logs" && p.containerDetailPanel != nil {
+				p.podInspectorPages.SwitchToPage("logs")
+				p.app.Focus(p.containerDetailPanel.GetRootView())
+				p.app.SetFooterContext(ui.ContainerDetailContext{FocusedPanel: p.containerDetailPanel.GetFocusedPanelName()})
+				return
+			}
+			p.returnToPodModal()
+		},
+		OnYank: func(_ string) {
+			p.app.ShowToast(fmt.Sprintf("Copied %s to clipboard", title), ui.ToastSuccess, 2*time.Second)
+		},
 	})
-	p.app.AddDetailPage("container_spec", p.containerSpecPanel.GetRootView())
+	p.podInspectorPages.RemovePage("yaml")
+	p.podInspectorPages.AddAndSwitchToPage("yaml", box, true)
+	p.app.Focus(textView)
 }
 
-// showContainerSpec navigates to the container spec view
-func (p *MainPanel) showContainerSpec(namespace, podName, containerName string, containerSpec *v1.Container) {
-	// Ensure the container spec panel exists (lazy initialization)
-	p.ensureContainerSpecPanel()
-
-	// Show the container spec
-	p.containerSpecPanel.ShowSpec(namespace, podName, containerName, containerSpec)
-	p.app.ShowDetailPage("container_spec")
-	p.app.Focus(p.containerSpecPanel.GetRootView())
-}
-
-// showContainerLogs navigates to the container detail view (with logs)
+// showContainerLogs transitions the shared Pod Inspector modal to container logs.
 func (p *MainPanel) showContainerLogs(namespace, podName, containerName string) {
-	// Ensure the container detail panel exists (lazy initialization)
 	p.ensureContainerDetailPanel()
 
-	// Track state for navigation consistency
-	p.viewState.SetContainerLogs(namespace, podName, containerName)
+	p.activeModalPodNS = namespace
+	p.activeModalPodName = podName
+	p.viewState.SetContainerModal(namespace, podName, containerName)
 
-	// Show the container detail with logs
 	p.containerDetailPanel.ShowContainer(namespace, podName, containerName)
-	p.app.ShowDetailPage("container_detail")
+	p.podInspectorPages.SwitchToPage("logs")
+	if !p.podInspectorOpen {
+		p.podInspectorOpen = true
+		p.app.ShowModalPage(podInspectorModalID, p.podInspectorOverlay)
+	}
 	p.app.Focus(p.containerDetailPanel.GetRootView())
-
-	// Set initial footer context (default focus is on logs panel)
 	p.app.SetFooterContext(ui.ContainerDetailContext{FocusedPanel: p.containerDetailPanel.GetFocusedPanelName()})
 }
 
@@ -533,27 +583,32 @@ func (p *MainPanel) showNodeDetail(nodeName string) {
 	p.nodeDetailPanel.InitFocus() // Set up initial focus on events panel
 }
 
-// showPodDetail navigates to the pod detail view
+// showPodDetail opens the shared floating Pod Inspector modal for the given pod.
 func (p *MainPanel) showPodDetail(namespace, podName string) {
 	if p.containerDetailPanel != nil {
 		p.containerDetailPanel.Cleanup()
 	}
-	// Ensure the detail panel exists (lazy initialization)
 	p.ensurePodDetailPanel()
 
-	// Set tracking IMMEDIATELY to prevent race with refreshPodView
-	// If we set this after network calls, refreshPodView might update with old pod data
-	p.viewState.SetPodDetail(namespace, podName)
+	p.activeModalPodNS = namespace
+	p.activeModalPodName = podName
+	p.viewState.SetPodModal(namespace, podName)
 
 	detailData := p.buildPodDetailData(context.Background(), namespace+"/"+podName, p.cachedPodModels)
 	if detailData == nil {
-		return // Pod not found
+		p.viewState.ClearModal()
+		return
 	}
 
-	// Update and show the detail panel
 	p.podDetailPanel.DrawBody(detailData)
-	p.app.ShowDetailPage("pod_detail")
-	p.podDetailPanel.InitFocus() // Set up initial focus on events panel
+	p.podInspectorPages.SwitchToPage("pod")
+	if !p.podInspectorOpen {
+		p.podInspectorOpen = true
+		p.app.ShowModalPage(podInspectorModalID, p.podInspectorOverlay)
+	}
+	p.podDetailPanel.SetFocused(true)
+	p.podDetailPanel.InitFocus()
+	p.app.SetFooterContext(ui.PodDetailContext{FocusedPanel: "containers"})
 }
 
 func (p *MainPanel) refreshNodeView(ctx context.Context, models []model.NodeModel) error {
@@ -661,15 +716,15 @@ func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) er
 	// Capture the pod key at fetch time so we can verify it later
 	var podDetailData *model.PodDetailData
 	var fetchedPodKey string
-	if namespace, podName, ok := p.viewState.GetPodDetail(); ok && p.podDetailPanel != nil {
+	if namespace, podName, ok := p.viewState.GetPodModal(); ok && p.podDetailPanel != nil {
 		fetchedPodKey = namespace + "/" + podName
 		podDetailData = p.buildPodDetailData(ctx, fetchedPodKey, updatedModels)
 	}
 
-	// Pre-fetch container metrics if container detail view is visible
+	// Pre-fetch container metrics if container modal view is visible
 	var containerCPU, containerMem string
 	var fetchedContainerKey string
-	if namespace, podName, containerName, ok := p.viewState.GetContainerLogs(); ok && p.containerDetailPanel != nil {
+	if namespace, podName, containerName, ok := p.viewState.GetContainerModal(); ok && p.containerDetailPanel != nil {
 		fetchedContainerKey = namespace + "/" + podName + "/" + containerName
 		if p.metricsSource != nil {
 			if podMetrics, err := p.metricsSource.GetPodMetrics(ctx, namespace, podName); err == nil && podMetrics != nil {
@@ -715,25 +770,21 @@ func (p *MainPanel) refreshPods(ctx context.Context, models []model.PodModel) er
 		// CRITICAL: Re-verify the view state matches what we fetched - user may have
 		// navigated to a different pod/page between fetch and now
 		if podDetailData != nil && p.podDetailPanel != nil && fetchedPodKey != "" {
-			if ns, pod, ok := p.viewState.GetPodDetail(); ok {
+			if ns, pod, ok := p.viewState.GetPodModal(); ok {
 				currentKey := ns + "/" + pod
 				if currentKey == fetchedPodKey {
-					// Additional validation: ensure PodModel matches expected identity
 					if podDetailData.PodModel != nil &&
 						podDetailData.PodModel.Namespace == ns &&
 						podDetailData.PodModel.Name == pod {
 						p.podDetailPanel.DrawBody(podDetailData)
 					}
-					// If PodModel doesn't match, skip - data is inconsistent
 				}
-				// If keys don't match, skip this update - the data is stale
 			}
-			// If not on pod detail page anymore, skip update
 		}
 
-		// If container detail is currently displayed, update metrics with pre-fetched data
+		// If container modal is currently displayed, update metrics with pre-fetched data
 		if fetchedContainerKey != "" && p.containerDetailPanel != nil {
-			if ns, pod, container, ok := p.viewState.GetContainerLogs(); ok {
+			if ns, pod, container, ok := p.viewState.GetContainerModal(); ok {
 				currentKey := ns + "/" + pod + "/" + container
 				if currentKey == fetchedContainerKey {
 					p.containerDetailPanel.UpdateMetrics(containerCPU, containerMem)
@@ -910,6 +961,16 @@ func (p *MainPanel) buildPodDetailData(ctx context.Context, podKey string, podMo
 			pm := podModels[i] // Copy the value
 			podModel = &pm     // Pointer to local copy
 			break
+		}
+	}
+
+	if podModel == nil {
+		// Fallback when opened from another tab (e.g., --page=workloads) before Overview's pod cache refreshes.
+		if p.app != nil && p.app.GetK8sClient() != nil {
+			if pod, err := p.app.GetK8sClient().Controller().GetPod(ctx, namespace, podName); err == nil && pod != nil {
+				pm := model.NewPodModel(pod, nil, nil)
+				podModel = pm
+			}
 		}
 	}
 

@@ -181,7 +181,7 @@ func (c NodeDetailContext) GetItems() []FooterItem {
 	}
 }
 
-// PodDetailContext provides footer items for Pod Detail page
+// PodDetailContext provides footer items for the Pod Inspector modal.
 type PodDetailContext struct {
 	FocusedPanel string // "events", "containers", "volumes"
 }
@@ -192,21 +192,19 @@ func (c PodDetailContext) GetItems() []FooterItem {
 	case "containers":
 		return []FooterItem{
 			{Key: "[↑/↓]", Action: "navigate"},
-			{Key: "[Enter]", Action: "container"},
-			{Key: "[Tab]", Action: "next"},
-			{Key: "[n]", Action: "node"},
+			{Key: "[Enter]", Action: "logs"},
+			{Key: "[v]", Action: "yaml"},
 			{Key: "[y]", Action: "copy"},
 			{Key: "[?]", Action: "help"},
-			{Key: "[ESC]", Action: "back"},
+			{Key: "[ESC]", Action: "close"},
 			{Key: "[Ctrl+C]", Action: "quit"},
 		}
 	default: // events, volumes
 		return []FooterItem{
 			{Key: "[↑/↓]", Action: "scroll"},
-			{Key: "[Tab]", Action: "next"},
-			{Key: "[n]", Action: "node"},
+			{Key: "[v]", Action: "yaml"},
 			{Key: "[?]", Action: "help"},
-			{Key: "[ESC]", Action: "back"},
+			{Key: "[ESC]", Action: "close"},
 			{Key: "[Ctrl+C]", Action: "quit"},
 		}
 	}

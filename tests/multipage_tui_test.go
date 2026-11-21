@@ -198,11 +198,10 @@ func TestMultiPage_PerPageStackIsolationAndEscUnwind(t *testing.T) {
 	t.Cleanup(ts.Close)
 
 	app.NavigateToNodeDetail("worker-1")
-	app.NavigateToPodDetail("default", "api-0")
 	ts.Draw(app.RootPrimitive())
-	screenPod := ts.Text()
-	if !strings.Contains(screenPod, "POD_DETAIL_BODY: default/api-0") || !strings.Contains(screenPod, "Overview › node/worker-1 › pod/default/api-0") {
-		t.Fatalf("expected Pod Detail and breadcrumb on Tab 1, got:\n%s", screenPod)
+	screenNode1 := ts.Text()
+	if !strings.Contains(screenNode1, "NODE_DETAIL_BODY: worker-1") || !strings.Contains(screenNode1, "Overview › node/worker-1") {
+		t.Fatalf("expected Node Detail and breadcrumb on Tab 1, got:\n%s", screenNode1)
 	}
 
 	// Switch to Tab 2: root Workloads renders with no Overview breadcrumb.
@@ -215,30 +214,21 @@ func TestMultiPage_PerPageStackIsolationAndEscUnwind(t *testing.T) {
 		t.Fatalf("expected Tab 2 breadcrumb cleared, got:\n%s", screenTab2)
 	}
 
-	// Switch back to Tab 1: Pod Detail and breadcrumb must be restored intact.
+	// Switch back to Tab 1: Node Detail and breadcrumb must be restored intact.
 	sendAppKey(ts, app, tcell.KeyRune, '1', tcell.ModNone)
 	screenRestored := ts.Text()
-	if !strings.Contains(screenRestored, "POD_DETAIL_BODY: default/api-0") || !strings.Contains(screenRestored, "Overview › node/worker-1 › pod/default/api-0") {
-		t.Fatalf("expected Pod Detail and breadcrumb restored on return to Tab 1, got:\n%s", screenRestored)
+	if activeDetail != "node:worker-1" || !strings.Contains(screenRestored, "NODE_DETAIL_BODY: worker-1") || !strings.Contains(screenRestored, "Overview › node/worker-1") {
+		t.Fatalf("expected Node Detail and breadcrumb restored on return to Tab 1, activeDetail=%q, got:\n%s", activeDetail, screenRestored)
 	}
 
-	// Unwind stack via ESC: Pod Detail -> Node Detail -> Overview root.
-	sendAppKey(ts, app, tcell.KeyEsc, 0, tcell.ModNone)
-	screenNode := ts.Text()
-	if activeDetail != "node:worker-1" || !strings.Contains(screenNode, "NODE_DETAIL_BODY: worker-1") {
-		t.Fatalf("expected first ESC to unwind to Node Detail, activeDetail=%q, got:\n%s", activeDetail, screenNode)
-	}
-	if !strings.Contains(screenNode, "Overview › node/worker-1") || strings.Contains(screenNode, "pod/default/api-0") {
-		t.Fatalf("expected breadcrumb updated to Node Detail after first ESC, got:\n%s", screenNode)
-	}
-
+	// Unwind depth-1 stack via ESC: Node Detail -> Overview root.
 	sendAppKey(ts, app, tcell.KeyEsc, 0, tcell.ModNone)
 	if app.IsInDetailView() {
-		t.Fatal("expected second ESC to unwind back to Overview root")
+		t.Fatal("expected ESC to unwind back to Overview root")
 	}
 	screenRoot := ts.Text()
 	if !strings.Contains(screenRoot, "OVERVIEW_ROOT_BODY") {
-		t.Fatalf("expected Overview root body after second ESC, got:\n%s", screenRoot)
+		t.Fatalf("expected Overview root body after ESC, got:\n%s", screenRoot)
 	}
 }
 

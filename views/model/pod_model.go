@@ -286,6 +286,11 @@ func SortPodModelPointersBy(pods []*PodModel, column string, ascending bool) {
 
 func NewPodModel(pod *v1.Pod, podMetrics *metricsV1beta1.PodMetrics, nodeMetrics *metricsV1beta1.NodeMetrics) *PodModel {
 	totalCpu, totalMem := podMetricsTotals(podMetrics)
+	var nodeUsageCPU, nodeUsageMem *resource.Quantity
+	if nodeMetrics != nil {
+		nodeUsageCPU = nodeMetrics.Usage.Cpu()
+		nodeUsageMem = nodeMetrics.Usage.Memory()
+	}
 	statusSummary := getContainerStatusSummary(pod.Status.ContainerStatuses)
 	if (statusSummary.Status == "" || statusSummary.Status == "Completed") && statusSummary.SomeRunning {
 		if podIsReady(pod.Status.Conditions) {
@@ -307,8 +312,8 @@ func NewPodModel(pod *v1.Pod, podMetrics *metricsV1beta1.PodMetrics, nodeMetrics
 		VolMounts:          containerSummary.VolMounts,
 		PodRequestedMemQty: containerSummary.RequestedMemQty,
 		PodRequestedCpuQty: containerSummary.RequestedCpuQty,
-		NodeUsageCpuQty:    nodeMetrics.Usage.Cpu(),
-		NodeUsageMemQty:    nodeMetrics.Usage.Memory(),
+		NodeUsageCpuQty:    nodeUsageCPU,
+		NodeUsageMemQty:    nodeUsageMem,
 		PodUsageCpuQty:     totalCpu,
 		PodUsageMemQty:     totalMem,
 		ReadyContainers:    statusSummary.Ready,
@@ -318,10 +323,12 @@ func NewPodModel(pod *v1.Pod, podMetrics *metricsV1beta1.PodMetrics, nodeMetrics
 }
 
 func podMetricsTotals(metrics *metricsV1beta1.PodMetrics) (totalCpu, totalMem *resource.Quantity) {
-	containers := metrics.Containers
 	totalCpu = resource.NewQuantity(0, resource.DecimalSI)
 	totalMem = resource.NewQuantity(0, resource.DecimalSI)
-	for _, c := range containers {
+	if metrics == nil {
+		return
+	}
+	for _, c := range metrics.Containers {
 		totalCpu.Add(*c.Usage.Cpu())
 		totalMem.Add(*c.Usage.Memory())
 	}

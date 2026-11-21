@@ -185,15 +185,19 @@ func TestApplication_PageRegistryAndPerPageStackIsolation(t *testing.T) {
 		resetCount++
 	})
 
-	// Advance focus inside Overview to pods (index 2) and drill into Node -> Pod
+	// Advance focus inside Overview to pods (index 2) and drill into Node Detail (depth-1 subpage).
+	// Opening Pod Detail opens the shared modal without pushing onto the page stack.
 	app.tabIdx = 2
 	app.NavigateToNodeDetail("worker-1")
 	app.NavigateToPodDetail("default", "api-0")
 	if !app.IsInDetailView() {
 		t.Fatal("expected Overview session to be in detail view")
 	}
-	if got := app.panel.tabBar.Breadcrumb(); got != "Overview › node/worker-1 › pod/default/api-0" {
+	if got := app.panel.tabBar.Breadcrumb(); got != "Overview › node/worker-1" {
 		t.Fatalf("unexpected Overview breadcrumb: %q", got)
+	}
+	if got := presented[len(presented)-1]; got != "pod:default/api-0" {
+		t.Fatalf("expected Pod Inspector callback invoked, last presented=%q", got)
 	}
 
 	// Switch to Workloads (page 2): should clear detail view, show Workloads root, empty breadcrumb
@@ -225,29 +229,23 @@ func TestApplication_PageRegistryAndPerPageStackIsolation(t *testing.T) {
 		t.Fatalf("expected Workloads tabIdx=1 preserved, got %d", app.tabIdx)
 	}
 
-	// Switch back to Overview: Pod Detail and breadcrumb must be restored intact
+	// Switch back to Overview: Node Detail and breadcrumb must be restored intact
 	if !app.SwitchToPage("overview") {
 		t.Fatal("expected SwitchToPage('overview') to succeed")
 	}
 	if !app.IsInDetailView() {
 		t.Fatal("expected Overview detail view preserved after tab switch")
 	}
-	if got := app.panel.tabBar.Breadcrumb(); got != "Overview › node/worker-1 › pod/default/api-0" {
+	if got := app.panel.tabBar.Breadcrumb(); got != "Overview › node/worker-1" {
 		t.Fatalf("expected restored Overview breadcrumb, got %q", got)
 	}
-	if got := presented[len(presented)-1]; got != "pod:default/api-0" {
-		t.Fatalf("expected Pod Detail re-presented on return, last presented=%q", got)
+	if got := presented[len(presented)-1]; got != "node:worker-1" {
+		t.Fatalf("expected Node Detail re-presented on return, last presented=%q", got)
 	}
 
 	// Unwind Overview stack cleanly with NavigateBack
 	if !app.NavigateBack() {
-		t.Fatal("expected first NavigateBack to return to Node Detail")
-	}
-	if got := presented[len(presented)-1]; got != "node:worker-1" {
-		t.Fatalf("expected Node Detail on unwind, got %q", got)
-	}
-	if !app.NavigateBack() {
-		t.Fatal("expected second NavigateBack to return to Overview root")
+		t.Fatal("expected NavigateBack to return to Overview root")
 	}
 	if app.IsInDetailView() {
 		t.Fatal("expected Overview stack back at root")

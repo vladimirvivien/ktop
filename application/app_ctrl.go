@@ -205,6 +205,7 @@ func (app *Application) ShowModalPage(name string, view tview.Primitive) {
 // DismissModalPage dismisses the named modal overlay page
 func (app *Application) DismissModalPage(name string) {
 	app.panel.dismissModalPage(name)
+	app.updateFooterContext()
 }
 
 // HasActiveModalPage returns true if a modal overlay page is currently displayed
@@ -1007,22 +1008,12 @@ func (app *Application) NavigateToNodeDetail(nodeName string) {
 	app.updateFooterContext()
 }
 
-// NavigateToPodDetail navigates to the pod detail view for the given pod
+// NavigateToPodDetail opens the shared Pod Inspector modal for the given pod
+// without replacing the active tab or depth-1 subpage on the navigation stack.
 func (app *Application) NavigateToPodDetail(namespace, podName string) {
-	resourceID := namespace + "/" + podName
-	if stack := app.activeNavStack(); stack != nil {
-		stack.Push(PageState{
-			PageType:   PagePodDetail,
-			ResourceID: resourceID,
-		})
-	}
-
 	if app.podDetailCallback != nil {
 		app.podDetailCallback(namespace, podName)
 	}
-
-	app.syncTabBar()
-	app.updateFooterContext()
 }
 
 // SetContainerLogsCallback sets the callback for navigating to container logs view
@@ -1030,22 +1021,12 @@ func (app *Application) SetContainerLogsCallback(callback func(namespace, podNam
 	app.containerLogsCallback = callback
 }
 
-// NavigateToContainerLogs navigates to the container logs view
+// NavigateToContainerLogs transitions the shared Pod Inspector modal to container logs
+// without pushing onto the top-level navigation stack.
 func (app *Application) NavigateToContainerLogs(namespace, podName, containerName string) {
-	resourceID := namespace + "/" + podName + "/" + containerName
-	if stack := app.activeNavStack(); stack != nil {
-		stack.Push(PageState{
-			PageType:   PageContainerLogs,
-			ResourceID: resourceID,
-		})
-	}
-
 	if app.containerLogsCallback != nil {
 		app.containerLogsCallback(namespace, podName, containerName)
 	}
-
-	app.syncTabBar()
-	app.updateFooterContext()
 }
 
 func (app *Application) presentDetailState(state *PageState) {

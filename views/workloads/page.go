@@ -265,7 +265,6 @@ func (p *Page) ensureDetailPanel() {
 		p.app.NavigateBack()
 	})
 	p.detailPanel.SetOnPodSelected(func(namespace, podName string) {
-		p.clearDetailState()
 		p.app.NavigateToPodDetail(namespace, podName)
 	})
 	p.detailPanel.SetAppFocus(func(prim tview.Primitive) {

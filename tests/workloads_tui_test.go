@@ -205,21 +205,49 @@ func TestWorkloadsTUI_EndToEndNavigationAndDrillDown(t *testing.T) {
 		t.Fatal("expected ESC to dismiss YAML modal")
 	}
 
-	// Tab moves focus from Deployment Detail -> Owned Pods; Enter opens Pod Detail.
+	// Tab moves focus from Deployment Detail -> Owned Pods; Enter opens the shared Pod Inspector modal.
 	sendAppKey(ts, app, tcell.KeyTab, 0, tcell.ModNone)
 	sendAppKey(ts, app, tcell.KeyEnter, 0, tcell.ModNone)
-	if got := application.FormatBreadcrumb("Workloads", app.GetNavigationStack().Breadcrumb()); got != "Workloads › deploy/default/api › pod/default/api-abc-1" {
-		t.Fatalf("unexpected breadcrumb after pod drill-down: %q", got)
+	if !app.HasActiveModalPage() {
+		t.Fatal("expected Enter on owned pod to open floating Pod Inspector modal")
+	}
+	// Underlying Deployment Detail breadcrumb stays anchored on the TabFrame behind the modal.
+	if got := application.FormatBreadcrumb("Workloads", app.GetNavigationStack().Breadcrumb()); got != "Workloads › deploy/default/api" {
+		t.Fatalf("expected depth-1 Deployment breadcrumb preserved behind Pod modal, got %q", got)
+	}
+	podModalScreen := ts.Text()
+	for _, want := range []string{"[1] Overview", "[2] Workloads", "Workloads › deploy/default/api", "Pod: default/api-abc-1", "app"} {
+		if !strings.Contains(podModalScreen, want) {
+			t.Fatalf("expected %q visible with floating Pod Inspector modal, got:\n%s", want, podModalScreen)
+		}
 	}
 
-	// ESC unwinds back to Workload Detail, then second ESC unwinds to Workloads root.
-	sendAppKey(ts, app, tcell.KeyEsc, 0, tcell.ModNone)
-	if !strings.Contains(ts.Text(), "Workloads › deploy/default/api") {
-		t.Fatalf("expected ESC to return to Workload Detail, got:\n%s", ts.Text())
+	// Pressing 'v' inside Pod modal switches inline to Pod YAML; ESC returns to Pod Detail.
+	sendAppKey(ts, app, tcell.KeyRune, 'v', tcell.ModNone)
+	podYAMLScreen := ts.Text()
+	for _, want := range []string{"Pod YAML: default/api-abc-1", "kind: Pod", "name: api-abc-1"} {
+		if !strings.Contains(podYAMLScreen, want) {
+			t.Fatalf("expected %q in inline Pod YAML view, got:\n%s", want, podYAMLScreen)
+		}
 	}
 	sendAppKey(ts, app, tcell.KeyEsc, 0, tcell.ModNone)
+	if !app.HasActiveModalPage() {
+		t.Fatal("expected ESC from Pod YAML to return to Pod Detail inside the same modal")
+	}
+
+	// ESC from Pod Detail closes the Pod Inspector modal and returns directly to Deployment Detail.
+	sendAppKey(ts, app, tcell.KeyEsc, 0, tcell.ModNone)
+	if app.HasActiveModalPage() {
+		t.Fatal("expected ESC from Pod Detail to close Pod Inspector modal")
+	}
+	if !strings.Contains(ts.Text(), "Workloads › deploy/default/api") {
+		t.Fatalf("expected Deployment Detail visible after closing Pod modal, got:\n%s", ts.Text())
+	}
+
+	// Next ESC unwinds Deployment Detail back to Workloads root.
+	sendAppKey(ts, app, tcell.KeyEsc, 0, tcell.ModNone)
 	if app.IsInDetailView() {
-		t.Fatal("expected second ESC to return to Workloads root")
+		t.Fatal("expected ESC from Deployment Detail to return to Workloads root")
 	}
 	if !strings.Contains(ts.Text(), "Summary") {
 		t.Fatalf("expected Workloads root after unwinding, got:\n%s", ts.Text())

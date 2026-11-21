@@ -20,15 +20,30 @@ type YAMLModalConfig struct {
 
 // YAMLModal renders syntax-highlighted YAML inside a centered, scrollable modal overlay.
 type YAMLModal struct {
-	grid     *tview.Grid
+	overlay  *OverlayFrame
+	box      *tview.Flex
 	textView *tview.TextView
 	rawYAML  string
 	onClose  func()
 	onYank   func(content string)
 }
 
-// NewYAMLModal constructs a centered, responsive modal displaying highlighted YAML content.
+// NewYAMLModal constructs a centered, responsive modal displaying highlighted YAML content
+// with transparent outer margins so header, tabs, parent frame, and footer stay visible.
 func NewYAMLModal(cfg YAMLModalConfig) *YAMLModal {
+	m := newYAMLModalCore(cfg)
+	m.overlay = NewOverlayFrame(m.box, 4, 3, 5, 5)
+	return m
+}
+
+// NewYAMLBox constructs the bordered, scrollable YAML view without an outer overlay wrapper,
+// suitable for embedding as a sub-view inside an existing modal container.
+func NewYAMLBox(cfg YAMLModalConfig) (*tview.Flex, *tview.TextView) {
+	m := newYAMLModalCore(cfg)
+	return m.box, m.textView
+}
+
+func newYAMLModalCore(cfg YAMLModalConfig) *YAMLModal {
 	m := &YAMLModal{
 		rawYAML: cfg.Content,
 		onClose: cfg.OnClose,
@@ -88,19 +103,14 @@ func NewYAMLModal(cfg YAMLModalConfig) *YAMLModal {
 		SetTitle(title).
 		SetTitleAlign(tview.AlignCenter)
 	SetFlexFocused(box, true)
-
-	// Proportional margins (~83% of screen) so the modal adapts to any terminal size.
-	m.grid = tview.NewGrid().
-		SetColumns(-1, -10, -1).
-		SetRows(-1, -10, -1).
-		AddItem(box, 1, 1, 1, 1, 0, 0, true)
+	m.box = box
 
 	return m
 }
 
 // GetRootView returns the modal root primitive for ShowModalPage layering.
 func (m *YAMLModal) GetRootView() tview.Primitive {
-	return m.grid
+	return m.overlay
 }
 
 // HandleInput processes scrolling, copy, and dismissal key events for the YAML modal.

@@ -72,6 +72,7 @@ type DetailPanel struct {
 	// Callbacks
 	onNodeNavigate        NodeNavigationCallback
 	onContainerSelected   ContainerSelectedCallback
+	onShowYAML            func(pod *corev1.Pod)
 	onBack                func()
 	onFooterContextChange func(focusedPanel string)
 }
@@ -91,6 +92,11 @@ func (p *DetailPanel) SetOnNodeNavigate(callback NodeNavigationCallback) {
 // SetOnContainerSelected sets the callback for when a container is selected (for logs)
 func (p *DetailPanel) SetOnContainerSelected(callback ContainerSelectedCallback) {
 	p.onContainerSelected = callback
+}
+
+// SetOnShowYAML sets the callback for inspecting the full Pod YAML.
+func (p *DetailPanel) SetOnShowYAML(callback func(pod *corev1.Pod)) {
+	p.onShowYAML = callback
 }
 
 // SetOnBack sets the callback for when user navigates back
@@ -262,6 +268,11 @@ func (p *DetailPanel) Layout(_ any) {
 				case 'l', 'L':
 					p.handleContainerSelect()
 					return nil
+				case 'v', 'V':
+					if p.data != nil && p.data.Pod != nil && p.onShowYAML != nil {
+						p.onShowYAML(p.data.Pod)
+						return nil
+					}
 				case 'n', 'N':
 					if p.data != nil && p.data.PodModel != nil && p.onNodeNavigate != nil {
 						p.onNodeNavigate(p.data.PodModel.Node)
@@ -305,7 +316,13 @@ func (p *DetailPanel) Layout(_ any) {
 					return nil
 				}
 			case tcell.KeyRune:
-				if event.Rune() == 'n' || event.Rune() == 'N' {
+				switch event.Rune() {
+				case 'v', 'V':
+					if p.data != nil && p.data.Pod != nil && p.onShowYAML != nil {
+						p.onShowYAML(p.data.Pod)
+						return nil
+					}
+				case 'n', 'N':
 					if p.data != nil && p.data.PodModel != nil && p.onNodeNavigate != nil {
 						p.onNodeNavigate(p.data.PodModel.Node)
 						return nil
@@ -396,14 +413,13 @@ func (p *DetailPanel) DrawBody(data any) {
 		}
 	}
 
-	// Update main title with breadcrumb navigation
+	// Update main title
 	if p.data.PodModel != nil {
-		p.root.SetTitle(fmt.Sprintf(" %s Pods > [::b]%s[::] ", ui.Icons.Package, p.data.PodModel.Name))
+		p.root.SetTitle(fmt.Sprintf(" %s Pod: [::b]%s/%s[::] ", ui.Icons.Package, p.data.PodModel.Namespace, p.data.PodModel.Name))
 	}
 
 	// Only draw info header if it's visible (hidden at panel height ≤31)
-	terminalHeight := ui.GetTerminalHeight(p.root)
-	if terminalHeight > 31 {
+	if p.effectiveHeight() > 31 {
 		p.drawInfoHeader()
 	}
 	p.drawSparklines() // Always draw sparklines (height varies based on terminal size)
@@ -1226,17 +1242,19 @@ func (p *DetailPanel) calculatePanelHeights(terminalHeight int) podDetailHeights
 	}
 }
 
+func (p *DetailPanel) effectiveHeight() int {
+	_, _, w, height := p.root.GetRect()
+	// tview.NewBox initializes unrendered primitives to (0, 0, 15, 10).
+	if height <= 0 || (w == 15 && height == 10) {
+		return 40
+	}
+	return height
+}
+
 // buildLayout builds the initial layout with correct sizes based on terminal dimensions.
 // Called once on first DrawBody() when dimensions are available.
 func (p *DetailPanel) buildLayout() {
-	// Get actual dimensions - don't build until we have real values
-	_, _, _, height := p.root.GetRect()
-	if height <= 0 {
-		// Panel not rendered yet, will try again next frame
-		return
-	}
-
-	terminalHeight := height
+	terminalHeight := p.effectiveHeight()
 	currentCategory := ui.GetHeightCategory(terminalHeight)
 	heights := p.calculatePanelHeights(terminalHeight)
 
@@ -1263,8 +1281,8 @@ func (p *DetailPanel) checkAndRebuildLayout() {
 	}
 
 	// Get actual dimensions
-	_, _, _, height := p.root.GetRect()
-	if height <= 0 {
+	_, _, w, height := p.root.GetRect()
+	if height <= 0 || (w == 15 && height == 10) {
 		return
 	}
 
