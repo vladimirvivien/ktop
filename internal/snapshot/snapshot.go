@@ -145,6 +145,7 @@ type PodData struct {
 	PSI                    PSIData         `json:"psi"`
 	NodePSIKernelSupported bool            `json:"node_psi_kernel_supported"`
 	CPUThrottledPct        float64         `json:"cpu_throttled_pct"`
+	ResizeStatus           string          `json:"resize_status,omitempty"`
 	Containers             []ContainerData `json:"containers,omitempty"`
 }
 

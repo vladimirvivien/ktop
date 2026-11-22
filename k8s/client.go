@@ -58,6 +58,7 @@ type Client struct {
 	discoClient       discovery.CachedDiscoveryInterface
 	metricsClient     *metricsclient.Clientset
 	metricsAvailCount int
+	metricsAPIVersion string
 	refreshTimeout    time.Duration
 	controller        *Controller
 }
@@ -193,9 +194,20 @@ func (k8s *Client) AssertMetricsAvailable() error {
 	}
 
 	avail := false
+	metricsVer := "v1beta1"
 	for _, group := range groups.Groups {
 		if group.Name == metricsapi.GroupName {
 			avail = true
+			if group.PreferredVersion.Version == "v1" {
+				metricsVer = "v1"
+			} else {
+				for _, gv := range group.Versions {
+					if gv.Version == "v1" {
+						metricsVer = "v1"
+						break
+					}
+				}
+			}
 			break
 		}
 	}
@@ -204,9 +216,49 @@ func (k8s *Client) AssertMetricsAvailable() error {
 		return fmt.Errorf("metrics api not available")
 	}
 
+	k8s.metricsAPIVersion = metricsVer
 	k8s.metricsAvailCount++
 
 	return nil
+}
+
+// MetricsAPIVersion returns the negotiated metrics.k8s.io API version ("v1" on
+// Kubernetes 1.37+ clusters exposing GA metrics, or "v1beta1" fallback).
+func (k8s *Client) MetricsAPIVersion() string {
+	k8s.RLock()
+	ver := k8s.metricsAPIVersion
+	disco := k8s.discoClient
+	k8s.RUnlock()
+	if ver != "" {
+		return ver
+	}
+	if disco == nil {
+		return "v1beta1"
+	}
+	groups, err := disco.ServerGroups()
+	if err != nil {
+		return "v1beta1"
+	}
+	ver = "v1beta1"
+	for _, group := range groups.Groups {
+		if group.Name == metricsapi.GroupName {
+			if group.PreferredVersion.Version == "v1" {
+				ver = "v1"
+			} else {
+				for _, gv := range group.Versions {
+					if gv.Version == "v1" {
+						ver = "v1"
+						break
+					}
+				}
+			}
+			break
+		}
+	}
+	k8s.Lock()
+	k8s.metricsAPIVersion = ver
+	k8s.Unlock()
+	return ver
 }
 
 func (k8s *Client) Controller() *Controller {

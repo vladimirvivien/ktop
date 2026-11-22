@@ -128,20 +128,48 @@ func (d *PodDetailData) GetContainers() []ContainerInfo {
 			}
 		}
 
-		// Resource requests
-		if cpu := container.Resources.Requests.Cpu(); cpu != nil && !cpu.IsZero() {
-			info.CPURequest = cpu.String()
-		}
-		if mem := container.Resources.Requests.Memory(); mem != nil && !mem.IsZero() {
-			info.MemoryRequest = mem.String()
+		// Resource requests & limits (prefer live In-Place Pod Vertical Scaling
+		// status.allocatedResources / status.resources when present).
+		cpuReq := container.Resources.Requests.Cpu()
+		memReq := container.Resources.Requests.Memory()
+		cpuLim := container.Resources.Limits.Cpu()
+		memLim := container.Resources.Limits.Memory()
+		if status, ok := statusMap[container.Name]; ok {
+			if q := status.AllocatedResources.Cpu(); q != nil && !q.IsZero() {
+				cpuReq = q
+			} else if status.Resources != nil {
+				if q := status.Resources.Requests.Cpu(); q != nil && !q.IsZero() {
+					cpuReq = q
+				}
+			}
+			if q := status.AllocatedResources.Memory(); q != nil && !q.IsZero() {
+				memReq = q
+			} else if status.Resources != nil {
+				if q := status.Resources.Requests.Memory(); q != nil && !q.IsZero() {
+					memReq = q
+				}
+			}
+			if status.Resources != nil {
+				if q := status.Resources.Limits.Cpu(); q != nil && !q.IsZero() {
+					cpuLim = q
+				}
+				if q := status.Resources.Limits.Memory(); q != nil && !q.IsZero() {
+					memLim = q
+				}
+			}
 		}
 
-		// Resource limits
-		if cpu := container.Resources.Limits.Cpu(); cpu != nil && !cpu.IsZero() {
-			info.CPULimit = cpu.String()
+		if cpuReq != nil && !cpuReq.IsZero() {
+			info.CPURequest = cpuReq.String()
 		}
-		if mem := container.Resources.Limits.Memory(); mem != nil && !mem.IsZero() {
-			info.MemoryLimit = mem.String()
+		if memReq != nil && !memReq.IsZero() {
+			info.MemoryRequest = memReq.String()
+		}
+		if cpuLim != nil && !cpuLim.IsZero() {
+			info.CPULimit = cpuLim.String()
+		}
+		if memLim != nil && !memLim.IsZero() {
+			info.MemoryLimit = memLim.String()
 		}
 
 		// Resource usage from metrics
@@ -205,6 +233,115 @@ func formatProbe(probe *corev1.Probe) string {
 	return ""
 }
 
+// PodEffectiveResources aggregates effective CPU/Memory requests and limits
+// accounting for PodLevelResources (v1.34+) and In-Place Pod Vertical Scaling (v1.35+).
+type PodEffectiveResources struct {
+	ReqCPUMillis int64
+	ReqMemBytes  int64
+	LimCPUMillis int64
+	LimMemBytes  int64
+	PodLevel     bool
+	ResizeStatus string
+}
+
+// GetEffectiveResources computes effective pod-wide requests and limits.
+func (d *PodDetailData) GetEffectiveResources() PodEffectiveResources {
+	var out PodEffectiveResources
+	if d == nil || d.Pod == nil {
+		return out
+	}
+	pod := d.Pod
+	out.ResizeStatus = GetPodResizeStatus(pod)
+
+	statusMap := make(map[string]corev1.ContainerStatus, len(pod.Status.ContainerStatuses))
+	for _, cs := range pod.Status.ContainerStatuses {
+		statusMap[cs.Name] = cs
+	}
+
+	for _, c := range pod.Spec.Containers {
+		cReqCPU := c.Resources.Requests.Cpu()
+		cReqMem := c.Resources.Requests.Memory()
+		cLimCPU := c.Resources.Limits.Cpu()
+		cLimMem := c.Resources.Limits.Memory()
+		if cs, ok := statusMap[c.Name]; ok {
+			if q := cs.AllocatedResources.Cpu(); q != nil && !q.IsZero() {
+				cReqCPU = q
+			} else if cs.Resources != nil {
+				if q := cs.Resources.Requests.Cpu(); q != nil && !q.IsZero() {
+					cReqCPU = q
+				}
+			}
+			if q := cs.AllocatedResources.Memory(); q != nil && !q.IsZero() {
+				cReqMem = q
+			} else if cs.Resources != nil {
+				if q := cs.Resources.Requests.Memory(); q != nil && !q.IsZero() {
+					cReqMem = q
+				}
+			}
+			if cs.Resources != nil {
+				if q := cs.Resources.Limits.Cpu(); q != nil && !q.IsZero() {
+					cLimCPU = q
+				}
+				if q := cs.Resources.Limits.Memory(); q != nil && !q.IsZero() {
+					cLimMem = q
+				}
+			}
+		}
+		if cReqCPU != nil {
+			out.ReqCPUMillis += cReqCPU.MilliValue()
+		}
+		if cReqMem != nil {
+			out.ReqMemBytes += cReqMem.Value()
+		}
+		if cLimCPU != nil {
+			out.LimCPUMillis += cLimCPU.MilliValue()
+		}
+		if cLimMem != nil {
+			out.LimMemBytes += cLimMem.Value()
+		}
+	}
+
+	if pod.Status.AllocatedResources != nil {
+		if q := pod.Status.AllocatedResources.Cpu(); q != nil && !q.IsZero() {
+			out.ReqCPUMillis = q.MilliValue()
+		}
+		if q := pod.Status.AllocatedResources.Memory(); q != nil && !q.IsZero() {
+			out.ReqMemBytes = q.Value()
+		}
+	}
+	if pod.Status.Resources != nil {
+		out.PodLevel = true
+		if q := pod.Status.Resources.Requests.Cpu(); q != nil && !q.IsZero() {
+			out.ReqCPUMillis = q.MilliValue()
+		}
+		if q := pod.Status.Resources.Requests.Memory(); q != nil && !q.IsZero() {
+			out.ReqMemBytes = q.Value()
+		}
+		if q := pod.Status.Resources.Limits.Cpu(); q != nil && !q.IsZero() {
+			out.LimCPUMillis = q.MilliValue()
+		}
+		if q := pod.Status.Resources.Limits.Memory(); q != nil && !q.IsZero() {
+			out.LimMemBytes = q.Value()
+		}
+	} else if pod.Spec.Resources != nil {
+		out.PodLevel = true
+		if q := pod.Spec.Resources.Requests.Cpu(); q != nil && !q.IsZero() {
+			out.ReqCPUMillis = q.MilliValue()
+		}
+		if q := pod.Spec.Resources.Requests.Memory(); q != nil && !q.IsZero() {
+			out.ReqMemBytes = q.Value()
+		}
+		if q := pod.Spec.Resources.Limits.Cpu(); q != nil && !q.IsZero() {
+			out.LimCPUMillis = q.MilliValue()
+		}
+		if q := pod.Spec.Resources.Limits.Memory(); q != nil && !q.IsZero() {
+			out.LimMemBytes = q.Value()
+		}
+	}
+
+	return out
+}
+
 // GetConditions returns structured pod condition information
 func (d *PodDetailData) GetConditions() []PodConditionInfo {
 	if d.Pod == nil {
@@ -214,6 +351,12 @@ func (d *PodDetailData) GetConditions() []PodConditionInfo {
 	conditions := make([]PodConditionInfo, 0, len(d.Pod.Status.Conditions))
 	for _, cond := range d.Pod.Status.Conditions {
 		healthy := cond.Status == corev1.ConditionTrue
+		switch cond.Type {
+		case corev1.PodResizePending:
+			healthy = cond.Status != corev1.ConditionTrue
+		case corev1.PodResizeInProgress:
+			healthy = cond.Status != corev1.ConditionTrue || cond.Reason != string(corev1.PodReasonError)
+		}
 
 		conditions = append(conditions, PodConditionInfo{
 			Type:    string(cond.Type),

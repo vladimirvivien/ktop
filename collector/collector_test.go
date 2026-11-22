@@ -98,7 +98,7 @@ func TestCollector_WindowAndHealthScoreStats(t *testing.T) {
 	var progress bytes.Buffer
 	c := New(&fakeProvider{scores: []int{100, 80, 90}}, Options{
 		Version:        "v0.7.1",
-		Duration:       110 * time.Millisecond,
+		Duration:       190 * time.Millisecond,
 		Interval:       40 * time.Millisecond,
 		Quiet:          true,
 		ProgressWriter: &progress,

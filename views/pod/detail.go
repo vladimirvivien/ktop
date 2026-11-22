@@ -841,46 +841,39 @@ func (p *DetailPanel) drawPodDetailSection() {
 
 	// === CENTER COLUMN BOTTOM: Resources ===
 	var resourcesBuilder strings.Builder
-	resourcesBuilder.WriteString(sectionOpen + "Resources[::-]\n")
+	effRes := p.data.GetEffectiveResources()
+	resHeading := "Resources"
+	if effRes.PodLevel {
+		resHeading = "Resources (pod-level)"
+	}
+	resourcesBuilder.WriteString(sectionOpen + resHeading + "[::-]\n")
 
 	if p.data.Pod != nil {
-		var totalReqCPU, totalReqMem, totalLimCPU, totalLimMem int64
-		for _, c := range p.data.Pod.Spec.Containers {
-			if c.Resources.Requests.Cpu() != nil {
-				totalReqCPU += c.Resources.Requests.Cpu().MilliValue()
-			}
-			if c.Resources.Requests.Memory() != nil {
-				totalReqMem += c.Resources.Requests.Memory().Value()
-			}
-			if c.Resources.Limits.Cpu() != nil {
-				totalLimCPU += c.Resources.Limits.Cpu().MilliValue()
-			}
-			if c.Resources.Limits.Memory() != nil {
-				totalLimMem += c.Resources.Limits.Memory().Value()
-			}
-		}
-
 		// Format requests
 		reqCPU := "n/a"
 		reqMem := "n/a"
-		if totalReqCPU > 0 {
-			reqCPU = fmt.Sprintf("%dm", totalReqCPU)
+		if effRes.ReqCPUMillis > 0 {
+			reqCPU = fmt.Sprintf("%dm", effRes.ReqCPUMillis)
 		}
-		if totalReqMem > 0 {
-			reqMem = ui.FormatBytes(totalReqMem)
+		if effRes.ReqMemBytes > 0 {
+			reqMem = ui.FormatBytes(effRes.ReqMemBytes)
 		}
 		resourcesBuilder.WriteString(fmt.Sprintf("%sRequests:%s %s / %s\n", mutedOpen, closeTag, reqCPU, reqMem))
 
 		// Format limits
 		limCPU := "n/a"
 		limMem := "n/a"
-		if totalLimCPU > 0 {
-			limCPU = fmt.Sprintf("%dm", totalLimCPU)
+		if effRes.LimCPUMillis > 0 {
+			limCPU = fmt.Sprintf("%dm", effRes.LimCPUMillis)
 		}
-		if totalLimMem > 0 {
-			limMem = ui.FormatBytes(totalLimMem)
+		if effRes.LimMemBytes > 0 {
+			limMem = ui.FormatBytes(effRes.LimMemBytes)
 		}
-		resourcesBuilder.WriteString(fmt.Sprintf("%sLimits:%s   %s / %s\n", mutedOpen, closeTag, limCPU, limMem))
+		resizeSuffix := ""
+		if effRes.ResizeStatus != "" {
+			resizeSuffix = fmt.Sprintf("  %sResize:%s %s", mutedOpen, closeTag, effRes.ResizeStatus)
+		}
+		resourcesBuilder.WriteString(fmt.Sprintf("%sLimits:%s   %s / %s%s\n", mutedOpen, closeTag, limCPU, limMem, resizeSuffix))
 	} else {
 		resourcesBuilder.WriteString(mutedOpen + "n/a" + closeTag)
 	}

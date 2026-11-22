@@ -7,6 +7,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metricsv1 "k8s.io/metrics/pkg/apis/metrics/v1"
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 )
 
@@ -270,5 +271,48 @@ func TestMetricsServerSource_New(t *testing.T) {
 
 	if source.errorCount != 0 {
 		t.Errorf("Expected errorCount to be 0, got %d", source.errorCount)
+	}
+}
+
+func TestConvertMetricsV1_GA(t *testing.T) {
+	ts := metav1.NewTime(time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC))
+	nm := &metricsv1.NodeMetrics{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-v1"},
+		Timestamp:  ts,
+		Usage: v1.ResourceList{
+			v1.ResourceCPU:    resource.MustParse("1200m"),
+			v1.ResourceMemory: resource.MustParse("4Gi"),
+		},
+	}
+	gotNode := convertNodeMetricsV1(nm)
+	if gotNode.NodeName != "node-v1" || gotNode.CPUUsage.MilliValue() != 1200 || gotNode.MemoryUsage.Value() != 4*1024*1024*1024 {
+		t.Fatalf("unexpected v1 NodeMetrics conversion: %+v", gotNode)
+	}
+
+	pm := &metricsv1.PodMetrics{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod-v1", Namespace: "prod"},
+		Timestamp:  ts,
+		Containers: []metricsv1.ContainerMetrics{
+			{
+				Name: "api",
+				Usage: v1.ResourceList{
+					v1.ResourceCPU:    resource.MustParse("350m"),
+					v1.ResourceMemory: resource.MustParse("256Mi"),
+				},
+			},
+		},
+	}
+	gotPod := convertPodMetricsV1(pm)
+	if gotPod.PodName != "pod-v1" || gotPod.Namespace != "prod" || len(gotPod.Containers) != 1 || gotPod.Containers[0].CPUUsage.MilliValue() != 350 {
+		t.Fatalf("unexpected v1 PodMetrics conversion: %+v", gotPod)
+	}
+
+	src := &MetricsServerSource{useV1: true}
+	if src.GetSourceInfo().Version != "v1" {
+		t.Fatalf("expected Version=v1, got %q", src.GetSourceInfo().Version)
+	}
+	src.downgradeToV1beta1()
+	if src.GetSourceInfo().Version != "v1beta1" {
+		t.Fatalf("expected Version=v1beta1 after downgrade, got %q", src.GetSourceInfo().Version)
 	}
 }

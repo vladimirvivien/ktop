@@ -349,6 +349,7 @@ func podDataFromModel(p model.PodModel) PodData {
 		PSI:                    psiDataFromMetrics(p.PSI),
 		NodePSIKernelSupported: p.NodePSIKernelSupported,
 		CPUThrottledPct:        p.CPUThrottledPct,
+		ResizeStatus:           p.ResizeStatus,
 	}
 }
 
@@ -376,6 +377,7 @@ func (p PodData) ToPodModel() model.PodModel {
 		PSI:                    p.PSI.toMetrics(),
 		NodePSIKernelSupported: p.NodePSIKernelSupported,
 		CPUThrottledPct:        p.CPUThrottledPct,
+		ResizeStatus:           p.ResizeStatus,
 	}
 }
 

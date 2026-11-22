@@ -10,7 +10,9 @@ import (
 	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/prom"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metricsv1 "k8s.io/metrics/pkg/apis/metrics/v1"
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
@@ -26,6 +28,7 @@ type historyDataPoint struct {
 // for historical data to support sparklines and trends.
 type MetricsServerSource struct {
 	metricsClient *metricsclient.Clientset
+	useV1         bool
 	healthy       bool
 	mu            sync.RWMutex
 	lastError     error
@@ -47,36 +50,71 @@ const DefaultMaxHistorySamples = 120 // ~10 minutes at 5s scrape interval
 // NewMetricsServerSource creates a new MetricsServerSource wrapping the k8s.Controller.
 func NewMetricsServerSource(controller *k8s.Controller) *MetricsServerSource {
 	var metricsClient *metricsclient.Clientset
+	var useV1 bool
 	if controller != nil {
 		if client := controller.GetClient(); client != nil {
 			metricsClient = client.GetMetricsClient()
+			useV1 = client.MetricsAPIVersion() == "v1"
 		}
 	}
 
 	return &MetricsServerSource{
 		metricsClient:     metricsClient,
+		useV1:             useV1,
 		healthy:           false, // Start unhealthy, will become healthy on first successful fetch
 		historyBuffers:    make(map[string]*prom.RingBuffer[historyDataPoint]),
 		maxHistorySamples: DefaultMaxHistorySamples,
 	}
 }
 
+func (m *MetricsServerSource) prefersV1() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.useV1
+}
+
+func (m *MetricsServerSource) downgradeToV1beta1() {
+	m.mu.Lock()
+	m.useV1 = false
+	m.mu.Unlock()
+}
+
+func (m *MetricsServerSource) apiVersionLocked() string {
+	if m.useV1 {
+		return "v1"
+	}
+	return "v1beta1"
+}
+
 // GetNodeMetrics retrieves metrics for a specific node from the Metrics Server.
 func (m *MetricsServerSource) GetNodeMetrics(ctx context.Context, nodeName string) (*metrics.NodeMetrics, error) {
-	// Call Metrics Server API directly to avoid circular dependency
 	if m.metricsClient == nil {
 		m.recordError(fmt.Errorf("metrics client not available"))
 		return nil, fmt.Errorf("metrics client not available")
 	}
 
-	nodeMetrics, err := m.metricsClient.MetricsV1beta1().NodeMetricses().Get(ctx, nodeName, metav1.GetOptions{})
-	if err != nil {
-		m.recordError(err)
-		return nil, fmt.Errorf("metrics server: %w", err)
+	var result *metrics.NodeMetrics
+	if m.prefersV1() {
+		nmV1, err := m.metricsClient.MetricsV1().NodeMetricses().Get(ctx, nodeName, metav1.GetOptions{})
+		if err == nil {
+			result = convertNodeMetricsV1(nmV1)
+		} else if apierrors.IsNotFound(err) {
+			m.downgradeToV1beta1()
+		} else {
+			m.recordError(err)
+			return nil, fmt.Errorf("metrics server: %w", err)
+		}
+	}
+	if result == nil {
+		nodeMetrics, err := m.metricsClient.MetricsV1beta1().NodeMetricses().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			m.recordError(err)
+			return nil, fmt.Errorf("metrics server: %w", err)
+		}
+		result = convertNodeMetrics(nodeMetrics)
 	}
 
 	m.recordSuccess()
-	result := convertNodeMetrics(nodeMetrics)
 
 	// Record history for CPU and memory
 	now := time.Now().UnixMilli()
@@ -92,21 +130,33 @@ func (m *MetricsServerSource) GetNodeMetrics(ctx context.Context, nodeName strin
 
 // GetPodMetrics retrieves metrics for a specific pod by namespace and name.
 func (m *MetricsServerSource) GetPodMetrics(ctx context.Context, namespace, podName string) (*metrics.PodMetrics, error) {
-	// Call Metrics Server API directly
 	if m.metricsClient == nil {
 		m.recordError(fmt.Errorf("metrics client not available"))
 		return nil, fmt.Errorf("metrics client not available")
 	}
 
-	podMetrics, err := m.metricsClient.MetricsV1beta1().PodMetricses(namespace).Get(ctx, podName, metav1.GetOptions{})
-	if err != nil {
-		// Metrics Server unavailable - return error so caller can handle graceful degradation
-		m.recordError(err)
-		return nil, fmt.Errorf("metrics server unavailable: %w", err)
+	var result *metrics.PodMetrics
+	if m.prefersV1() {
+		pmV1, err := m.metricsClient.MetricsV1().PodMetricses(namespace).Get(ctx, podName, metav1.GetOptions{})
+		if err == nil {
+			result = convertPodMetricsV1(pmV1)
+		} else if apierrors.IsNotFound(err) {
+			m.downgradeToV1beta1()
+		} else {
+			m.recordError(err)
+			return nil, fmt.Errorf("metrics server unavailable: %w", err)
+		}
+	}
+	if result == nil {
+		podMetrics, err := m.metricsClient.MetricsV1beta1().PodMetricses(namespace).Get(ctx, podName, metav1.GetOptions{})
+		if err != nil {
+			m.recordError(err)
+			return nil, fmt.Errorf("metrics server unavailable: %w", err)
+		}
+		result = convertPodMetrics(podMetrics)
 	}
 
 	m.recordSuccess()
-	result := convertPodMetrics(podMetrics)
 
 	// Record aggregated history for CPU and memory across all containers
 	now := time.Now().UnixMilli()
@@ -129,9 +179,6 @@ func (m *MetricsServerSource) GetPodMetrics(ctx context.Context, namespace, podN
 
 // GetMetricsForPod retrieves metrics for a specific pod object.
 func (m *MetricsServerSource) GetMetricsForPod(ctx context.Context, pod metav1.Object) (*metrics.PodMetrics, error) {
-	// Note: k8s.Controller.GetPodMetricsByName expects *v1.Pod, not just metav1.Object
-	// This is a limitation we'll need to address in a future PR.
-	// For now, use GetPodMetrics with namespace/name or GetAllPodMetrics and filter.
 	return m.GetPodMetrics(ctx, pod.GetNamespace(), pod.GetName())
 }
 
@@ -142,10 +189,26 @@ func (m *MetricsServerSource) GetPodNetworkDiskMetrics(ctx context.Context, name
 
 // GetAllPodMetrics retrieves metrics for all pods.
 func (m *MetricsServerSource) GetAllPodMetrics(ctx context.Context) ([]*metrics.PodMetrics, error) {
-	// Call Metrics Server API directly
 	if m.metricsClient == nil {
 		m.recordError(fmt.Errorf("metrics client not available"))
 		return nil, fmt.Errorf("metrics client not available")
+	}
+
+	if m.prefersV1() {
+		listV1, err := m.metricsClient.MetricsV1().PodMetricses("").List(ctx, metav1.ListOptions{})
+		if err == nil {
+			m.recordSuccess()
+			result := make([]*metrics.PodMetrics, 0, len(listV1.Items))
+			for i := range listV1.Items {
+				result = append(result, convertPodMetricsV1(&listV1.Items[i]))
+			}
+			return result, nil
+		}
+		if !apierrors.IsNotFound(err) {
+			m.recordError(err)
+			return nil, fmt.Errorf("metrics server: %w", err)
+		}
+		m.downgradeToV1beta1()
 	}
 
 	podMetricsList, err := m.metricsClient.MetricsV1beta1().PodMetricses("").List(ctx, metav1.ListOptions{})
@@ -184,7 +247,7 @@ func (m *MetricsServerSource) GetSourceInfo() metrics.SourceInfo {
 
 	return metrics.SourceInfo{
 		Type:         metrics.SourceTypeMetricsServer,
-		Version:      "v1beta1",
+		Version:      m.apiVersionLocked(),
 		LastScrape:   time.Now(), // Metrics Server doesn't expose this, use current time
 		MetricsCount: 2,          // CPU and memory
 		ErrorCount:   m.errorCount,
@@ -207,7 +270,7 @@ func (m *MetricsServerSource) SetHealthCallback(callback func(healthy bool, info
 func (m *MetricsServerSource) buildSourceInfoLocked(healthy bool) metrics.SourceInfo {
 	return metrics.SourceInfo{
 		Type:         metrics.SourceTypeMetricsServer,
-		Version:      "v1beta1",
+		Version:      m.apiVersionLocked(),
 		LastScrape:   time.Now(),
 		MetricsCount: 2,
 		ErrorCount:   m.errorCount,
@@ -263,6 +326,34 @@ func (m *MetricsServerSource) recordSuccess() {
 	// Notify outside the lock to avoid deadlock
 	if shouldNotify {
 		cb(true, info)
+	}
+}
+
+// convertNodeMetricsV1 converts GA metrics.k8s.io/v1 NodeMetrics to metrics.NodeMetrics.
+func convertNodeMetricsV1(nm *metricsv1.NodeMetrics) *metrics.NodeMetrics {
+	return &metrics.NodeMetrics{
+		NodeName:    nm.Name,
+		Timestamp:   nm.Timestamp.Time,
+		CPUUsage:    nm.Usage.Cpu(),
+		MemoryUsage: nm.Usage.Memory(),
+	}
+}
+
+// convertPodMetricsV1 converts GA metrics.k8s.io/v1 PodMetrics to metrics.PodMetrics.
+func convertPodMetricsV1(pm *metricsv1.PodMetrics) *metrics.PodMetrics {
+	containers := make([]metrics.ContainerMetrics, 0, len(pm.Containers))
+	for _, c := range pm.Containers {
+		containers = append(containers, metrics.ContainerMetrics{
+			Name:        c.Name,
+			CPUUsage:    c.Usage.Cpu(),
+			MemoryUsage: c.Usage.Memory(),
+		})
+	}
+	return &metrics.PodMetrics{
+		PodName:    pm.Name,
+		Namespace:  pm.Namespace,
+		Timestamp:  pm.Timestamp.Time,
+		Containers: containers,
 	}
 }
 

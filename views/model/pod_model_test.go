@@ -136,3 +136,92 @@ func TestSortPodModelPointersBy(t *testing.T) {
 		t.Fatalf("expected a-pod, b-pod on MEM desc sort, got %s, %s", pods[0].Name, pods[1].Name)
 	}
 }
+
+func TestPodLevelResourcesAndInPlaceResize(t *testing.T) {
+	t.Run("PodLevelResources budget overrides zero container requests", func(t *testing.T) {
+		pod := &v1.Pod{
+			Spec: v1.PodSpec{
+				Resources: &v1.ResourceRequirements{
+					Requests: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("1500m"),
+						v1.ResourceMemory: resource.MustParse("1Gi"),
+					},
+					Limits: v1.ResourceList{
+						v1.ResourceCPU:    resource.MustParse("2"),
+						v1.ResourceMemory: resource.MustParse("2Gi"),
+					},
+				},
+				Containers: []v1.Container{{Name: "app"}, {Name: "sidecar"}},
+			},
+		}
+
+		sum := GetPodContainerSummary(pod)
+		if sum.RequestedCpuQty.MilliValue() != 1500 {
+			t.Fatalf("RequestedCpuQty = %dm, want 1500m", sum.RequestedCpuQty.MilliValue())
+		}
+		if sum.RequestedMemQty.Value() != 1024*1024*1024 {
+			t.Fatalf("RequestedMemQty = %d, want 1Gi", sum.RequestedMemQty.Value())
+		}
+
+		detail := &PodDetailData{Pod: pod}
+		eff := detail.GetEffectiveResources()
+		if !eff.PodLevel || eff.ReqCPUMillis != 1500 || eff.LimCPUMillis != 2000 {
+			t.Fatalf("unexpected effective resources: %+v", eff)
+		}
+	})
+
+	t.Run("In-Place Pod Vertical Scaling AllocatedResources and resize conditions", func(t *testing.T) {
+		pod := &v1.Pod{
+			Spec: v1.PodSpec{
+				Containers: []v1.Container{
+					{
+						Name: "app",
+						Resources: v1.ResourceRequirements{
+							Requests: v1.ResourceList{
+								v1.ResourceCPU:    resource.MustParse("250m"),
+								v1.ResourceMemory: resource.MustParse("256Mi"),
+							},
+						},
+					},
+				},
+			},
+			Status: v1.PodStatus{
+				ContainerStatuses: []v1.ContainerStatus{
+					{
+						Name: "app",
+						AllocatedResources: v1.ResourceList{
+							v1.ResourceCPU:    resource.MustParse("750m"),
+							v1.ResourceMemory: resource.MustParse("512Mi"),
+						},
+					},
+				},
+				Conditions: []v1.PodCondition{
+					{Type: v1.PodReady, Status: v1.ConditionTrue},
+					{Type: v1.PodResizePending, Status: v1.ConditionTrue, Reason: string(v1.PodReasonDeferred)},
+				},
+			},
+		}
+
+		sum := GetPodContainerSummary(pod)
+		if sum.RequestedCpuQty.MilliValue() != 750 {
+			t.Fatalf("expected live allocated CPU 750m, got %dm", sum.RequestedCpuQty.MilliValue())
+		}
+		if sum.RequestedMemQty.Value() != 512*1024*1024 {
+			t.Fatalf("expected live allocated memory 512Mi, got %d", sum.RequestedMemQty.Value())
+		}
+		if got := GetPodResizeStatus(pod); got != "Deferred" {
+			t.Fatalf("GetPodResizeStatus = %q, want Deferred", got)
+		}
+
+		detail := &PodDetailData{Pod: pod}
+		containers := detail.GetContainers()
+		if len(containers) != 1 || containers[0].CPURequest != "750m" || containers[0].MemoryRequest != "512Mi" {
+			t.Fatalf("expected container live allocated requests, got %+v", containers)
+		}
+		for _, cond := range detail.GetConditions() {
+			if cond.Type == string(v1.PodResizePending) && cond.Healthy {
+				t.Fatalf("expected active PodResizePending condition to be marked unhealthy")
+			}
+		}
+	})
+}

@@ -49,6 +49,10 @@ type PodModel struct {
 	// CPUThrottledPct is the worst-case CFS CPU throttling percentage (0.0-100.0)
 	// across workload containers in this pod.
 	CPUThrottledPct float64
+
+	// ResizeStatus reflects active In-Place Pod Vertical Scaling state
+	// (e.g., "InProgress", "Deferred", "Infeasible", "Error"), empty when none.
+	ResizeStatus string
 }
 
 type PodContainerSummary struct {
@@ -319,6 +323,49 @@ func NewPodModel(pod *v1.Pod, podMetrics *metricsV1beta1.PodMetrics, nodeMetrics
 		ReadyContainers:    statusSummary.Ready,
 		TotalContainers:    statusSummary.Total,
 		Restarts:           statusSummary.Restarts,
+		ResizeStatus:       GetPodResizeStatus(pod),
+	}
+}
+
+// GetPodResizeStatus derives an operator-facing In-Place Pod Vertical Scaling
+// status from Kubernetes v1.35+ pod resize conditions (with fallback to the
+// deprecated status.resize field on older clusters).
+func GetPodResizeStatus(pod *v1.Pod) string {
+	if pod == nil {
+		return ""
+	}
+	var pendingReason string
+	var inProgress bool
+	var inProgressErr bool
+	for _, cond := range pod.Status.Conditions {
+		if cond.Status != v1.ConditionTrue {
+			continue
+		}
+		switch cond.Type {
+		case v1.PodResizePending:
+			if cond.Reason != "" {
+				pendingReason = cond.Reason
+			} else {
+				pendingReason = "Pending"
+			}
+		case v1.PodResizeInProgress:
+			inProgress = true
+			if cond.Reason == string(v1.PodReasonError) {
+				inProgressErr = true
+			}
+		}
+	}
+	switch {
+	case inProgressErr:
+		return "Error"
+	case pendingReason != "":
+		return pendingReason
+	case inProgress:
+		return "InProgress"
+	case pod.Status.Resize != "":
+		return string(pod.Status.Resize)
+	default:
+		return ""
 	}
 }
 
@@ -382,18 +429,107 @@ func GetPodContainerSummary(pod *v1.Pod) PodContainerSummary {
 	cpus := resource.NewQuantity(0, resource.DecimalSI)
 	var ports int
 	var mounts int
+	if pod == nil {
+		return PodContainerSummary{RequestedMemQty: mems, RequestedCpuQty: cpus}
+	}
+
+	statusByName := make(map[string]v1.ContainerStatus, len(pod.Status.ContainerStatuses)+len(pod.Status.InitContainerStatuses))
+	for _, cs := range pod.Status.ContainerStatuses {
+		statusByName[cs.Name] = cs
+	}
+	for _, cs := range pod.Status.InitContainerStatuses {
+		statusByName[cs.Name] = cs
+	}
+
+	effectiveReq := func(c v1.Container) (cpu, mem *resource.Quantity) {
+		cpu = c.Resources.Requests.Cpu()
+		mem = c.Resources.Requests.Memory()
+		if cs, ok := statusByName[c.Name]; ok {
+			if q := cs.AllocatedResources.Cpu(); q != nil && !q.IsZero() {
+				cpu = q
+			} else if cs.Resources != nil {
+				if q := cs.Resources.Requests.Cpu(); q != nil && !q.IsZero() {
+					cpu = q
+				}
+			}
+			if q := cs.AllocatedResources.Memory(); q != nil && !q.IsZero() {
+				mem = q
+			} else if cs.Resources != nil {
+				if q := cs.Resources.Requests.Memory(); q != nil && !q.IsZero() {
+					mem = q
+				}
+			}
+		}
+		return cpu, mem
+	}
+
 	for _, container := range pod.Spec.Containers {
-		mems.Add(*container.Resources.Requests.Memory())
-		cpus.Add(*container.Resources.Requests.Cpu())
+		cCPU, cMem := effectiveReq(container)
+		if cMem != nil {
+			mems.Add(*cMem)
+		}
+		if cCPU != nil {
+			cpus.Add(*cCPU)
+		}
 		ports += len(container.Ports)
 		mounts += len(container.VolumeMounts)
 	}
 
 	for _, container := range pod.Spec.InitContainers {
-		mems.Add(*container.Resources.Requests.Memory())
-		cpus.Add(*container.Resources.Requests.Cpu())
+		cCPU, cMem := effectiveReq(container)
+		if cMem != nil {
+			mems.Add(*cMem)
+		}
+		if cCPU != nil {
+			cpus.Add(*cCPU)
+		}
 		ports += len(container.Ports)
 		mounts += len(container.VolumeMounts)
+	}
+
+	// Kubernetes v1.34+ PodLevelResources / v1.35+ pod-level AllocatedResources:
+	// when pod-level requests or node-allocated pod totals are declared, prefer
+	// them over summed container specs so shared pod budgets are represented accurately.
+	var podLevelCPU, podLevelMem *resource.Quantity
+	if pod.Status.AllocatedResources != nil {
+		if q := pod.Status.AllocatedResources.Cpu(); q != nil && !q.IsZero() {
+			podLevelCPU = q
+		}
+		if q := pod.Status.AllocatedResources.Memory(); q != nil && !q.IsZero() {
+			podLevelMem = q
+		}
+	}
+	if pod.Status.Resources != nil {
+		if podLevelCPU == nil {
+			if q := pod.Status.Resources.Requests.Cpu(); q != nil && !q.IsZero() {
+				podLevelCPU = q
+			}
+		}
+		if podLevelMem == nil {
+			if q := pod.Status.Resources.Requests.Memory(); q != nil && !q.IsZero() {
+				podLevelMem = q
+			}
+		}
+	}
+	if pod.Spec.Resources != nil {
+		if podLevelCPU == nil {
+			if q := pod.Spec.Resources.Requests.Cpu(); q != nil && !q.IsZero() {
+				podLevelCPU = q
+			}
+		}
+		if podLevelMem == nil {
+			if q := pod.Spec.Resources.Requests.Memory(); q != nil && !q.IsZero() {
+				podLevelMem = q
+			}
+		}
+	}
+	if podLevelCPU != nil {
+		q := podLevelCPU.DeepCopy()
+		cpus = &q
+	}
+	if podLevelMem != nil {
+		q := podLevelMem.DeepCopy()
+		mems = &q
 	}
 
 	if pod.Spec.Overhead != nil {

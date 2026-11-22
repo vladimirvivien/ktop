@@ -218,6 +218,8 @@ func (e *mockK8sEnv) handlePods(w http.ResponseWriter, r *http.Request) {
 		ch := make(chan watch.Event, 8)
 		e.mu.Lock()
 		e.podWatchChans[ch] = struct{}{}
+		podsCopy := append([]coreV1.Pod(nil), e.pods...)
+		rv := fmt.Sprintf("%d", e.resourceVersion.Load())
 		e.mu.Unlock()
 		defer func() {
 			e.mu.Lock()
@@ -228,11 +230,36 @@ func (e *mockK8sEnv) handlePods(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		flusher, _ := w.(http.Flusher)
+		enc := json.NewEncoder(w)
+
+		if r.URL.Query().Get("sendInitialEvents") == "true" {
+			for i := range podsCopy {
+				p := podsCopy[i]
+				p.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "Pod"}
+				_ = enc.Encode(map[string]any{
+					"type":   watch.Added,
+					"object": &p,
+				})
+			}
+			_ = enc.Encode(map[string]any{
+				"type": watch.Bookmark,
+				"object": map[string]any{
+					"apiVersion": "v1",
+					"kind":       "Pod",
+					"metadata": map[string]any{
+						"resourceVersion": rv,
+						"annotations": map[string]string{
+							metav1.InitialEventsAnnotationKey: "true",
+						},
+					},
+				},
+			})
+		}
+
 		if flusher != nil {
 			flusher.Flush()
 		}
 
-		enc := json.NewEncoder(w)
 		for {
 			select {
 			case <-r.Context().Done():
@@ -315,8 +342,52 @@ func (e *mockK8sEnv) handleListOrWatch(listBody func() any, extra func(http.Resp
 		if r.URL.Query().Get("watch") == "true" {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			if f, ok := w.(http.Flusher); ok {
-				f.Flush()
+			flusher, _ := w.(http.Flusher)
+			if r.URL.Query().Get("sendInitialEvents") == "true" {
+				raw, _ := json.Marshal(listBody())
+				var decoded struct {
+					APIVersion string `json:"apiVersion"`
+					Kind       string `json:"kind"`
+					Metadata   struct {
+						ResourceVersion string `json:"resourceVersion"`
+					} `json:"metadata"`
+					Items []json.RawMessage `json:"items"`
+				}
+				if err := json.Unmarshal(raw, &decoded); err == nil {
+					itemKind := strings.TrimSuffix(decoded.Kind, "List")
+					enc := json.NewEncoder(w)
+					for _, itemRaw := range decoded.Items {
+						var obj map[string]any
+						if json.Unmarshal(itemRaw, &obj) == nil {
+							obj["apiVersion"] = decoded.APIVersion
+							obj["kind"] = itemKind
+							_ = enc.Encode(map[string]any{
+								"type":   watch.Added,
+								"object": obj,
+							})
+						}
+					}
+					rv := decoded.Metadata.ResourceVersion
+					if rv == "" {
+						rv = "1"
+					}
+					_ = enc.Encode(map[string]any{
+						"type": watch.Bookmark,
+						"object": map[string]any{
+							"apiVersion": decoded.APIVersion,
+							"kind":       itemKind,
+							"metadata": map[string]any{
+								"resourceVersion": rv,
+								"annotations": map[string]string{
+									metav1.InitialEventsAnnotationKey: "true",
+								},
+							},
+						},
+					})
+				}
+			}
+			if flusher != nil {
+				flusher.Flush()
 			}
 			<-r.Context().Done()
 			return
@@ -449,7 +520,7 @@ func TestHeadlessE2E_WindowedJSONWithWatchTransition(t *testing.T) {
 	kc := env.kubeconfig(t)
 
 	go func() {
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(240 * time.Millisecond)
 		degraded := healthyPodFixture()
 		degraded.Status.ContainerStatuses[0].RestartCount = 2
 		degraded.Status.ContainerStatuses[0].State = coreV1.ContainerState{
@@ -462,8 +533,8 @@ func TestHeadlessE2E_WindowedJSONWithWatchTransition(t *testing.T) {
 		"--noui",
 		"--kubeconfig="+kc,
 		"--metrics-source=none",
-		"-d", "360ms",
-		"-i", "90ms",
+		"-d", "650ms",
+		"-i", "100ms",
 		"-o", "json",
 	)
 	if code := cmd.ExitCode(err); code != cmd.ExitOK {
