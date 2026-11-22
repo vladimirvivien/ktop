@@ -111,6 +111,18 @@ func TestNodeDetailPanel_RenderTUI(t *testing.T) {
 			t.Fatalf("expected %q in rendered NodeDetailPanel, got:\n%s", expected, ts.Text())
 		}
 	}
+
+	// Verify 'v' triggers Node YAML callback.
+	var yamlNode *corev1.Node
+	panel.SetOnShowYAML(func(n *corev1.Node) { yamlNode = n })
+	handler := panel.podsTable.GetInputCapture()
+	if handler == nil {
+		t.Fatal("expected input capture on podsTable")
+	}
+	handler(tcell.NewEventKey(tcell.KeyRune, 'v', tcell.ModNone))
+	if yamlNode == nil || yamlNode.Name != "worker-node-1" {
+		t.Fatalf("expected 'v' to invoke onShowYAML for worker-node-1, got %v", yamlNode)
+	}
 }
 
 func TestNodeDetailPanel_PodsTableSortAndFilter(t *testing.T) {

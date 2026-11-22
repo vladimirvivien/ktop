@@ -164,6 +164,7 @@ func (c NodeDetailContext) GetItems() []FooterItem {
 		return []FooterItem{
 			{Key: "[↑/↓]", Action: "navigate"},
 			{Key: "[Enter]", Action: "pod detail"},
+			{Key: "[v]", Action: "yaml"},
 			{Key: "[Tab]", Action: "next"},
 			{Key: "[y]", Action: "copy"},
 			{Key: "[?]", Action: "help"},
@@ -173,6 +174,7 @@ func (c NodeDetailContext) GetItems() []FooterItem {
 	default: // events
 		return []FooterItem{
 			{Key: "[↑/↓]", Action: "scroll"},
+			{Key: "[v]", Action: "yaml"},
 			{Key: "[Tab]", Action: "next"},
 			{Key: "[?]", Action: "help"},
 			{Key: "[ESC]", Action: "back"},

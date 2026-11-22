@@ -389,6 +389,33 @@ func (p *MainPanel) ensureNodeDetailPanel() {
 	p.nodeDetailPanel.SetOnPodSelected(func(namespace, podName string) {
 		p.app.NavigateToPodDetail(namespace, podName)
 	})
+	p.nodeDetailPanel.SetOnShowYAML(func(node *v1.Node) {
+		if node == nil || p.app == nil {
+			return
+		}
+		nodeCopy := node.DeepCopy()
+		nodeCopy.TypeMeta = metav1.TypeMeta{APIVersion: "v1", Kind: "Node"}
+		yamlText, err := ui.FormatObjectYAML(nodeCopy)
+		if err != nil {
+			p.app.ShowToast(fmt.Sprintf("Unable to render Node YAML: %v", err), ui.ToastError, 3*time.Second)
+			return
+		}
+		const nodeYAMLModalID = "node-yaml-modal"
+		modal := ui.NewYAMLModal(ui.YAMLModalConfig{
+			Title:   fmt.Sprintf("Node YAML: %s", node.Name),
+			Content: yamlText,
+			OnClose: func() {
+				p.app.DismissModalPage(nodeYAMLModalID)
+				if p.nodeDetailPanel != nil {
+					p.nodeDetailPanel.InitFocus()
+				}
+			},
+			OnYank: func(_ string) {
+				p.app.ShowToast(fmt.Sprintf("Copied Node YAML: %s to clipboard", node.Name), ui.ToastSuccess, 2*time.Second)
+			},
+		})
+		p.app.ShowModalPage(nodeYAMLModalID, modal.GetRootView())
+	})
 	// Set up focus callback for tab cycling within the detail panel
 	p.nodeDetailPanel.SetAppFocus(func(prim tview.Primitive) {
 		p.app.Focus(prim)

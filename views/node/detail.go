@@ -64,6 +64,7 @@ type DetailPanel struct {
 
 	// Callbacks
 	onPodSelected         NodeSelectedCallback
+	onShowYAML            func(node *corev1.Node)
 	onBack                func()
 	onFooterContextChange func(focusedPanel string)
 
@@ -82,6 +83,11 @@ func NewDetailPanel() *DetailPanel {
 // SetOnPodSelected sets the callback for when a pod is selected
 func (p *DetailPanel) SetOnPodSelected(callback NodeSelectedCallback) {
 	p.onPodSelected = callback
+}
+
+// SetOnShowYAML sets the callback for inspecting the full Node YAML.
+func (p *DetailPanel) SetOnShowYAML(callback func(node *corev1.Node)) {
+	p.onShowYAML = callback
 }
 
 // SetOnBack sets the callback for when user navigates back
@@ -235,6 +241,11 @@ func (p *DetailPanel) Layout(_ any) {
 						return nil
 					}
 				}
+			case tcell.KeyRune:
+				if event.Rune() == 'v' && p.onShowYAML != nil && p.data != nil && p.data.Node != nil {
+					p.onShowYAML(p.data.Node)
+					return nil
+				}
 			}
 			return event
 		})
@@ -273,6 +284,12 @@ func (p *DetailPanel) Layout(_ any) {
 				}
 				if p.onBack != nil {
 					p.onBack()
+					return nil
+				}
+			case tcell.KeyRune:
+				if event.Rune() == 'v' && (p.podsTableCtrl == nil || !p.podsTableCtrl.IsFilterEditing()) &&
+					p.onShowYAML != nil && p.data != nil && p.data.Node != nil {
+					p.onShowYAML(p.data.Node)
 					return nil
 				}
 			}

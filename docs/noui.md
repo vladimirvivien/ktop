@@ -143,6 +143,13 @@ In `-o json` mode (the default), `ktop` buffers snapshots across the collection 
   },
   "nodes": [],
   "pods": [],
+  "workloads": {
+    "has_metrics": true,
+    "deployments": [],
+    "statefulsets": [],
+    "daemonsets": [],
+    "jobs": []
+  },
   "samples": []
 }
 ```
@@ -154,8 +161,9 @@ In `-o json` mode (the default), `ktop` buffers snapshots across the collection 
 | `summary` | Always | Latest cluster-wide counts, resource totals, I/O rates, PSI stall averages, and `health_score` |
 | `health_score_stats` | Always | Window-level `min`, `max`, `avg`, and `latest` health score across all collected samples |
 | `nodes` | Always | Latest slice of node records (`name`, `status`, `pressures`, capacities, usage, and node-root `psi`) |
-| `pods` | Always | Latest slice of pod records (`namespace`, `name`, `status`, `restarts`, `psi`, `cpu_throttled_pct`, and per-container breakdown) |
-| `samples` | Windowed runs (`-d > 0`) | Ordered array of per-interval snapshot objects (`timestamp`, `cluster`, `summary`, `nodes`, `pods`); omitted in single-shot mode |
+| `pods` | Always | Latest slice of pod records (`namespace`, `name`, `status`, `restarts`, `psi`, `cpu_throttled_pct`, optional `resize_status`, and per-container breakdown) |
+| `workloads` | When available | Latest cluster workload rollups (`deployments`, `statefulsets`, `daemonsets`, `jobs`) with replica counts, status, and aggregated CPU/memory usage |
+| `samples` | Windowed runs (`-d > 0`) | Ordered array of per-interval snapshot objects (`timestamp`, `cluster`, `summary`, `nodes`, `pods`, `workloads`); omitted in single-shot mode |
 
 ### Streaming Lines (`-o jsonl`)
 

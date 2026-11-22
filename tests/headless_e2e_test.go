@@ -35,14 +35,17 @@ type mockK8sEnv struct {
 	blockPodsList   bool
 	scrapeCount     atomic.Int64
 	podWatchChans   map[chan watch.Event]struct{}
+	podWatchOnce    sync.Once
+	podWatchStarted chan struct{}
 	resourceVersion atomic.Int64
 }
 
 func newMockK8sEnv(t *testing.T, initialPods []coreV1.Pod) *mockK8sEnv {
 	t.Helper()
 	env := &mockK8sEnv{
-		pods:          append([]coreV1.Pod(nil), initialPods...),
-		podWatchChans: make(map[chan watch.Event]struct{}),
+		pods:            append([]coreV1.Pod(nil), initialPods...),
+		podWatchChans:   make(map[chan watch.Event]struct{}),
+		podWatchStarted: make(chan struct{}),
 	}
 	env.resourceVersion.Store(1)
 
@@ -259,6 +262,7 @@ func (e *mockK8sEnv) handlePods(w http.ResponseWriter, r *http.Request) {
 		if flusher != nil {
 			flusher.Flush()
 		}
+		e.podWatchOnce.Do(func() { close(e.podWatchStarted) })
 
 		for {
 			select {
@@ -520,7 +524,13 @@ func TestHeadlessE2E_WindowedJSONWithWatchTransition(t *testing.T) {
 	kc := env.kubeconfig(t)
 
 	go func() {
-		time.Sleep(240 * time.Millisecond)
+		select {
+		case <-env.podWatchStarted:
+			// Give the collector time to complete informer sync and capture the initial healthy sample (95).
+			time.Sleep(180 * time.Millisecond)
+		case <-time.After(2 * time.Second):
+			return
+		}
 		degraded := healthyPodFixture()
 		degraded.Status.ContainerStatuses[0].RestartCount = 2
 		degraded.Status.ContainerStatuses[0].State = coreV1.ContainerState{
