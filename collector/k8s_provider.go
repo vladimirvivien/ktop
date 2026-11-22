@@ -8,6 +8,7 @@ import (
 	"github.com/vladimirvivien/ktop/internal/snapshot"
 	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/metrics"
+	"github.com/vladimirvivien/ktop/views/model"
 )
 
 // WarmupWaiter is optionally implemented by metrics sources (such as Prometheus)
@@ -78,6 +79,11 @@ func (p *K8sSnapshotProvider) Capture(ctx context.Context) (*snapshot.Snapshot, 
 	if err != nil {
 		return nil, err
 	}
+	workloadsSnap, err := ctrl.GetWorkloadsSnapshot(ctx)
+	var workloadsPtr *model.WorkloadsSnapshot
+	if err == nil {
+		workloadsPtr = &workloadsSnap
+	}
 
 	var podMetrics []*metrics.PodMetrics
 	if p.metricsSource != nil {
@@ -106,5 +112,6 @@ func (p *K8sSnapshotProvider) Capture(ctx context.Context) (*snapshot.Snapshot, 
 		Nodes:      nodes,
 		Pods:       pods,
 		PodMetrics: podMetrics,
+		Workloads:  workloadsPtr,
 	})
 }

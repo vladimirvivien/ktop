@@ -1,13 +1,12 @@
 package ui
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
-	"sigs.k8s.io/yaml"
+	"github.com/vladimirvivien/ktop/k8s"
 )
 
 // YAMLModalConfig configures a scrollable YAML inspection modal overlay.
@@ -176,31 +175,9 @@ func (m *YAMLModal) HandleInput(event *tcell.EventKey) *tcell.EventKey {
 }
 
 // FormatObjectYAML marshals a Kubernetes object to YAML, omitting verbose
-// metadata.managedFields without mutating the source object.
+// metadata.managedFields and redacting Secret data without mutating the source object.
 func FormatObjectYAML(obj any) (string, error) {
-	if obj == nil {
-		return "", fmt.Errorf("no object available")
-	}
-	rawJSON, err := json.Marshal(obj)
-	if err != nil {
-		return "", err
-	}
-	var generic map[string]any
-	if err := json.Unmarshal(rawJSON, &generic); err == nil && generic != nil {
-		if meta, ok := generic["metadata"].(map[string]any); ok {
-			delete(meta, "managedFields")
-		}
-		out, err := yaml.Marshal(generic)
-		if err != nil {
-			return "", err
-		}
-		return string(out), nil
-	}
-	out, err := yaml.Marshal(obj)
-	if err != nil {
-		return "", err
-	}
-	return string(out), nil
+	return k8s.FormatObjectYAML(obj)
 }
 
 // HighlightYAML adds theme-aware tview color tags to YAML text while escaping

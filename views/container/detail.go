@@ -69,8 +69,8 @@ type DetailPanel struct {
 	filterInput *tview.InputField
 
 	// Streaming control
-	cancelFunc context.CancelFunc
-	streamMu   sync.Mutex
+	streamer *k8s.LogStreamer
+	streamMu sync.Mutex
 
 	// Focus management for Tab cycling
 	focusedChildIdx int               // 0 = Container Detail, 1 = Logs
@@ -97,6 +97,7 @@ func NewDetailPanel() *DetailPanel {
 		wrapText:         false, // Default to no wrap
 		tailLines:        100,   // Default tail lines (fast initial load)
 		totalLinesLoaded: 100,   // Track cumulative for "load more"
+		streamer:         k8s.NewLogStreamer(),
 	}
 
 	p.setupInputCapture()
@@ -168,9 +169,8 @@ func (p *DetailPanel) ShowContainer(namespace, podName, containerName string) {
 	p.streamMu.Lock()
 
 	// Cancel any existing stream
-	if p.cancelFunc != nil {
-		p.cancelFunc()
-		p.cancelFunc = nil
+	if p.streamer != nil {
+		p.streamer.Stop()
 	}
 
 	p.namespace = namespace
@@ -1160,13 +1160,10 @@ func (p *DetailPanel) startLogStream(previous bool) {
 	}
 
 	p.streamMu.Lock()
-	if p.cancelFunc != nil {
-		p.cancelFunc()
+	if p.streamer == nil {
+		p.streamer = k8s.NewLogStreamer()
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	p.cancelFunc = cancel
-
+	streamer := p.streamer
 	opts := k8s.LogOptions{
 		Container:  p.containerName,
 		Follow:     p.following && !previous,
@@ -1174,70 +1171,41 @@ func (p *DetailPanel) startLogStream(previous bool) {
 		Timestamps: p.timestamps,
 		TailLines:  p.tailLines,
 	}
-
 	namespace := p.namespace
 	podName := p.podName
 	p.streamMu.Unlock()
 
-	go func() {
-		stream, err := p.getLogStream(ctx, namespace, podName, opts)
-		if err != nil {
-			p.appendLog(ui.ErrorMarkup(fmt.Sprintf("Error getting logs: %v", err)))
-			return
-		}
-		defer stream.Close()
-
-		// Ensure final UI update when goroutine exits
-		defer func() {
+	streamer.Start(context.Background(), p.getLogStream, namespace, podName, opts, k8s.LogStreamCallbacks{
+		OnLine: func(line string) {
+			p.appendLog(p.formatLogLine(line))
+		},
+		OnError: func(err error) {
+			if ui.IsMonochrome() {
+				p.appendLog(fmt.Sprintf("[::b]Stream ended: %v[::-]", err))
+			} else {
+				p.appendLog(fmt.Sprintf("[%s]Stream ended: %v[-]", ui.TagFg(ui.ActivePalette().StatusWarning), err))
+			}
+		},
+		OnDone: func() {
 			if p.queueUpdate != nil {
-				// Capture lineCount under mutex to avoid race condition
 				p.streamMu.Lock()
 				finalCount := p.lineCount
 				p.streamMu.Unlock()
-
 				p.queueUpdate(func() {
 					p.logsView.ScrollToEnd()
 					p.updateLogsTitleWithCount(finalCount)
 				})
 			}
-		}()
-
-		scanner := bufio.NewScanner(stream)
-		buf := make([]byte, 0, 64*1024)
-		scanner.Buffer(buf, 1024*1024)
-
-		for scanner.Scan() {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				line := scanner.Text()
-				p.appendLog(p.formatLogLine(line))
-			}
-		}
-
-		if err := scanner.Err(); err != nil {
-			select {
-			case <-ctx.Done():
-				// Context cancelled, don't report error
-			default:
-				if ui.IsMonochrome() {
-					p.appendLog(fmt.Sprintf("[::b]Stream ended: %v[::-]", err))
-				} else {
-					p.appendLog(fmt.Sprintf("[%s]Stream ended: %v[-]", ui.TagFg(ui.ActivePalette().StatusWarning), err))
-				}
-			}
-		}
-	}()
+		},
+	})
 }
 
 func (p *DetailPanel) stopStream() {
 	p.streamMu.Lock()
-	defer p.streamMu.Unlock()
-
-	if p.cancelFunc != nil {
-		p.cancelFunc()
-		p.cancelFunc = nil
+	streamer := p.streamer
+	p.streamMu.Unlock()
+	if streamer != nil {
+		streamer.Stop()
 	}
 }
 

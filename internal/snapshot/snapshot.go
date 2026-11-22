@@ -9,11 +9,93 @@ import (
 // It contains only pure value types with no mutexes or channels, suitable for
 // both synchronous TUI rendering and structured JSON serialization.
 type Snapshot struct {
-	Timestamp time.Time   `json:"timestamp"`
-	Cluster   ClusterInfo `json:"cluster"`
-	Summary   SummaryData `json:"summary"`
-	Nodes     []NodeData  `json:"nodes"`
-	Pods      []PodData   `json:"pods"`
+	Timestamp time.Time      `json:"timestamp"`
+	Cluster   ClusterInfo    `json:"cluster"`
+	Summary   SummaryData    `json:"summary"`
+	Nodes     []NodeData     `json:"nodes"`
+	Pods      []PodData      `json:"pods"`
+	Workloads *WorkloadsData `json:"workloads,omitempty"`
+}
+
+// WorkloadsData captures cluster Deployments, StatefulSets, DaemonSets, and Jobs.
+type WorkloadsData struct {
+	HasMetrics   bool              `json:"has_metrics,omitempty"`
+	Deployments  []DeploymentData  `json:"deployments,omitempty"`
+	StatefulSets []StatefulSetData `json:"statefulsets,omitempty"`
+	DaemonSets   []DaemonSetData   `json:"daemonsets,omitempty"`
+	Jobs         []JobData         `json:"jobs,omitempty"`
+}
+
+// DeploymentData captures a Deployment's replicas, status, and aggregated pod usage.
+type DeploymentData struct {
+	Namespace      string    `json:"namespace"`
+	Name           string    `json:"name"`
+	Desired        int32     `json:"desired"`
+	Ready          int32     `json:"ready"`
+	Updated        int32     `json:"updated"`
+	Available      int32     `json:"available"`
+	Unavailable    int32     `json:"unavailable"`
+	Age            string    `json:"age"`
+	CreationTime   time.Time `json:"creation_time"`
+	Status         string    `json:"status"`
+	Strategy       string    `json:"strategy,omitempty"`
+	UsageCPUMillis int64     `json:"usage_cpu_millis,omitempty"`
+	UsageMemBytes  int64     `json:"usage_memory_bytes,omitempty"`
+	HasUsageCPU    bool      `json:"has_usage_cpu,omitempty"`
+	HasUsageMem    bool      `json:"has_usage_memory,omitempty"`
+}
+
+// StatefulSetData captures a StatefulSet's replicas, status, and aggregated pod usage.
+type StatefulSetData struct {
+	Namespace      string    `json:"namespace"`
+	Name           string    `json:"name"`
+	Desired        int32     `json:"desired"`
+	Ready          int32     `json:"ready"`
+	Current        int32     `json:"current"`
+	Updated        int32     `json:"updated"`
+	Age            string    `json:"age"`
+	CreationTime   time.Time `json:"creation_time"`
+	Status         string    `json:"status"`
+	ServiceName    string    `json:"service_name,omitempty"`
+	UsageCPUMillis int64     `json:"usage_cpu_millis,omitempty"`
+	UsageMemBytes  int64     `json:"usage_memory_bytes,omitempty"`
+	HasUsageCPU    bool      `json:"has_usage_cpu,omitempty"`
+	HasUsageMem    bool      `json:"has_usage_memory,omitempty"`
+}
+
+// DaemonSetData captures a DaemonSet's pod scheduling counts, status, and aggregated usage.
+type DaemonSetData struct {
+	Namespace      string    `json:"namespace"`
+	Name           string    `json:"name"`
+	Desired        int32     `json:"desired"`
+	Current        int32     `json:"current"`
+	Ready          int32     `json:"ready"`
+	UpToDate       int32     `json:"up_to_date"`
+	Available      int32     `json:"available"`
+	Misscheduled   int32     `json:"misscheduled"`
+	Age            string    `json:"age"`
+	CreationTime   time.Time `json:"creation_time"`
+	Status         string    `json:"status"`
+	UsageCPUMillis int64     `json:"usage_cpu_millis,omitempty"`
+	UsageMemBytes  int64     `json:"usage_memory_bytes,omitempty"`
+	HasUsageCPU    bool      `json:"has_usage_cpu,omitempty"`
+	HasUsageMem    bool      `json:"has_usage_memory,omitempty"`
+}
+
+// JobData captures a batch/v1 Job's execution state and completion counts.
+type JobData struct {
+	Namespace          string    `json:"namespace"`
+	Name               string    `json:"name"`
+	CompletionsDesired int32     `json:"completions_desired"`
+	HasCompletions     bool      `json:"has_completions,omitempty"`
+	Succeeded          int32     `json:"succeeded"`
+	Active             int32     `json:"active"`
+	Failed             int32     `json:"failed"`
+	Suspended          bool      `json:"suspended,omitempty"`
+	Age                string    `json:"age"`
+	CreationTime       time.Time `json:"creation_time"`
+	Status             string    `json:"status"`
+	Owner              string    `json:"owner,omitempty"`
 }
 
 // ClusterInfo describes cluster-wide connectivity and capability metadata.
@@ -176,6 +258,16 @@ func (s *Snapshot) Clone() *Snapshot {
 	for i, p := range s.Pods {
 		p.Containers = slices.Clone(p.Containers)
 		cp.Pods[i] = p
+	}
+	if s.Workloads != nil {
+		w := &WorkloadsData{
+			HasMetrics:   s.Workloads.HasMetrics,
+			Deployments:  slices.Clone(s.Workloads.Deployments),
+			StatefulSets: slices.Clone(s.Workloads.StatefulSets),
+			DaemonSets:   slices.Clone(s.Workloads.DaemonSets),
+			Jobs:         slices.Clone(s.Workloads.Jobs),
+		}
+		cp.Workloads = w
 	}
 	return &cp
 }

@@ -5,9 +5,9 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/ui"
 	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/yaml"
 )
 
 // SpecPanel displays the full container spec in YAML format
@@ -103,15 +103,13 @@ func (p *SpecPanel) renderSpec() {
 		return
 	}
 
-	// Marshal container spec to YAML
-	yamlBytes, err := yaml.Marshal(p.containerSpec)
+	yamlText, err := k8s.FormatObjectYAML(p.containerSpec)
 	if err != nil {
 		p.specView.SetText(ui.ErrorMarkup(fmt.Sprintf("Error rendering spec: %v", err)))
 		return
 	}
 
-	// Add syntax highlighting
-	highlighted := ui.HighlightYAML(string(yamlBytes))
+	highlighted := ui.HighlightYAML(yamlText)
 	p.specView.SetText(highlighted)
 
 	// Scroll to top

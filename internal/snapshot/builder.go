@@ -18,6 +18,7 @@ type BuildInput struct {
 	Nodes      []model.NodeModel
 	Pods       []model.PodModel
 	PodMetrics []*metrics.PodMetrics
+	Workloads  *model.WorkloadsSnapshot
 }
 
 // Builder constructs immutable Snapshots via lock-free in-memory joins.
@@ -100,7 +101,182 @@ func (b *Builder) Build(ctx context.Context, in BuildInput) (*Snapshot, error) {
 		Summary:   summaryDataFromModel(in.Summary),
 		Nodes:     nodes,
 		Pods:      pods,
+		Workloads: workloadsDataFromModel(in.Workloads),
 	}, nil
+}
+
+func workloadsDataFromModel(w *model.WorkloadsSnapshot) *WorkloadsData {
+	if w == nil {
+		return nil
+	}
+	out := &WorkloadsData{
+		HasMetrics:   w.HasMetrics,
+		Deployments:  make([]DeploymentData, 0, len(w.Deployments)),
+		StatefulSets: make([]StatefulSetData, 0, len(w.StatefulSets)),
+		DaemonSets:   make([]DaemonSetData, 0, len(w.DaemonSets)),
+		Jobs:         make([]JobData, 0, len(w.Jobs)),
+	}
+	for _, d := range w.Deployments {
+		out.Deployments = append(out.Deployments, DeploymentData{
+			Namespace:      d.Namespace,
+			Name:           d.Name,
+			Desired:        d.Desired,
+			Ready:          d.Ready,
+			Updated:        d.Updated,
+			Available:      d.Available,
+			Unavailable:    d.Unavailable,
+			Age:            d.Age,
+			CreationTime:   d.CreationTime.Time,
+			Status:         d.Status,
+			Strategy:       d.Strategy,
+			UsageCPUMillis: qtyMillis(d.Usage.CPU),
+			UsageMemBytes:  qtyBytes(d.Usage.Mem),
+			HasUsageCPU:    d.Usage.HasCPU,
+			HasUsageMem:    d.Usage.HasMem,
+		})
+	}
+	for _, s := range w.StatefulSets {
+		out.StatefulSets = append(out.StatefulSets, StatefulSetData{
+			Namespace:      s.Namespace,
+			Name:           s.Name,
+			Desired:        s.Desired,
+			Ready:          s.Ready,
+			Current:        s.Current,
+			Updated:        s.Updated,
+			Age:            s.Age,
+			CreationTime:   s.CreationTime.Time,
+			Status:         s.Status,
+			ServiceName:    s.ServiceName,
+			UsageCPUMillis: qtyMillis(s.Usage.CPU),
+			UsageMemBytes:  qtyBytes(s.Usage.Mem),
+			HasUsageCPU:    s.Usage.HasCPU,
+			HasUsageMem:    s.Usage.HasMem,
+		})
+	}
+	for _, ds := range w.DaemonSets {
+		out.DaemonSets = append(out.DaemonSets, DaemonSetData{
+			Namespace:      ds.Namespace,
+			Name:           ds.Name,
+			Desired:        ds.Desired,
+			Current:        ds.Current,
+			Ready:          ds.Ready,
+			UpToDate:       ds.UpToDate,
+			Available:      ds.Available,
+			Misscheduled:   ds.Misscheduled,
+			Age:            ds.Age,
+			CreationTime:   ds.CreationTime.Time,
+			Status:         ds.Status,
+			UsageCPUMillis: qtyMillis(ds.Usage.CPU),
+			UsageMemBytes:  qtyBytes(ds.Usage.Mem),
+			HasUsageCPU:    ds.Usage.HasCPU,
+			HasUsageMem:    ds.Usage.HasMem,
+		})
+	}
+	for _, j := range w.Jobs {
+		out.Jobs = append(out.Jobs, JobData{
+			Namespace:          j.Namespace,
+			Name:               j.Name,
+			CompletionsDesired: j.CompletionsDesired,
+			HasCompletions:     j.HasCompletions,
+			Succeeded:          j.Succeeded,
+			Active:             j.Active,
+			Failed:             j.Failed,
+			Suspended:          j.Suspended,
+			Age:                j.Age,
+			CreationTime:       j.CreationTime.Time,
+			Status:             j.Status,
+			Owner:              j.Owner,
+		})
+	}
+	return out
+}
+
+// ToWorkloadsSnapshot converts WorkloadsData back to model.WorkloadsSnapshot for views.
+func (w *WorkloadsData) ToWorkloadsSnapshot() model.WorkloadsSnapshot {
+	if w == nil {
+		return model.WorkloadsSnapshot{}
+	}
+	out := model.WorkloadsSnapshot{
+		HasMetrics:   w.HasMetrics,
+		Deployments:  make([]model.DeploymentModel, 0, len(w.Deployments)),
+		StatefulSets: make([]model.StatefulSetModel, 0, len(w.StatefulSets)),
+		DaemonSets:   make([]model.DaemonSetModel, 0, len(w.DaemonSets)),
+		Jobs:         make([]model.JobModel, 0, len(w.Jobs)),
+	}
+	usageFrom := func(cpuMillis, memBytes int64, hasCPU, hasMem bool) model.WorkloadUsage {
+		u := model.WorkloadUsage{HasCPU: hasCPU, HasMem: hasMem}
+		if hasCPU {
+			u.CPU = resource.NewMilliQuantity(cpuMillis, resource.DecimalSI)
+		}
+		if hasMem {
+			u.Mem = resource.NewQuantity(memBytes, resource.DecimalSI)
+		}
+		return u
+	}
+	for _, d := range w.Deployments {
+		out.Deployments = append(out.Deployments, model.DeploymentModel{
+			Namespace:    d.Namespace,
+			Name:         d.Name,
+			Desired:      d.Desired,
+			Ready:        d.Ready,
+			Updated:      d.Updated,
+			Available:    d.Available,
+			Unavailable:  d.Unavailable,
+			Age:          d.Age,
+			CreationTime: metav1.NewTime(d.CreationTime),
+			Status:       d.Status,
+			Strategy:     d.Strategy,
+			Usage:        usageFrom(d.UsageCPUMillis, d.UsageMemBytes, d.HasUsageCPU, d.HasUsageMem),
+		})
+	}
+	for _, s := range w.StatefulSets {
+		out.StatefulSets = append(out.StatefulSets, model.StatefulSetModel{
+			Namespace:    s.Namespace,
+			Name:         s.Name,
+			Desired:      s.Desired,
+			Ready:        s.Ready,
+			Current:      s.Current,
+			Updated:      s.Updated,
+			Age:          s.Age,
+			CreationTime: metav1.NewTime(s.CreationTime),
+			Status:       s.Status,
+			ServiceName:  s.ServiceName,
+			Usage:        usageFrom(s.UsageCPUMillis, s.UsageMemBytes, s.HasUsageCPU, s.HasUsageMem),
+		})
+	}
+	for _, ds := range w.DaemonSets {
+		out.DaemonSets = append(out.DaemonSets, model.DaemonSetModel{
+			Namespace:    ds.Namespace,
+			Name:         ds.Name,
+			Desired:      ds.Desired,
+			Current:      ds.Current,
+			Ready:        ds.Ready,
+			UpToDate:     ds.UpToDate,
+			Available:    ds.Available,
+			Misscheduled: ds.Misscheduled,
+			Age:          ds.Age,
+			CreationTime: metav1.NewTime(ds.CreationTime),
+			Status:       ds.Status,
+			Usage:        usageFrom(ds.UsageCPUMillis, ds.UsageMemBytes, ds.HasUsageCPU, ds.HasUsageMem),
+		})
+	}
+	for _, j := range w.Jobs {
+		out.Jobs = append(out.Jobs, model.JobModel{
+			Namespace:          j.Namespace,
+			Name:               j.Name,
+			CompletionsDesired: j.CompletionsDesired,
+			HasCompletions:     j.HasCompletions,
+			Succeeded:          j.Succeeded,
+			Active:             j.Active,
+			Failed:             j.Failed,
+			Suspended:          j.Suspended,
+			Age:                j.Age,
+			CreationTime:       metav1.NewTime(j.CreationTime),
+			Status:             j.Status,
+			Owner:              j.Owner,
+		})
+	}
+	return out
 }
 
 func psiDataFromMetrics(p metrics.PSIMetrics) PSIData {
