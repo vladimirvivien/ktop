@@ -55,7 +55,7 @@ func TestHelpModal_RenderAndContext(t *testing.T) {
 				PageTitles:   []string{"Overview", "Workloads", "Events"},
 			},
 			expectBadges:  []string{"(Active: Namespace Header)"},
-			expectContent: []string{"1-3", "Overview, Workloads, Events"},
+			expectContent: []string{"Keys 1-3", "Switch page (Overview, Workloads, Events)", "[ or ]", "Previous / next page"},
 		},
 	}
 

@@ -69,7 +69,7 @@ func NewHelpModal(cfg HelpModalConfig) *HelpModal {
 
 	m.grid = tview.NewGrid().
 		SetColumns(0, 74, 0).
-		SetRows(0, 24, 0).
+		SetRows(0, 25, 0).
 		AddItem(box, 1, 1, 1, 1, 0, 0, true)
 
 	return m
@@ -81,10 +81,11 @@ func (m *HelpModal) renderHelpContent(cfg HelpModalConfig) string {
 	mono := IsMonochrome()
 
 	key := func(k string) string {
+		escaped := tview.Escape(k)
 		if mono {
-			return "[::b]" + k + "[::-]"
+			return "[::b]" + escaped + "[::-]"
 		}
-		return fmt.Sprintf("[%s]%s[-]", TagFg(p.Accent), k)
+		return fmt.Sprintf("[%s]%s[-]", TagFg(p.Accent), escaped)
 	}
 	section := func(title string) string {
 		if mono {
@@ -120,7 +121,8 @@ func (m *HelpModal) renderHelpContent(cfg HelpModalConfig) string {
 		cfg.FocusedPanel == "deployments" ||
 		cfg.FocusedPanel == "statefulsets" ||
 		cfg.FocusedPanel == "daemonsets" ||
-		cfg.FocusedPanel == "jobs"
+		cfg.FocusedPanel == "jobs" ||
+		(cfg.FocusedPanel == "events" && cfg.CurrentPage == "Events")
 	isHeaderActive := cfg.FocusedPanel == "header"
 	isLogsActive := cfg.FocusedPanel == "logs" || cfg.CurrentPage == "Container Logs"
 	isDetailActive := cfg.CurrentPage == "Node Detail" || cfg.CurrentPage == "Pod Detail" || cfg.CurrentPage == "Workload Detail"
@@ -129,14 +131,15 @@ func (m *HelpModal) renderHelpContent(cfg HelpModalConfig) string {
 	b.WriteString(section("GENERAL & NAVIGATION") + "\n")
 	fmt.Fprintf(&b, "  %s / %s   Cycle focus across Header and page panels\n", key("Tab"), key("Shift+Tab"))
 	if len(cfg.PageTitles) > 1 {
-		fmt.Fprintf(&b, "  %s / %s     Switch page (%s)\n", key(fmt.Sprintf("1-%d", len(cfg.PageTitles))), key("[ / ]"), strings.Join(cfg.PageTitles, ", "))
+		fmt.Fprintf(&b, "  %s          Switch page (%s)\n", key(fmt.Sprintf("Keys 1-%d", len(cfg.PageTitles))), strings.Join(cfg.PageTitles, ", "))
 	} else {
-		fmt.Fprintf(&b, "  %s / %s     Switch top-level page\n", key("1-9"), key("[ / ]"))
+		fmt.Fprintf(&b, "  %s          Switch top-level page\n", key("Keys 1-9"))
 	}
-	fmt.Fprintf(&b, "  %s           Open detail view for selected Node, Pod, or Workload\n", key("Enter"))
-	fmt.Fprintf(&b, "  %s / %s           Copy selected resource name to clipboard\n", key("y"), key("Y"))
-	fmt.Fprintf(&b, "  %s / %s          Toggle this keyboard shortcuts help modal\n", key("?"), key("F1"))
-	fmt.Fprintf(&b, "  %s             Clear filter / Back to previous view / Double-ESC quit\n\n", key("Esc"))
+	fmt.Fprintf(&b, "  %s or %s            Previous / next page\n", key("["), key("]"))
+	fmt.Fprintf(&b, "  %s             Open detail view for selected Node, Pod, Workload, or Event\n", key("Enter"))
+	fmt.Fprintf(&b, "  %s / %s             Copy selected resource name to clipboard\n", key("y"), key("Y"))
+	fmt.Fprintf(&b, "  %s / %s            Toggle this keyboard shortcuts help modal\n", key("?"), key("F1"))
+	fmt.Fprintf(&b, "  %s               Clear filter / Back to previous view / Double-ESC quit\n\n", key("Esc"))
 
 	// Section 2: Table Sorting
 	activeTableLabel := ""
