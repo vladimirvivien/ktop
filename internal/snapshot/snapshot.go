@@ -15,6 +15,40 @@ type Snapshot struct {
 	Nodes     []NodeData     `json:"nodes"`
 	Pods      []PodData      `json:"pods"`
 	Workloads *WorkloadsData `json:"workloads,omitempty"`
+	Events    *EventsData    `json:"events,omitempty"`
+}
+
+// EventsData captures recent Kubernetes Events and summary counts.
+type EventsData struct {
+	Summary   EventsSummaryData `json:"summary"`
+	Items     []EventData       `json:"items,omitempty"`
+	Truncated bool              `json:"truncated,omitempty"`
+}
+
+// EventsSummaryData aggregates event totals and the top firing reason.
+type EventsSummaryData struct {
+	Total          int    `json:"total"`
+	WarningCount   int    `json:"warning_count"`
+	NormalCount    int    `json:"normal_count"`
+	TopReason      string `json:"top_reason,omitempty"`
+	TopReasonCount int    `json:"top_reason_count,omitempty"`
+}
+
+// EventData captures a single normalized Kubernetes Event.
+type EventData struct {
+	UID               string    `json:"uid,omitempty"`
+	Namespace         string    `json:"namespace,omitempty"`
+	Name              string    `json:"name"`
+	Type              string    `json:"type"`
+	Reason            string    `json:"reason"`
+	Message           string    `json:"message"`
+	InvolvedKind      string    `json:"involved_kind,omitempty"`
+	InvolvedNamespace string    `json:"involved_namespace,omitempty"`
+	InvolvedName      string    `json:"involved_name,omitempty"`
+	Source            string    `json:"source,omitempty"`
+	Count             int32     `json:"count"`
+	FirstSeen         time.Time `json:"first_seen,omitempty"`
+	LastSeen          time.Time `json:"last_seen,omitempty"`
 }
 
 // WorkloadsData captures cluster Deployments, StatefulSets, DaemonSets, and Jobs.
@@ -268,6 +302,13 @@ func (s *Snapshot) Clone() *Snapshot {
 			Jobs:         slices.Clone(s.Workloads.Jobs),
 		}
 		cp.Workloads = w
+	}
+	if s.Events != nil {
+		cp.Events = &EventsData{
+			Summary:   s.Events.Summary,
+			Items:     slices.Clone(s.Events.Items),
+			Truncated: s.Events.Truncated,
+		}
 	}
 	return &cp
 }

@@ -19,6 +19,7 @@ type BuildInput struct {
 	Pods       []model.PodModel
 	PodMetrics []*metrics.PodMetrics
 	Workloads  *model.WorkloadsSnapshot
+	Events     *model.EventsSnapshot
 }
 
 // Builder constructs immutable Snapshots via lock-free in-memory joins.
@@ -102,7 +103,79 @@ func (b *Builder) Build(ctx context.Context, in BuildInput) (*Snapshot, error) {
 		Nodes:     nodes,
 		Pods:      pods,
 		Workloads: workloadsDataFromModel(in.Workloads),
+		Events:    eventsDataFromModel(in.Events),
 	}, nil
+}
+
+func eventsDataFromModel(ev *model.EventsSnapshot) *EventsData {
+	if ev == nil {
+		return nil
+	}
+	out := &EventsData{
+		Summary: EventsSummaryData{
+			Total:          ev.Summary.Total,
+			WarningCount:   ev.Summary.WarningCount,
+			NormalCount:    ev.Summary.NormalCount,
+			TopReason:      ev.Summary.TopReason,
+			TopReasonCount: ev.Summary.TopReasonCount,
+		},
+		Items:     make([]EventData, 0, len(ev.Events)),
+		Truncated: ev.Truncated,
+	}
+	for _, e := range ev.Events {
+		out.Items = append(out.Items, EventData{
+			UID:               e.UID,
+			Namespace:         e.Namespace,
+			Name:              e.Name,
+			Type:              e.Type,
+			Reason:            e.Reason,
+			Message:           e.Message,
+			InvolvedKind:      e.InvolvedKind,
+			InvolvedNamespace: e.InvolvedNamespace,
+			InvolvedName:      e.InvolvedName,
+			Source:            e.Source,
+			Count:             e.Count,
+			FirstSeen:         e.FirstSeen,
+			LastSeen:          e.LastSeen,
+		})
+	}
+	return out
+}
+
+// ToEventsSnapshot converts EventsData back to model.EventsSnapshot for views.
+func (e *EventsData) ToEventsSnapshot() model.EventsSnapshot {
+	if e == nil {
+		return model.EventsSnapshot{}
+	}
+	out := model.EventsSnapshot{
+		Summary: model.EventsSummary{
+			Total:          e.Summary.Total,
+			WarningCount:   e.Summary.WarningCount,
+			NormalCount:    e.Summary.NormalCount,
+			TopReason:      e.Summary.TopReason,
+			TopReasonCount: e.Summary.TopReasonCount,
+		},
+		Events:    make([]model.EventModel, 0, len(e.Items)),
+		Truncated: e.Truncated,
+	}
+	for _, item := range e.Items {
+		out.Events = append(out.Events, model.EventModel{
+			UID:               item.UID,
+			Namespace:         item.Namespace,
+			Name:              item.Name,
+			Type:              item.Type,
+			Reason:            item.Reason,
+			Message:           item.Message,
+			InvolvedKind:      item.InvolvedKind,
+			InvolvedNamespace: item.InvolvedNamespace,
+			InvolvedName:      item.InvolvedName,
+			Source:            item.Source,
+			Count:             item.Count,
+			FirstSeen:         item.FirstSeen,
+			LastSeen:          item.LastSeen,
+		})
+	}
+	return out
 }
 
 func workloadsDataFromModel(w *model.WorkloadsSnapshot) *WorkloadsData {

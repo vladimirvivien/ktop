@@ -84,6 +84,11 @@ func (p *K8sSnapshotProvider) Capture(ctx context.Context) (*snapshot.Snapshot, 
 	if err == nil {
 		workloadsPtr = &workloadsSnap
 	}
+	eventsSnap, err := ctrl.GetEventsSnapshot(ctx, k8s.AllNamespaces, k8s.DefaultSnapshotEventsLimit)
+	var eventsPtr *model.EventsSnapshot
+	if err == nil {
+		eventsPtr = &eventsSnap
+	}
 
 	var podMetrics []*metrics.PodMetrics
 	if p.metricsSource != nil {
@@ -113,5 +118,6 @@ func (p *K8sSnapshotProvider) Capture(ctx context.Context) (*snapshot.Snapshot, 
 		Pods:       pods,
 		PodMetrics: podMetrics,
 		Workloads:  workloadsPtr,
+		Events:     eventsPtr,
 	})
 }

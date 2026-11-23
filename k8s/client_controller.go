@@ -23,6 +23,7 @@ type RefreshNodesFunc func(ctx context.Context, items []model.NodeModel) error
 type RefreshPodsFunc func(ctx context.Context, items []model.PodModel) error
 type RefreshSummaryFunc func(ctx context.Context, items model.ClusterSummary) error
 type RefreshWorkloadsFunc func(ctx context.Context, snap model.WorkloadsSnapshot) error
+type RefreshEventsFunc func(ctx context.Context, snap model.EventsSnapshot) error
 
 type Controller struct {
 	client        *Client
@@ -48,6 +49,8 @@ type Controller struct {
 	summaryRefreshFunc   RefreshSummaryFunc
 	workloadsRefreshFunc RefreshWorkloadsFunc
 	workloadsNotifyCh    chan struct{}
+	eventsRefreshFunc    RefreshEventsFunc
+	eventsNotifyCh       chan struct{}
 
 	// API health tracking
 	healthTracker *health.APIHealthTracker
@@ -56,12 +59,14 @@ type Controller struct {
 	started          bool
 	startCtx         context.Context
 	workloadsStarted bool
+	eventsStarted    bool
 }
 
 func newController(client *Client) *Controller {
 	ctrl := &Controller{
 		client:            client,
 		workloadsNotifyCh: make(chan struct{}, 1),
+		eventsNotifyCh:    make(chan struct{}, 1),
 	}
 	return ctrl
 }
@@ -92,6 +97,22 @@ func (c *Controller) SetWorkloadsRefreshFunc(fn RefreshWorkloadsFunc) *Controlle
 
 	if shouldStart {
 		c.setupWorkloadsHandler(ctx, fn)
+	}
+	return c
+}
+
+func (c *Controller) SetEventsRefreshFunc(fn RefreshEventsFunc) *Controller {
+	c.startMu.Lock()
+	c.eventsRefreshFunc = fn
+	shouldStart := c.started && !c.eventsStarted && fn != nil && c.startCtx != nil
+	if shouldStart {
+		c.eventsStarted = true
+	}
+	ctx := c.startCtx
+	c.startMu.Unlock()
+
+	if shouldStart {
+		c.setupEventsHandler(ctx, fn)
 	}
 	return c
 }
@@ -231,6 +252,7 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 			default:
 			}
 		}
+		c.notifyEventsChanged()
 	}()
 
 	c.setupSummaryHandler(ctx, c.summaryRefreshFunc)
@@ -243,9 +265,17 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	if startWL {
 		c.workloadsStarted = true
 	}
+	evFn := c.eventsRefreshFunc
+	startEV := !c.eventsStarted && evFn != nil
+	if startEV {
+		c.eventsStarted = true
+	}
 	c.startMu.Unlock()
 	if startWL {
 		c.setupWorkloadsHandler(ctx, wlFn)
+	}
+	if startEV {
+		c.setupEventsHandler(ctx, evFn)
 	}
 
 	// Wire up reconnect callback to trigger immediate health check when user presses Retry

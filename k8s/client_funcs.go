@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 
+	"github.com/vladimirvivien/ktop/views/model"
 	appsV1 "k8s.io/api/apps/v1"
 	batchV1 "k8s.io/api/batch/v1"
 	coreV1 "k8s.io/api/core/v1"
@@ -212,21 +213,12 @@ func (c *Controller) GetEventsForPod(ctx context.Context, namespace, podName str
 	return c.GetEventsForObject(ctx, namespace, "Pod", podName)
 }
 
-// sortEventsByTime sorts events by LastTimestamp descending (most recent first)
-// Uses stable sort with secondary key (event name) for deterministic ordering
+// sortEventsByTime sorts events by normalized last-observed timestamp descending (most recent first).
+// Uses stable sort with secondary key (event name) for deterministic ordering.
 func sortEventsByTime(events []coreV1.Event) {
 	sort.SliceStable(events, func(i, j int) bool {
-		timeI := events[i].LastTimestamp.Time
-		timeJ := events[j].LastTimestamp.Time
-		// If LastTimestamp is zero, use EventTime
-		if timeI.IsZero() && !events[i].EventTime.IsZero() {
-			timeI = events[i].EventTime.Time
-		}
-		if timeJ.IsZero() && !events[j].EventTime.IsZero() {
-			timeJ = events[j].EventTime.Time
-		}
-		// Sort descending (most recent first)
-		// If times are equal, sort by name for stability
+		timeI := model.EventLastTimestamp(&events[i])
+		timeJ := model.EventLastTimestamp(&events[j])
 		if timeI.Equal(timeJ) {
 			return events[i].Name < events[j].Name
 		}
