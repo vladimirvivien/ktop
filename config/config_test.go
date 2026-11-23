@@ -784,4 +784,27 @@ func TestAppConfig_DefaultPageAndNormalizePage(t *testing.T) {
 			t.Errorf("NormalizePage(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
+
+	ksmCases := []struct {
+		in      string
+		want    string
+		wantErr bool
+	}{
+		{"", "auto", false},
+		{" AUTO ", "auto", false},
+		{"off", "off", false},
+		{"none", "off", false},
+		{"disabled", "off", false},
+		{"invalid", "", true},
+	}
+	for _, tc := range ksmCases {
+		got, err := NormalizeKSMMode(tc.in)
+		if (err != nil) != tc.wantErr {
+			t.Errorf("NormalizeKSMMode(%q) err=%v, wantErr=%v", tc.in, err, tc.wantErr)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("NormalizeKSMMode(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
 }

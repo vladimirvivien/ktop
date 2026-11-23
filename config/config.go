@@ -98,6 +98,8 @@ type MetricsConfig struct {
 	ScrapeInterval string   `json:"scrape_interval" yaml:"scrape_interval"`
 	Retention      string   `json:"retention" yaml:"retention"`
 	MaxSamples     int      `json:"max_samples" yaml:"max_samples"`
+	KSMMode        string   `json:"ksm_mode,omitempty" yaml:"ksm_mode,omitempty"`
+	KSMEndpoint    string   `json:"ksm_endpoint,omitempty" yaml:"ksm_endpoint,omitempty"`
 	Components     []string `json:"components" yaml:"components"`
 }
 
@@ -256,6 +258,14 @@ var ValidPages = map[string]string{
 	"events":    "events",
 }
 
+// ValidKSMModes lists valid kube-state-metrics enrichment mode values.
+var ValidKSMModes = map[string]string{
+	"auto":     "auto",
+	"off":      "off",
+	"disabled": "off",
+	"none":     "off",
+}
+
 // NormalizeMetricsSource converts aliases to canonical names
 func NormalizeMetricsSource(source string) (string, error) {
 	normalized, ok := ValidMetricsSources[strings.ToLower(source)]
@@ -278,6 +288,11 @@ func NormalizeColorMode(mode string) (string, error) {
 // NormalizePage validates and canonicalizes a top-level TUI page identifier.
 func NormalizePage(page string) (string, error) {
 	return normalizeOption(page, "overview", "page", ValidPages, "overview, workloads, events")
+}
+
+// NormalizeKSMMode validates and canonicalizes the kube-state-metrics enrichment mode.
+func NormalizeKSMMode(mode string) (string, error) {
+	return normalizeOption(mode, "auto", "ksm mode", ValidKSMModes, "auto, off")
 }
 
 func normalizeOption(raw, emptyDefault, kind string, valid map[string]string, validList string) (string, error) {

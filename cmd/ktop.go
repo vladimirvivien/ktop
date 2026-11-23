@@ -67,6 +67,8 @@ type ktopCmdOptions struct {
 	prometheusRetention      string
 	prometheusMaxSamples     int
 	prometheusComponents     []string
+	ksmMode                  string
+	ksmEndpoint              string
 
 	// UI appearance configuration
 	theme     string
@@ -147,6 +149,10 @@ func NewKtopCmd() *cobra.Command {
 	cmd.Flags().StringSliceVar(&o.prometheusComponents, "prometheus-components",
 		[]string{"kubelet", "cadvisor"},
 		"Kubernetes components to scrape (comma-separated: kubelet,cadvisor,apiserver,etcd,scheduler,controller-manager,kube-proxy)")
+	cmd.Flags().StringVar(&o.ksmMode, "ksm", "auto",
+		"kube-state-metrics enrichment mode: auto (default) or off")
+	cmd.Flags().StringVar(&o.ksmEndpoint, "ksm-endpoint", "",
+		"Explicit kube-state-metrics endpoint (URL or namespace/service[:port])")
 
 	// Logging flags
 	cmd.Flags().StringVar(&o.logLevel, "log-level", "info",
@@ -333,6 +339,12 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, _ []string) error {
 		if !c.Flags().Changed("prometheus-components") && len(appConfig.Metrics.Components) > 0 {
 			o.prometheusComponents = appConfig.Metrics.Components
 		}
+		if !c.Flags().Changed("ksm") && appConfig.Metrics.KSMMode != "" {
+			o.ksmMode = appConfig.Metrics.KSMMode
+		}
+		if !c.Flags().Changed("ksm-endpoint") && appConfig.Metrics.KSMEndpoint != "" {
+			o.ksmEndpoint = appConfig.Metrics.KSMEndpoint
+		}
 	}
 
 	// Load configuration with defaults
@@ -398,6 +410,13 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, _ []string) error {
 		return WrapExitError(ExitInvalidFlags, err)
 	}
 	o.page = normalizedPage
+
+	normalizedKSM, err := config.NormalizeKSMMode(o.ksmMode)
+	if err != nil {
+		slog.Error("invalid ksm mode", "value", o.ksmMode, "error", err)
+		return WrapExitError(ExitInvalidFlags, err)
+	}
+	o.ksmMode = normalizedKSM
 
 	k8sC, err := k8s.New(o.kubeFlags)
 	if err != nil {
