@@ -135,9 +135,10 @@ ktop uses a hierarchical navigation model:
 Overview  → Node Detail     → Pod Detail → Container Detail
           → Pod Detail      → Container Detail
 Workloads → Workload Detail → Pod Detail → Container Detail
+Events    → Event Detail Modal → Pod / Node / Workload Inspector
 ```
 
-Switch top-level tabs at any time using `1`–`2` or `[` / `]`. Launch directly onto a specific page with `--page=workloads` or `ui.default_page` in `~/.ktop/config.yaml`.
+Switch top-level tabs at any time using `1`–`3` or `[` / `]`. Launch directly onto a specific page with `--page=workloads`, `--page=events`, or `ui.default_page` in `~/.ktop/config.yaml`.
 
 ### Key Controls
 
@@ -183,6 +184,17 @@ Groups application controllers into a two-column layout of four sortable, filter
 The `CPU` and `MEM` columns sum live CPU and memory usage across each workload's active owned pods.
 
 Press `Tab` to move across Workload sections and `Enter` on any row to open its detail view (`Deployment Detail`, `StatefulSet Detail`, `DaemonSet Detail`, or `Job Detail`), displaying replica/rollout state, container images, aggregated CPU/memory usage vs. requests/limits, rollout conditions, scoped events, and owned pods. Press `Enter` while the detail panel is active to inspect the full object YAML in a scrollable modal (`y` copies YAML to clipboard), or `Tab` to **Owned Pods** and press `Enter` to drill into Pod Detail.
+
+### Events
+
+Displays a live, chronological cluster- or namespace-wide stream of Kubernetes Events across all resource kinds (`LAST SEEN`, `TYPE`, `REASON`, `OBJECT`, `NS`, `COUNT`, `MESSAGE`), paired with a single-line Summary bar reporting total events, warning/normal counts, top firing reason, and active stream filters.
+
+**Controls:**
+- `w` — Toggle **Warnings only** vs. all events
+- `f` — Toggle **Follow (LIVE)** vs. **Paused** (freezes the table while tracking incoming event count in the summary bar)
+- `/` — Substring filter across type, reason, object, namespace, source, and message
+- `y` — Copy selected event summary to clipboard
+- `Enter` — Open the floating **Event Detail** modal displaying full metadata and the untruncated word-wrapped message (`g` inspects the involved Pod, Node, or Workload when supported; `v` opens raw Event YAML; `y` copies the full message; `ESC`/`q` closes)
 
 ### Node Detail
 

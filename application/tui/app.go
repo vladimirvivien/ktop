@@ -10,6 +10,7 @@ import (
 	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
+	"github.com/vladimirvivien/ktop/views/events"
 	"github.com/vladimirvivien/ktop/views/overview"
 	"github.com/vladimirvivien/ktop/views/workloads"
 )
@@ -67,6 +68,15 @@ func NewRunner(ctx context.Context, k8sC *k8s.Client, metricsSource metrics.Metr
 		RootType:   application.PageWorkloads,
 		Panel:      workloadsPage,
 		ChildNames: []string{"deployments", "statefulsets", "daemonsets", "jobs"},
+	})
+	eventsPage := events.New(app, "Events")
+	app.RegisterPage(application.PageDescriptor{
+		ID:         "events",
+		Title:      "Events",
+		Key:        '3',
+		RootType:   application.PageEvents,
+		Panel:      eventsPage,
+		ChildNames: []string{"events"},
 	})
 	if opts.InitialPage != "" {
 		if err := app.SetInitialPage(opts.InitialPage); err != nil {

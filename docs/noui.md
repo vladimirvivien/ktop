@@ -150,6 +150,16 @@ In `-o json` mode (the default), `ktop` buffers snapshots across the collection 
     "daemonsets": [],
     "jobs": []
   },
+  "events": {
+    "summary": {
+      "total": 12,
+      "warning_count": 2,
+      "normal_count": 10,
+      "top_reason": "BackOff",
+      "top_reason_count": 2
+    },
+    "items": []
+  },
   "samples": []
 }
 ```
@@ -163,7 +173,8 @@ In `-o json` mode (the default), `ktop` buffers snapshots across the collection 
 | `nodes` | Always | Latest slice of node records (`name`, `status`, `pressures`, capacities, usage, and node-root `psi`) |
 | `pods` | Always | Latest slice of pod records (`namespace`, `name`, `status`, `restarts`, `psi`, `cpu_throttled_pct`, optional `resize_status`, and per-container breakdown) |
 | `workloads` | When available | Latest cluster workload rollups (`deployments`, `statefulsets`, `daemonsets`, `jobs`) with replica counts, status, and aggregated CPU/memory usage |
-| `samples` | Windowed runs (`-d > 0`) | Ordered array of per-interval snapshot objects (`timestamp`, `cluster`, `summary`, `nodes`, `pods`, `workloads`); omitted in single-shot mode |
+| `events` | When available | Recent cluster or namespace-scoped Kubernetes Events with summary totals (`total`, `warning_count`, `normal_count`, `top_reason`) and bounded `items` list |
+| `samples` | Windowed runs (`-d > 0`) | Ordered array of per-interval snapshot objects (`timestamp`, `cluster`, `summary`, `nodes`, `pods`, `workloads`, `events`); omitted in single-shot mode |
 
 ### Streaming Lines (`-o jsonl`)
 

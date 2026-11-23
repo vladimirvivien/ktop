@@ -91,6 +91,75 @@ func (c WorkloadsContext) GetItems() []FooterItem {
 	}
 }
 
+// EventsContext provides footer items for the standalone Events page.
+type EventsContext struct {
+	FocusedPanel string // "header" or "events"
+	PageCount    int
+	WarningsOnly bool
+	Paused       bool
+}
+
+// GetItems returns footer items based on the focused Events panel and active toggles.
+func (c EventsContext) GetItems() []FooterItem {
+	switch c.FocusedPanel {
+	case "header":
+		items := appendPageSwitchFooterItem([]FooterItem{{Key: "[Tab]", Action: "next"}}, c.PageCount)
+		return append(items,
+			FooterItem{Key: "[/]", Action: "filter"},
+			FooterItem{Key: "[?]", Action: "help"},
+			FooterItem{Key: "[ESC | Ctrl+C]", Action: "quit"},
+		)
+	default: // events table
+		warnAction := "warnings"
+		if c.WarningsOnly {
+			warnAction = "all"
+		}
+		followAction := "pause"
+		if c.Paused {
+			followAction = "live"
+		}
+		items := []FooterItem{
+			{Key: "[↑/↓]", Action: "navigate"},
+			{Key: "[Enter]", Action: "detail"},
+			{Key: "[w]", Action: warnAction},
+			{Key: "[f]", Action: followAction},
+			{Key: "[Tab]", Action: "next"},
+		}
+		items = appendPageSwitchFooterItem(items, c.PageCount)
+		return append(items,
+			FooterItem{Key: "[/]", Action: "filter"},
+			FooterItem{Key: "[y]", Action: "copy"},
+			FooterItem{Key: "[?]", Action: "help"},
+			FooterItem{Key: "[ESC | Ctrl+C]", Action: "quit"},
+		)
+	}
+}
+
+// EventDetailModalContext provides footer items when the Event Detail modal is open.
+type EventDetailModalContext struct {
+	CanJump  bool
+	JumpKind string
+}
+
+// GetItems returns footer items for the Event Detail modal.
+func (c EventDetailModalContext) GetItems() []FooterItem {
+	items := []FooterItem{
+		{Key: "[↑/↓]", Action: "scroll"},
+	}
+	if c.CanJump {
+		action := "inspect"
+		if c.JumpKind != "" {
+			action = "inspect " + c.JumpKind
+		}
+		items = append(items, FooterItem{Key: "[g]", Action: action})
+	}
+	return append(items,
+		FooterItem{Key: "[v]", Action: "yaml"},
+		FooterItem{Key: "[y]", Action: "copy"},
+		FooterItem{Key: "[ESC/q]", Action: "close"},
+	)
+}
+
 // WorkloadDetailContext provides footer items for Workload Detail view.
 type WorkloadDetailContext struct {
 	FocusedPanel string // "detail", "pods", or "events"

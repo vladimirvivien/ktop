@@ -1021,6 +1021,63 @@ func (app *Application) SetContainerLogsCallback(callback func(namespace, podNam
 	app.containerLogsCallback = callback
 }
 
+// IsInspectableObjectKind reports whether ktop has a built-in resource inspector
+// for the given Kubernetes object kind.
+func IsInspectableObjectKind(kind string) bool {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "pod", "node", "deployment", "statefulset", "daemonset", "job":
+		return true
+	default:
+		return false
+	}
+}
+
+// JumpToObject opens the appropriate inspector for the referenced Kubernetes object.
+// Pods open in the shared floating Pod Inspector modal over the current tab; Nodes
+// and Workloads switch to their owning tab before pushing the detail subpage.
+// Returns (true, "") on success or (false, reason) when the object is unsupported or missing.
+func (app *Application) JumpToObject(kind, namespace, name string) (bool, string) {
+	normKind := strings.ToLower(strings.TrimSpace(kind))
+	if name == "" || !IsInspectableObjectKind(normKind) {
+		return false, fmt.Sprintf("No inspector available for %s", kind)
+	}
+
+	if app.k8sClient != nil && !app.k8sClient.Controller().HasObject(normKind, namespace, name) {
+		if normKind == "node" || namespace == "" {
+			return false, fmt.Sprintf("%s %s no longer exists", kind, name)
+		}
+		return false, fmt.Sprintf("%s %s/%s no longer exists", kind, namespace, name)
+	}
+
+	switch normKind {
+	case "pod":
+		app.NavigateToPodDetail(namespace, name)
+		return true, ""
+	case "node":
+		if idx, ok := app.FindPageIndex("overview"); ok {
+			app.SwitchToPageIndex(idx)
+		}
+		if stack := app.activeNavStack(); stack != nil && stack.CanGoBack() {
+			stack.Clear()
+			app.fireDetailResetCallbacks()
+		}
+		app.NavigateToNodeDetail(name)
+		return true, ""
+	case "deployment", "statefulset", "daemonset", "job":
+		if idx, ok := app.FindPageIndex("workloads"); ok {
+			app.SwitchToPageIndex(idx)
+		}
+		if stack := app.activeNavStack(); stack != nil && stack.CanGoBack() {
+			stack.Clear()
+			app.fireDetailResetCallbacks()
+		}
+		app.NavigateToWorkloadDetail(kind, namespace, name)
+		return true, ""
+	default:
+		return false, fmt.Sprintf("No inspector available for %s", kind)
+	}
+}
+
 // NavigateToContainerLogs transitions the shared Pod Inspector modal to container logs
 // without pushing onto the top-level navigation stack.
 func (app *Application) NavigateToContainerLogs(namespace, podName, containerName string) {
@@ -1265,6 +1322,23 @@ func (app *Application) updateFooterContext() {
 			ctx = ui.WorkloadsContext{
 				FocusedPanel: app.getFocusedPanelName(),
 				PageCount:    pageCount,
+			}
+		case PageEvents:
+			var warnOnly, paused bool
+			if active := app.activePagePanel(); active != nil {
+				if st, ok := active.(interface {
+					WarningsOnly() bool
+					Paused() bool
+				}); ok {
+					warnOnly = st.WarningsOnly()
+					paused = st.Paused()
+				}
+			}
+			ctx = ui.EventsContext{
+				FocusedPanel: app.getFocusedPanelName(),
+				PageCount:    pageCount,
+				WarningsOnly: warnOnly,
+				Paused:       paused,
 			}
 		default:
 			ctx = ui.PageContext{
