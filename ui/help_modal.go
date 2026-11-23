@@ -135,7 +135,7 @@ func (m *HelpModal) renderHelpContent(cfg HelpModalConfig) string {
 	} else {
 		fmt.Fprintf(&b, "  %s          Switch top-level page\n", key("Keys 1-9"))
 	}
-	fmt.Fprintf(&b, "  %s or %s            Previous / next page\n", key("["), key("]"))
+	fmt.Fprintf(&b, "  %s or %s            Previous / next page\n", key("<"), key(">"))
 	fmt.Fprintf(&b, "  %s             Open detail view for selected Node, Pod, Workload, or Event\n", key("Enter"))
 	fmt.Fprintf(&b, "  %s / %s             Copy selected resource name to clipboard\n", key("y"), key("Y"))
 	fmt.Fprintf(&b, "  %s / %s            Toggle this keyboard shortcuts help modal\n", key("?"), key("F1"))

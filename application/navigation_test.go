@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 	"github.com/vladimirvivien/ktop/ui"
 )
@@ -253,6 +254,21 @@ func TestApplication_PageRegistryAndPerPageStackIsolation(t *testing.T) {
 	if app.tabIdx != 2 {
 		t.Fatalf("expected Overview tabIdx=2 preserved across detail drill-down, got %d", app.tabIdx)
 	}
+	// Verify '>' / '<' key events advance and rewind top-level pages (while '[' / ']' do not).
+	app.SwitchToPage("overview")
+	app.handleInputEvent(tcell.NewEventKey(tcell.KeyRune, '>', tcell.ModShift))
+	if app.ActivePageID() != "workloads" {
+		t.Fatalf("expected '>' to switch to workloads, got %q", app.ActivePageID())
+	}
+	app.handleInputEvent(tcell.NewEventKey(tcell.KeyRune, '<', tcell.ModShift))
+	if app.ActivePageID() != "overview" {
+		t.Fatalf("expected '<' to switch back to overview, got %q", app.ActivePageID())
+	}
+	app.handleInputEvent(tcell.NewEventKey(tcell.KeyRune, ']', tcell.ModNone))
+	if app.ActivePageID() != "overview" {
+		t.Fatalf("expected ']' not to switch page, got %q", app.ActivePageID())
+	}
+
 	if _, ok := app.panel.footerComponent.GetView().(*tview.Flex); !ok {
 		t.Fatal("expected footer component view")
 	}

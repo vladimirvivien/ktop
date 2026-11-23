@@ -583,10 +583,10 @@ func (app *Application) handleInputEvent(event *tcell.EventKey) *tcell.EventKey 
 			}
 		} else if app.PageCount() > 1 {
 			switch r {
-			case ']':
+			case '>':
 				app.NextPage()
 				return nil
-			case '[':
+			case '<':
 				app.PrevPage()
 				return nil
 			}

@@ -138,7 +138,7 @@ Workloads → Workload Detail → Pod Detail → Container Detail
 Events    → Event Detail Modal → Pod / Node / Workload Inspector
 ```
 
-Switch top-level tabs at any time using `1`–`3` or `[` / `]`. Launch directly onto a specific page with `--page=workloads`, `--page=events`, or `ui.default_page` in `~/.ktop/config.yaml`.
+Switch top-level tabs at any time using `1`–`3` or `<` / `>`. Launch directly onto a specific page with `--page=workloads`, `--page=events`, or `ui.default_page` in `~/.ktop/config.yaml`.
 
 ### Key Controls
 
