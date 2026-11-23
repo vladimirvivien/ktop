@@ -87,11 +87,23 @@ type ClusterSummary struct {
 	// PSIBeta is true when the cluster's Kubernetes version is below 1.36 (GA).
 	// Surfaced by the UI to mark stall values as best-effort.
 	PSIBeta bool
+
+	// Component SLIs (/metrics/slis) and Kubelet Probes (/metrics/probes)
+	SLIAvailable           bool
+	SLIUnhealthyComponents int
+	SLIFailingChecks       []string
+	ProbeFailingPods       int
+
+	// kube-state-metrics (KSM) governance rollups
+	KSMAvailable       bool
+	KSMHPAsLimited     int
+	KSMPDBsAtRisk      int
+	KSMQuotasNearLimit int
 }
 
 // CalculateHealthScore computes a composite 0-100 cluster health score from
 // node readiness, pod failures/OOMs/CrashLoopBackOffs, PSI saturation, node
-// pressure, and metrics availability.
+// pressure, component SLIs (when reachable), and metrics availability.
 func CalculateHealthScore(summary ClusterSummary, hasMetrics bool) int {
 	score := 100
 
@@ -117,6 +129,14 @@ func CalculateHealthScore(summary ClusterSummary, hasMetrics bool) int {
 
 	if summary.NodePressureCount > 0 {
 		score -= summary.NodePressureCount * 5
+	}
+
+	if summary.SLIAvailable && summary.SLIUnhealthyComponents > 0 {
+		penalty := summary.SLIUnhealthyComponents * 15
+		if penalty > 30 {
+			penalty = 30
+		}
+		score -= penalty
 	}
 
 	if !hasMetrics {

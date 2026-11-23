@@ -99,6 +99,39 @@ func TestCalculateHealthScore(t *testing.T) {
 			want:       90,
 		},
 		{
+			name: "sli unavailable applies zero penalty",
+			summary: ClusterSummary{
+				NodesCount:             3,
+				NodesReady:             3,
+				SLIAvailable:           false,
+				SLIUnhealthyComponents: 2,
+			},
+			hasMetrics: true,
+			want:       100,
+		},
+		{
+			name: "one unhealthy sli component deducts 15",
+			summary: ClusterSummary{
+				NodesCount:             3,
+				NodesReady:             3,
+				SLIAvailable:           true,
+				SLIUnhealthyComponents: 1,
+			},
+			hasMetrics: true,
+			want:       85,
+		},
+		{
+			name: "multiple unhealthy sli components cap penalty at 30",
+			summary: ClusterSummary{
+				NodesCount:             3,
+				NodesReady:             3,
+				SLIAvailable:           true,
+				SLIUnhealthyComponents: 4,
+			},
+			hasMetrics: true,
+			want:       70,
+		},
+		{
 			name: "severely degraded cluster clamps at 0",
 			summary: ClusterSummary{
 				NodesCount:         4,
