@@ -128,14 +128,14 @@ func TestMultiPage_TabSwitchingAndBracketCycling(t *testing.T) {
 		t.Fatalf("expected Events body after pressing '3', got:\n%s", ts.Text())
 	}
 
-	sendAppKey(ts, app, tcell.KeyRune, ']', tcell.ModNone)
+	sendAppKey(ts, app, tcell.KeyRune, '>', tcell.ModShift)
 	if app.ActivePageID() != "overview" {
-		t.Fatalf("expected ']' to wrap to 'overview', got %q", app.ActivePageID())
+		t.Fatalf("expected '>' to wrap to 'overview', got %q", app.ActivePageID())
 	}
 
-	sendAppKey(ts, app, tcell.KeyRune, '[', tcell.ModNone)
+	sendAppKey(ts, app, tcell.KeyRune, '<', tcell.ModShift)
 	if app.ActivePageID() != "events" {
-		t.Fatalf("expected '[' to wrap to 'events', got %q", app.ActivePageID())
+		t.Fatalf("expected '<' to wrap to 'events', got %q", app.ActivePageID())
 	}
 }
 

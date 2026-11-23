@@ -10,6 +10,7 @@ import (
 	"github.com/vladimirvivien/ktop/application"
 	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/ui"
+	"github.com/vladimirvivien/ktop/views/model"
 	"github.com/vladimirvivien/ktop/views/overview"
 	"github.com/vladimirvivien/ktop/views/workloads"
 	appsv1 "k8s.io/api/apps/v1"
@@ -132,10 +133,22 @@ func TestWorkloadsTUI_EndToEndNavigationAndDrillDown(t *testing.T) {
 		t.Fatalf("Setup failed: %v", err)
 	}
 
-	// Simulate Workloads initial snapshot delivery directly without background QueueUpdateDraw loop.
-	snap, err := client.Controller().GetWorkloadsSnapshot(ctx)
-	if err != nil {
-		t.Fatalf("GetWorkloadsSnapshot failed: %v", err)
+	// Wait briefly for all workload informers (including batch/v1 Jobs under -race) to populate.
+	var snap model.WorkloadsSnapshot
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		var err error
+		snap, err = client.Controller().GetWorkloadsSnapshot(ctx)
+		if err != nil {
+			t.Fatalf("GetWorkloadsSnapshot failed: %v", err)
+		}
+		if len(snap.Deployments) > 0 && len(snap.StatefulSets) > 0 && len(snap.DaemonSets) > 0 && len(snap.Jobs) > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 	workloadsPanel.DrawBody(snap)
 
