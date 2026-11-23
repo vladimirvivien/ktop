@@ -706,6 +706,25 @@ func (p *DetailPanel) drawMetadataSection() {
 		addRow(p.middleDetailTable, row, "Req Usage", effText, valColor)
 		row++
 	}
+	for _, hpa := range p.data.HPAs {
+		hpaText := fmt.Sprintf("%s %d/%d [%d..%d]", hpa.Name, hpa.CurrentReplicas, hpa.DesiredReplicas, hpa.MinReplicas, hpa.MaxReplicas)
+		hpaColor := okColor
+		if hpa.ScalingLimited {
+			hpaText += " (LIMITED)"
+			hpaColor = warnColor
+		}
+		addRow(p.middleDetailTable, row, "HPA", ui.Truncate(hpaText, 38), hpaColor)
+		row++
+	}
+	for _, pdb := range p.data.PDBs {
+		pdbText := fmt.Sprintf("%s %d/%d (%d allowed)", pdb.Name, pdb.CurrentHealthy, pdb.DesiredHealthy, pdb.DisruptionsAllowed)
+		pdbColor := okColor
+		if pdb.DisruptionsAllowed == 0 {
+			pdbColor = warnColor
+		}
+		addRow(p.middleDetailTable, row, "PDB", ui.Truncate(pdbText, 38), pdbColor)
+		row++
+	}
 
 	if len(p.data.Conditions) == 0 {
 		p.middleDetailTable.SetCell(row, 0, ui.NewDataCell("No conditions").SetTextColor(mutedColor).SetSelectable(false))

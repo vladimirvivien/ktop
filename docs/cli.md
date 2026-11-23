@@ -32,6 +32,8 @@ ktop uses your kubeconfig file (from `$KUBECONFIG` or `~/.kube/config`) to conne
 | `--prometheus-retention` | `1h` | How long to keep metrics (min: 5m) |
 | `--prometheus-max-samples` | `10000` | Max samples per time series |
 | `--prometheus-components` | `kubelet,cadvisor` | Components to scrape |
+| `--ksm` | `auto` | `kube-state-metrics` enrichment mode: `auto` (auto-discovers via API service proxy and degrades silently) or `off` |
+| `--ksm-endpoint` | `""` | Explicit `kube-state-metrics` endpoint (`http(s)://...` URL or `namespace/service[:port]`) |
 
 ### Available Prometheus Components
 

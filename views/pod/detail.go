@@ -874,6 +874,22 @@ func (p *DetailPanel) drawPodDetailSection() {
 			resizeSuffix = fmt.Sprintf("  %sResize:%s %s", mutedOpen, closeTag, effRes.ResizeStatus)
 		}
 		resourcesBuilder.WriteString(fmt.Sprintf("%sLimits:%s   %s / %s%s\n", mutedOpen, closeTag, limCPU, limMem, resizeSuffix))
+
+		var failingProbes []string
+		for _, pr := range p.data.Probes {
+			if pr.Failing {
+				failingProbes = append(failingProbes, fmt.Sprintf("%s/%s (%.0f fail)", pr.Container, pr.ProbeType, pr.FailureCount))
+			}
+		}
+		if len(failingProbes) > 0 {
+			resourcesBuilder.WriteString(fmt.Sprintf("%sProbes:%s   %s\n", mutedOpen, closeTag, strings.Join(failingProbes, ", ")))
+		}
+		if p.data.DisruptionReason != "" {
+			resourcesBuilder.WriteString(fmt.Sprintf("%sDisrupt:%s  %s\n", mutedOpen, closeTag, p.data.DisruptionReason))
+		}
+		if len(p.data.ResourceClaims) > 0 {
+			resourcesBuilder.WriteString(fmt.Sprintf("%sClaims:%s   %s\n", mutedOpen, closeTag, strings.Join(p.data.ResourceClaims, ", ")))
+		}
 	} else {
 		resourcesBuilder.WriteString(mutedOpen + "n/a" + closeTag)
 	}

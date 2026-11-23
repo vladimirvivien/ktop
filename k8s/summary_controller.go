@@ -260,6 +260,23 @@ func (c *Controller) BuildClusterSummary(ctx context.Context) (model.ClusterSumm
 		c.collectPrometheusEnhancedMetrics(&summary, nodes, nodeMetricsByNode)
 	}
 
+	if sliSnap := c.GetSLISnapshot(); sliSnap != nil {
+		if sliSnap.Available {
+			summary.SLIAvailable = true
+			summary.SLIUnhealthyComponents = sliSnap.UnhealthyComponentCount()
+			summary.SLIFailingChecks = sliSnap.FailingCheckNames()
+		}
+		if sliSnap.ProbesAvailable {
+			summary.ProbeFailingPods = sliSnap.FailingProbePods()
+		}
+	}
+	if ksmSnap := c.GetKSMSnapshot(); ksmSnap != nil && ksmSnap.Available {
+		summary.KSMAvailable = true
+		summary.KSMHPAsLimited = ksmSnap.HPAsLimited()
+		summary.KSMPDBsAtRisk = ksmSnap.PDBsAtRisk()
+		summary.KSMQuotasNearLimit = ksmSnap.QuotasNearLimit(85.0)
+	}
+
 	hasMetrics := c.metricsSource != nil && (len(nodeMetricsByNode) > 0 || (len(nodes) == 0 && c.metricsSource.IsHealthy()))
 	summary.PSIBeta = !c.client.PSIVersionOK()
 	summary.HealthScore = model.CalculateHealthScore(summary, hasMetrics)

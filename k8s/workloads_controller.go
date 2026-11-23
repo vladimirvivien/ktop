@@ -327,6 +327,30 @@ func (c *Controller) BuildWorkloadDetailData(ctx context.Context, kind model.Wor
 		detail.Events = events
 	}
 
+	if ksmSnap := c.GetKSMSnapshot(); ksmSnap != nil && ksmSnap.Available {
+		for _, h := range ksmSnap.HPAsForWorkload(string(kind), namespace, name) {
+			limited := h.ScalingLimited != nil && *h.ScalingLimited
+			detail.HPAs = append(detail.HPAs, model.WorkloadHPAInfo{
+				Name:            h.Name,
+				MinReplicas:     h.MinReplicas,
+				MaxReplicas:     h.MaxReplicas,
+				CurrentReplicas: h.CurrentReplicas,
+				DesiredReplicas: h.DesiredReplicas,
+				ScalingLimited:  limited,
+			})
+		}
+		for _, pdb := range ksmSnap.PDBs {
+			if pdb.Namespace == namespace && (pdb.Name == name || strings.HasPrefix(pdb.Name, name+"-") || strings.HasSuffix(pdb.Name, "-"+name)) {
+				detail.PDBs = append(detail.PDBs, model.WorkloadPDBInfo{
+					Name:               pdb.Name,
+					CurrentHealthy:     pdb.CurrentHealthy,
+					DesiredHealthy:     pdb.DesiredHealthy,
+					DisruptionsAllowed: pdb.DisruptionsAllowed,
+				})
+			}
+		}
+	}
+
 	return detail, nil
 }
 

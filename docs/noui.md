@@ -171,10 +171,12 @@ In `-o json` mode (the default), `ktop` buffers snapshots across the collection 
 | `summary` | Always | Latest cluster-wide counts, resource totals, I/O rates, PSI stall averages, and `health_score` |
 | `health_score_stats` | Always | Window-level `min`, `max`, `avg`, and `latest` health score across all collected samples |
 | `nodes` | Always | Latest slice of node records (`name`, `status`, `pressures`, capacities, usage, and node-root `psi`) |
-| `pods` | Always | Latest slice of pod records (`namespace`, `name`, `status`, `restarts`, `psi`, `cpu_throttled_pct`, optional `resize_status`, and per-container breakdown) |
+| `pods` | Always | Latest slice of pod records (`namespace`, `name`, `status`, `restarts`, `psi`, `cpu_throttled_pct`, optional `resize_status`, `disruption_reason`, `resource_claims`, `failing_probes`, and per-container breakdown) |
 | `workloads` | When available | Latest cluster workload rollups (`deployments`, `statefulsets`, `daemonsets`, `jobs`) with replica counts, status, and aggregated CPU/memory usage |
 | `events` | When available | Recent cluster or namespace-scoped Kubernetes Events with summary totals (`total`, `warning_count`, `normal_count`, `top_reason`) and bounded `items` list |
-| `samples` | Windowed runs (`-d > 0`) | Ordered array of per-interval snapshot objects (`timestamp`, `cluster`, `summary`, `nodes`, `pods`, `workloads`, `events`); omitted in single-shot mode |
+| `governance` | When KSM available | Auto-discovered `kube-state-metrics` governance state (`hpas`, `pdbs`, `resource_quotas`, `cronjobs`); omitted when KSM is absent or `--ksm=off` |
+| `slis` | When SLIs/probes available | Built-in Kubernetes `/metrics/slis` component healthcheck status (`apiserver`, `kubelet`) and `/metrics/probes` availability |
+| `samples` | Windowed runs (`-d > 0`) | Ordered array of per-interval snapshot objects (`timestamp`, `cluster`, `summary`, `nodes`, `pods`, `workloads`, `events`, `governance`, `slis`); omitted in single-shot mode |
 
 ### Streaming Lines (`-o jsonl`)
 

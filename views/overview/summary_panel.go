@@ -2,6 +2,7 @@ package overview
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/rivo/tview"
@@ -406,6 +407,9 @@ func (p *clusterSummaryPanel) drawEnhancedStats(summary model.ClusterSummary) {
 			pressureStr,
 			stallText,
 		)
+		if extra := formatSLIAndKSMBadges(summary, true); extra != "" {
+			enhancedText += " │ " + extra
+		}
 		p.enhancedStats.SetText(enhancedText)
 		return
 	}
@@ -441,7 +445,63 @@ func (p *clusterSummaryPanel) drawEnhancedStats(summary model.ClusterSummary) {
 		lblTag, ui.TagFg(pressureCol), summary.NodePressureCount,
 		lblTag, stallText,
 	)
+	if extra := formatSLIAndKSMBadges(summary, false); extra != "" {
+		enhancedText += fmt.Sprintf("[%s] │ %s", lblTag, extra)
+	}
 	p.enhancedStats.SetText(enhancedText)
+}
+
+func formatSLIAndKSMBadges(s model.ClusterSummary, mono bool) string {
+	pal := ui.ActivePalette()
+	var parts []string
+	lblTag := ui.TagFg(pal.DataPrimary)
+
+	if s.SLIAvailable {
+		if s.SLIUnhealthyComponents > 0 {
+			if mono {
+				parts = append(parts, "SLIs: "+ui.ErrorMarkup(fmt.Sprintf("%d fail", s.SLIUnhealthyComponents)))
+			} else {
+				parts = append(parts, fmt.Sprintf("[%s]SLIs: [%s]%d fail[-]", lblTag, ui.TagFg(pal.StatusError), s.SLIUnhealthyComponents))
+			}
+		} else {
+			if mono {
+				parts = append(parts, "SLIs: OK")
+			} else {
+				parts = append(parts, fmt.Sprintf("[%s]SLIs: [%s]OK[-]", lblTag, ui.TagFg(pal.StatusOK)))
+			}
+		}
+	}
+
+	if s.ProbeFailingPods > 0 {
+		if mono {
+			parts = append(parts, "Probes: "+ui.ErrorMarkup(fmt.Sprintf("%d fail", s.ProbeFailingPods)))
+		} else {
+			parts = append(parts, fmt.Sprintf("[%s]Probes: [%s]%d fail[-]", lblTag, ui.TagFg(pal.StatusWarning), s.ProbeFailingPods))
+		}
+	}
+
+	if s.KSMAvailable {
+		var alerts []string
+		if s.KSMHPAsLimited > 0 {
+			alerts = append(alerts, fmt.Sprintf("HPA-lim:%d", s.KSMHPAsLimited))
+		}
+		if s.KSMPDBsAtRisk > 0 {
+			alerts = append(alerts, fmt.Sprintf("PDB-0:%d", s.KSMPDBsAtRisk))
+		}
+		if s.KSMQuotasNearLimit > 0 {
+			alerts = append(alerts, fmt.Sprintf("Quota:%d", s.KSMQuotasNearLimit))
+		}
+		if len(alerts) > 0 {
+			joined := strings.Join(alerts, " ")
+			if mono {
+				parts = append(parts, "KSM: "+ui.ErrorMarkup(joined))
+			} else {
+				parts = append(parts, fmt.Sprintf("[%s]KSM: [%s]%s[-]", lblTag, ui.TagFg(pal.StatusWarning), joined))
+			}
+		}
+	}
+
+	return strings.Join(parts, " │ ")
 }
 
 // formatSummaryStall renders the cluster-wide PSI cell for the summary strip.

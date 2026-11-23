@@ -10,6 +10,8 @@ import (
 
 	"github.com/vladimirvivien/ktop/health"
 	"github.com/vladimirvivien/ktop/metrics"
+	"github.com/vladimirvivien/ktop/metrics/ksm"
+	"github.com/vladimirvivien/ktop/metrics/sli"
 	"github.com/vladimirvivien/ktop/views/model"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
@@ -28,6 +30,8 @@ type RefreshEventsFunc func(ctx context.Context, snap model.EventsSnapshot) erro
 type Controller struct {
 	client        *Client
 	metricsSource metrics.MetricsSource // NEW: for cluster summary metrics
+	ksmCollector  *ksm.Collector
+	sliCollector  *sli.Collector
 
 	namespaceInformer coreV1Informers.NamespaceInformer
 	nodeInformer      coreV1Informers.NodeInformer
@@ -120,6 +124,44 @@ func (c *Controller) SetEventsRefreshFunc(fn RefreshEventsFunc) *Controller {
 func (c *Controller) SetMetricsSource(source metrics.MetricsSource) *Controller {
 	c.metricsSource = source
 	return c
+}
+
+// SetKSMCollector attaches an optional kube-state-metrics collector.
+func (c *Controller) SetKSMCollector(col *ksm.Collector) *Controller {
+	c.ksmCollector = col
+	return c
+}
+
+// SetSLICollector attaches an optional Component SLI & Kubelet Probe collector.
+func (c *Controller) SetSLICollector(col *sli.Collector) *Controller {
+	c.sliCollector = col
+	return c
+}
+
+// KSMCollector returns the attached kube-state-metrics collector, if any.
+func (c *Controller) KSMCollector() *ksm.Collector {
+	return c.ksmCollector
+}
+
+// SLICollector returns the attached Component SLI & Probe collector, if any.
+func (c *Controller) SLICollector() *sli.Collector {
+	return c.sliCollector
+}
+
+// GetKSMSnapshot returns the latest lock-free KSM snapshot, or nil if unavailable.
+func (c *Controller) GetKSMSnapshot() *ksm.Snapshot {
+	if c == nil || c.ksmCollector == nil {
+		return nil
+	}
+	return c.ksmCollector.Latest()
+}
+
+// GetSLISnapshot returns the latest lock-free Component SLI & Probe snapshot, or nil if unavailable.
+func (c *Controller) GetSLISnapshot() *sli.Snapshot {
+	if c == nil || c.sliCollector == nil {
+		return nil
+	}
+	return c.sliCollector.Latest()
 }
 
 func (c *Controller) SetHealthTracker(tracker *health.APIHealthTracker) *Controller {
@@ -283,6 +325,14 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 		c.healthTracker.SetOnTryReconnect(func() {
 			c.checkAPIHealth(ctx)
 		})
+	}
+
+	// Start optional background KSM and SLI/Probe collectors (degrade silently if unavailable)
+	if c.ksmCollector != nil && c.ksmCollector.Enabled() {
+		c.ksmCollector.Start(ctx)
+	}
+	if c.sliCollector != nil {
+		c.sliCollector.Start(ctx)
 	}
 
 	// Start API health monitor - makes periodic live API calls to detect connection loss

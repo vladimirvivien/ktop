@@ -1071,6 +1071,34 @@ func (p *MainPanel) buildPodDetailData(ctx context.Context, podKey string, podMo
 		if events, err := ctrl.GetEventsForPod(ctx, namespace, podName); err == nil {
 			detailData.Events = events
 		}
+
+		// Attach kubelet probe failure counters (when /metrics/probes is available)
+		if sliSnap := ctrl.GetSLISnapshot(); sliSnap != nil && sliSnap.ProbesAvailable {
+			for _, pr := range sliSnap.ProbesForPod(namespace, podName) {
+				detailData.Probes = append(detailData.Probes, model.PodProbeInfo{
+					Container:    pr.Container,
+					ProbeType:    pr.ProbeType,
+					SuccessCount: pr.SuccessCount,
+					FailureCount: pr.FailureCount,
+					Failing:      pr.Failing,
+				})
+			}
+		}
+
+		// Attach KSM disruption reason and DRA ResourceClaim associations (when KSM is available)
+		if ksmSnap := ctrl.GetKSMSnapshot(); ksmSnap != nil && ksmSnap.Available {
+			podKey := namespace + "/" + podName
+			detailData.DisruptionReason = ksmSnap.PodDisruptions[podKey]
+			for _, cl := range ksmSnap.PodResourceClaims[podKey] {
+				name := cl.ResourceClaimName
+				if name == "" {
+					name = cl.Name
+				}
+				if name != "" {
+					detailData.ResourceClaims = append(detailData.ResourceClaims, name)
+				}
+			}
+		}
 	}
 
 	// Fetch container metrics for the containers table

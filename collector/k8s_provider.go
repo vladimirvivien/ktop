@@ -3,6 +3,7 @@ package collector
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/vladimirvivien/ktop/internal/snapshot"
@@ -60,6 +61,27 @@ func (p *K8sSnapshotProvider) WaitReady(ctx context.Context) error {
 			}
 		}
 	}
+
+	// Best-effort initial KSM and SLI/Probe scrape (bounded, silent on error)
+	var wg sync.WaitGroup
+	enrichCtx, enrichCancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+	defer enrichCancel()
+	if ksmCol := ctrl.KSMCollector(); ksmCol != nil && ksmCol.Enabled() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ksmCol.ScrapeOnce(enrichCtx)
+		}()
+	}
+	if sliCol := ctrl.SLICollector(); sliCol != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sliCol.ScrapeOnce(enrichCtx)
+		}()
+	}
+	wg.Wait()
+
 	return nil
 }
 
@@ -119,5 +141,7 @@ func (p *K8sSnapshotProvider) Capture(ctx context.Context) (*snapshot.Snapshot, 
 		PodMetrics: podMetrics,
 		Workloads:  workloadsPtr,
 		Events:     eventsPtr,
+		KSM:        ctrl.GetKSMSnapshot(),
+		SLI:        ctrl.GetSLISnapshot(),
 	})
 }

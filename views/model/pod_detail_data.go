@@ -32,6 +32,22 @@ type PodDetailData struct {
 	NetworkTxRate float64
 	DiskReadRate  float64
 	DiskWriteRate float64
+
+	// Kubelet /metrics/probes results for this pod (when available)
+	Probes []PodProbeInfo
+
+	// kube-state-metrics enrichments for this pod (when KSM is available)
+	DisruptionReason string
+	ResourceClaims   []string
+}
+
+// PodProbeInfo captures cumulative kubelet probe results for one container probe.
+type PodProbeInfo struct {
+	Container    string
+	ProbeType    string
+	SuccessCount float64
+	FailureCount float64
+	Failing      bool
 }
 
 // ContainerUsage holds formatted CPU and memory usage strings for a container

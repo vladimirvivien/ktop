@@ -261,7 +261,27 @@ type WorkloadDetailData struct {
 	TotalLimitMem      *resource.Quantity
 	TotalUsageCPU      *resource.Quantity
 	TotalUsageMem      *resource.Quantity
+	HPAs               []WorkloadHPAInfo
+	PDBs               []WorkloadPDBInfo
 	RawObject          any
+}
+
+// WorkloadHPAInfo summarizes a HorizontalPodAutoscaler targeting a workload (from KSM).
+type WorkloadHPAInfo struct {
+	Name            string
+	MinReplicas     int32
+	MaxReplicas     int32
+	CurrentReplicas int32
+	DesiredReplicas int32
+	ScalingLimited  bool
+}
+
+// WorkloadPDBInfo summarizes a PodDisruptionBudget associated with a workload (from KSM).
+type WorkloadPDBInfo struct {
+	Name               string
+	CurrentHealthy     int32
+	DesiredHealthy     int32
+	DisruptionsAllowed int32
 }
 
 // NewDeploymentModel constructs a DeploymentModel from a Kubernetes Deployment.

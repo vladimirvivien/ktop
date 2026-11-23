@@ -23,7 +23,9 @@ import (
 	"github.com/vladimirvivien/ktop/k8s"
 	"github.com/vladimirvivien/ktop/metrics"
 	k8sMetrics "github.com/vladimirvivien/ktop/metrics/k8s"
+	"github.com/vladimirvivien/ktop/metrics/ksm"
 	promMetrics "github.com/vladimirvivien/ktop/metrics/prom"
+	"github.com/vladimirvivien/ktop/metrics/sli"
 	"github.com/vladimirvivien/ktop/output"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/rest"
@@ -428,6 +430,29 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, _ []string) error {
 		return WrapExitError(ExitK8sConnectError, wrapped)
 	}
 	slog.Info("cluster connected", "host", k8sC.RESTConfig().Host)
+
+	// Attach auto-discovered KSM and Component SLI/Probe collectors (degrade silently when absent/forbidden)
+	ctrl := k8sC.Controller()
+	if o.ksmMode != ksm.ModeOff {
+		ctrl.SetKSMCollector(ksm.NewCollector(nil, k8sC.RESTConfig(), ksm.Config{
+			Mode:          o.ksmMode,
+			Endpoint:      o.ksmEndpoint,
+			NamespaceHint: o.namespace,
+		}))
+	}
+	ctrl.SetSLICollector(sli.NewCollector(nil, k8sC.RESTConfig(), func(listCtx context.Context) ([]string, error) {
+		nodes, err := ctrl.GetNodeList(listCtx)
+		if err != nil {
+			return nil, err
+		}
+		names := make([]string, 0, len(nodes))
+		for _, n := range nodes {
+			if n != nil {
+				names = append(names, n.Name)
+			}
+		}
+		return names, nil
+	}, sli.Config{}))
 
 	// Initialize metrics source based on configuration
 	// Fallback is enabled only when using default (not explicitly set)

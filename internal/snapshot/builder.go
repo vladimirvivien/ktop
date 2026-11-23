@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/vladimirvivien/ktop/metrics"
+	"github.com/vladimirvivien/ktop/metrics/ksm"
+	"github.com/vladimirvivien/ktop/metrics/sli"
 	"github.com/vladimirvivien/ktop/views/model"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -20,6 +22,8 @@ type BuildInput struct {
 	PodMetrics []*metrics.PodMetrics
 	Workloads  *model.WorkloadsSnapshot
 	Events     *model.EventsSnapshot
+	KSM        *ksm.Snapshot
+	SLI        *sli.Snapshot
 }
 
 // Builder constructs immutable Snapshots via lock-free in-memory joins.
@@ -87,6 +91,37 @@ func (b *Builder) Build(ctx context.Context, in BuildInput) (*Snapshot, error) {
 			pd.CPUThrottledPct = pm.CPUThrottledPct
 			pd.Containers = containers
 		}
+		podKey := p.Namespace + "/" + p.Name
+		if in.KSM != nil && in.KSM.Available {
+			if reason := in.KSM.PodDisruptions[podKey]; reason != "" {
+				pd.DisruptionReason = reason
+			}
+			if claims := in.KSM.PodResourceClaims[podKey]; len(claims) > 0 {
+				claimNames := make([]string, 0, len(claims))
+				for _, cl := range claims {
+					name := cl.ResourceClaimName
+					if name == "" {
+						name = cl.Name
+					}
+					if name != "" {
+						claimNames = append(claimNames, name)
+					}
+				}
+				pd.ResourceClaims = claimNames
+			}
+		}
+		if in.SLI != nil && in.SLI.ProbesAvailable {
+			for _, pr := range in.SLI.ProbesForPod(p.Namespace, p.Name) {
+				if pr.Failing {
+					pd.FailingProbes = append(pd.FailingProbes, PodProbeData{
+						Container:    pr.Container,
+						ProbeType:    pr.ProbeType,
+						SuccessCount: pr.SuccessCount,
+						FailureCount: pr.FailureCount,
+					})
+				}
+			}
+		}
 		pods = append(pods, pd)
 	}
 
@@ -97,14 +132,99 @@ func (b *Builder) Build(ctx context.Context, in BuildInput) (*Snapshot, error) {
 	cluster.PSIBeta = in.Summary.PSIBeta
 
 	return &Snapshot{
-		Timestamp: time.Now(),
-		Cluster:   cluster,
-		Summary:   summaryDataFromModel(in.Summary),
-		Nodes:     nodes,
-		Pods:      pods,
-		Workloads: workloadsDataFromModel(in.Workloads),
-		Events:    eventsDataFromModel(in.Events),
+		Timestamp:  time.Now(),
+		Cluster:    cluster,
+		Summary:    summaryDataFromModel(in.Summary),
+		Nodes:      nodes,
+		Pods:       pods,
+		Workloads:  workloadsDataFromModel(in.Workloads),
+		Events:     eventsDataFromModel(in.Events),
+		Governance: governanceDataFromKSM(in.KSM),
+		SLIs:       sliDataFromSnapshot(in.SLI),
 	}, nil
+}
+
+func governanceDataFromKSM(k *ksm.Snapshot) *GovernanceData {
+	if k == nil || !k.Available {
+		return nil
+	}
+	out := &GovernanceData{
+		Available:      true,
+		Endpoint:       k.Endpoint,
+		HPAs:           make([]HPAData, 0, len(k.HPAs)),
+		PDBs:           make([]PDBData, 0, len(k.PDBs)),
+		ResourceQuotas: make([]ResourceQuotaData, 0, len(k.ResourceQuotas)),
+		CronJobs:       make([]CronJobData, 0, len(k.CronJobs)),
+	}
+	for _, h := range k.HPAs {
+		out.HPAs = append(out.HPAs, HPAData{
+			Namespace:       h.Namespace,
+			Name:            h.Name,
+			TargetKind:      h.TargetKind,
+			TargetName:      h.TargetName,
+			MinReplicas:     h.MinReplicas,
+			MaxReplicas:     h.MaxReplicas,
+			CurrentReplicas: h.CurrentReplicas,
+			DesiredReplicas: h.DesiredReplicas,
+			ScalingLimited:  h.ScalingLimited != nil && *h.ScalingLimited,
+		})
+	}
+	for _, p := range k.PDBs {
+		out.PDBs = append(out.PDBs, PDBData{
+			Namespace:          p.Namespace,
+			Name:               p.Name,
+			CurrentHealthy:     p.CurrentHealthy,
+			DesiredHealthy:     p.DesiredHealthy,
+			ExpectedPods:       p.ExpectedPods,
+			DisruptionsAllowed: p.DisruptionsAllowed,
+		})
+	}
+	for _, q := range k.ResourceQuotas {
+		out.ResourceQuotas = append(out.ResourceQuotas, ResourceQuotaData{
+			Namespace: q.Namespace,
+			Name:      q.Name,
+			Resource:  q.Resource,
+			Hard:      q.Hard,
+			Used:      q.Used,
+			UsedPct:   q.UsedPct,
+		})
+	}
+	for _, cj := range k.CronJobs {
+		out.CronJobs = append(out.CronJobs, CronJobData{
+			Namespace:        cj.Namespace,
+			Name:             cj.Name,
+			Suspended:        cj.Suspended,
+			Active:           cj.Active,
+			LastScheduleTime: cj.LastScheduleTime,
+			NextScheduleTime: cj.NextScheduleTime,
+		})
+	}
+	return out
+}
+
+func sliDataFromSnapshot(s *sli.Snapshot) *SLIData {
+	if s == nil || (!s.Available && !s.ProbesAvailable) {
+		return nil
+	}
+	out := &SLIData{
+		Available:       s.Available,
+		ProbesAvailable: s.ProbesAvailable,
+		Components:      make([]ComponentSLIDat, 0, len(s.Components)),
+	}
+	for _, c := range s.Components {
+		failing := make([]string, 0, len(c.FailingChecks))
+		for _, chk := range c.FailingChecks {
+			failing = append(failing, chk.Name)
+		}
+		out.Components = append(out.Components, ComponentSLIDat{
+			Component:     c.Component,
+			Target:        c.Target,
+			Healthy:       c.Healthy,
+			TotalChecks:   c.TotalChecks,
+			FailingChecks: failing,
+		})
+	}
+	return out
 }
 
 func eventsDataFromModel(ev *model.EventsSnapshot) *EventsData {
@@ -435,6 +555,14 @@ func summaryDataFromModel(s model.ClusterSummary) SummaryData {
 		AvgNodeCPUStallPct:     s.AvgNodeCPUStallPct,
 		AvgNodeMemStallPct:     s.AvgNodeMemStallPct,
 		AvgNodeIOStallPct:      s.AvgNodeIOStallPct,
+		SLIAvailable:           s.SLIAvailable,
+		SLIUnhealthyComponents: s.SLIUnhealthyComponents,
+		SLIFailingChecks:       append([]string(nil), s.SLIFailingChecks...),
+		ProbeFailingPods:       s.ProbeFailingPods,
+		KSMAvailable:           s.KSMAvailable,
+		KSMHPAsLimited:         s.KSMHPAsLimited,
+		KSMPDBsAtRisk:          s.KSMPDBsAtRisk,
+		KSMQuotasNearLimit:     s.KSMQuotasNearLimit,
 	}
 }
 
@@ -488,6 +616,14 @@ func (s SummaryData) ToClusterSummary(c ClusterInfo) model.ClusterSummary {
 		AvgNodeMemStallPct:      s.AvgNodeMemStallPct,
 		AvgNodeIOStallPct:       s.AvgNodeIOStallPct,
 		PSIBeta:                 c.PSIBeta,
+		SLIAvailable:            s.SLIAvailable,
+		SLIUnhealthyComponents:  s.SLIUnhealthyComponents,
+		SLIFailingChecks:        append([]string(nil), s.SLIFailingChecks...),
+		ProbeFailingPods:        s.ProbeFailingPods,
+		KSMAvailable:            s.KSMAvailable,
+		KSMHPAsLimited:          s.KSMHPAsLimited,
+		KSMPDBsAtRisk:           s.KSMPDBsAtRisk,
+		KSMQuotasNearLimit:      s.KSMQuotasNearLimit,
 	}
 }
 

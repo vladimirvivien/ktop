@@ -46,15 +46,17 @@ type HealthScoreStats struct {
 
 // Aggregate is the top-level JSON report produced by headless mode.
 type Aggregate struct {
-	Metadata         ReportMetadata          `json:"metadata"`
-	Cluster          snapshot.ClusterInfo    `json:"cluster"`
-	Summary          snapshot.SummaryData    `json:"summary"`
-	HealthScoreStats HealthScoreStats        `json:"health_score_stats"`
-	Nodes            []snapshot.NodeData     `json:"nodes"`
-	Pods             []snapshot.PodData      `json:"pods"`
-	Workloads        *snapshot.WorkloadsData `json:"workloads,omitempty"`
-	Events           *snapshot.EventsData    `json:"events,omitempty"`
-	Samples          []*snapshot.Snapshot    `json:"samples,omitempty"`
+	Metadata         ReportMetadata           `json:"metadata"`
+	Cluster          snapshot.ClusterInfo     `json:"cluster"`
+	Summary          snapshot.SummaryData     `json:"summary"`
+	HealthScoreStats HealthScoreStats         `json:"health_score_stats"`
+	Nodes            []snapshot.NodeData      `json:"nodes"`
+	Pods             []snapshot.PodData       `json:"pods"`
+	Workloads        *snapshot.WorkloadsData  `json:"workloads,omitempty"`
+	Events           *snapshot.EventsData     `json:"events,omitempty"`
+	Governance       *snapshot.GovernanceData `json:"governance,omitempty"`
+	SLIs             *snapshot.SLIData        `json:"slis,omitempty"`
+	Samples          []*snapshot.Snapshot     `json:"samples,omitempty"`
 }
 
 // Options configures a Collector run.
@@ -203,6 +205,8 @@ func (c *Collector) buildAggregate(start, end time.Time, intervalSec float64, sa
 		Pods:             latest.Pods,
 		Workloads:        latest.Workloads,
 		Events:           latest.Events,
+		Governance:       latest.Governance,
+		SLIs:             latest.SLIs,
 	}
 	if includeSamples {
 		agg.Samples = samples

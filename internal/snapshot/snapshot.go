@@ -9,13 +9,92 @@ import (
 // It contains only pure value types with no mutexes or channels, suitable for
 // both synchronous TUI rendering and structured JSON serialization.
 type Snapshot struct {
-	Timestamp time.Time      `json:"timestamp"`
-	Cluster   ClusterInfo    `json:"cluster"`
-	Summary   SummaryData    `json:"summary"`
-	Nodes     []NodeData     `json:"nodes"`
-	Pods      []PodData      `json:"pods"`
-	Workloads *WorkloadsData `json:"workloads,omitempty"`
-	Events    *EventsData    `json:"events,omitempty"`
+	Timestamp  time.Time       `json:"timestamp"`
+	Cluster    ClusterInfo     `json:"cluster"`
+	Summary    SummaryData     `json:"summary"`
+	Nodes      []NodeData      `json:"nodes"`
+	Pods       []PodData       `json:"pods"`
+	Workloads  *WorkloadsData  `json:"workloads,omitempty"`
+	Events     *EventsData     `json:"events,omitempty"`
+	Governance *GovernanceData `json:"governance,omitempty"`
+	SLIs       *SLIData        `json:"slis,omitempty"`
+}
+
+// GovernanceData captures kube-state-metrics HPA, PDB, ResourceQuota, and CronJob telemetry.
+type GovernanceData struct {
+	Available      bool                `json:"available"`
+	Endpoint       string              `json:"endpoint,omitempty"`
+	HPAs           []HPAData           `json:"hpas,omitempty"`
+	PDBs           []PDBData           `json:"pdbs,omitempty"`
+	ResourceQuotas []ResourceQuotaData `json:"resource_quotas,omitempty"`
+	CronJobs       []CronJobData       `json:"cronjobs,omitempty"`
+}
+
+// HPAData captures HorizontalPodAutoscaler spec, live replica counts, and scaling flags.
+type HPAData struct {
+	Namespace       string `json:"namespace"`
+	Name            string `json:"name"`
+	TargetKind      string `json:"target_kind,omitempty"`
+	TargetName      string `json:"target_name,omitempty"`
+	MinReplicas     int32  `json:"min_replicas"`
+	MaxReplicas     int32  `json:"max_replicas"`
+	CurrentReplicas int32  `json:"current_replicas"`
+	DesiredReplicas int32  `json:"desired_replicas"`
+	ScalingLimited  bool   `json:"scaling_limited,omitempty"`
+}
+
+// PDBData captures PodDisruptionBudget health and allowed disruptions.
+type PDBData struct {
+	Namespace          string `json:"namespace"`
+	Name               string `json:"name"`
+	CurrentHealthy     int32  `json:"current_healthy"`
+	DesiredHealthy     int32  `json:"desired_healthy"`
+	ExpectedPods       int32  `json:"expected_pods"`
+	DisruptionsAllowed int32  `json:"disruptions_allowed"`
+}
+
+// ResourceQuotaData captures hard limit vs. used utilization for one quota resource.
+type ResourceQuotaData struct {
+	Namespace string  `json:"namespace"`
+	Name      string  `json:"name"`
+	Resource  string  `json:"resource"`
+	Hard      float64 `json:"hard"`
+	Used      float64 `json:"used"`
+	UsedPct   float64 `json:"used_pct"`
+}
+
+// CronJobData captures CronJob active/suspended status and schedule timestamps.
+type CronJobData struct {
+	Namespace        string    `json:"namespace"`
+	Name             string    `json:"name"`
+	Suspended        bool      `json:"suspended,omitempty"`
+	Active           int32     `json:"active"`
+	LastScheduleTime time.Time `json:"last_schedule_time,omitempty"`
+	NextScheduleTime time.Time `json:"next_schedule_time,omitempty"`
+}
+
+// SLIData captures Kubernetes Component SLIs (/metrics/slis) and Kubelet probe status.
+type SLIData struct {
+	Available       bool              `json:"available"`
+	ProbesAvailable bool              `json:"probes_available,omitempty"`
+	Components      []ComponentSLIDat `json:"components,omitempty"`
+}
+
+// ComponentSLIDat captures /metrics/slis status for one component target.
+type ComponentSLIDat struct {
+	Component     string   `json:"component"`
+	Target        string   `json:"target"`
+	Healthy       bool     `json:"healthy"`
+	TotalChecks   int      `json:"total_checks"`
+	FailingChecks []string `json:"failing_checks,omitempty"`
+}
+
+// PodProbeData captures failing kubelet probe statistics for a container.
+type PodProbeData struct {
+	Container    string  `json:"container"`
+	ProbeType    string  `json:"probe_type"`
+	SuccessCount float64 `json:"success_count"`
+	FailureCount float64 `json:"failure_count"`
 }
 
 // EventsData captures recent Kubernetes Events and summary counts.
@@ -188,6 +267,14 @@ type SummaryData struct {
 	AvgNodeCPUStallPct     float64   `json:"avg_node_cpu_stall_pct"`
 	AvgNodeMemStallPct     float64   `json:"avg_node_mem_stall_pct"`
 	AvgNodeIOStallPct      float64   `json:"avg_node_io_stall_pct"`
+	SLIAvailable           bool      `json:"sli_available,omitempty"`
+	SLIUnhealthyComponents int       `json:"sli_unhealthy_components,omitempty"`
+	SLIFailingChecks       []string  `json:"sli_failing_checks,omitempty"`
+	ProbeFailingPods       int       `json:"probe_failing_pods,omitempty"`
+	KSMAvailable           bool      `json:"ksm_available,omitempty"`
+	KSMHPAsLimited         int       `json:"ksm_hpas_limited,omitempty"`
+	KSMPDBsAtRisk          int       `json:"ksm_pdbs_at_risk,omitempty"`
+	KSMQuotasNearLimit     int       `json:"ksm_quotas_near_limit,omitempty"`
 }
 
 // PSIData holds Pressure Stall Information percentages (0.0-100.0).
@@ -262,6 +349,9 @@ type PodData struct {
 	NodePSIKernelSupported bool            `json:"node_psi_kernel_supported"`
 	CPUThrottledPct        float64         `json:"cpu_throttled_pct"`
 	ResizeStatus           string          `json:"resize_status,omitempty"`
+	DisruptionReason       string          `json:"disruption_reason,omitempty"`
+	ResourceClaims         []string        `json:"resource_claims,omitempty"`
+	FailingProbes          []PodProbeData  `json:"failing_probes,omitempty"`
 	Containers             []ContainerData `json:"containers,omitempty"`
 }
 
@@ -282,6 +372,7 @@ func (s *Snapshot) Clone() *Snapshot {
 		return nil
 	}
 	cp := *s
+	cp.Summary.SLIFailingChecks = slices.Clone(s.Summary.SLIFailingChecks)
 	cp.Nodes = make([]NodeData, len(s.Nodes))
 	for i, n := range s.Nodes {
 		n.Roles = slices.Clone(n.Roles)
@@ -291,6 +382,8 @@ func (s *Snapshot) Clone() *Snapshot {
 	cp.Pods = make([]PodData, len(s.Pods))
 	for i, p := range s.Pods {
 		p.Containers = slices.Clone(p.Containers)
+		p.ResourceClaims = slices.Clone(p.ResourceClaims)
+		p.FailingProbes = slices.Clone(p.FailingProbes)
 		cp.Pods[i] = p
 	}
 	if s.Workloads != nil {
@@ -308,6 +401,28 @@ func (s *Snapshot) Clone() *Snapshot {
 			Summary:   s.Events.Summary,
 			Items:     slices.Clone(s.Events.Items),
 			Truncated: s.Events.Truncated,
+		}
+	}
+	if s.Governance != nil {
+		cp.Governance = &GovernanceData{
+			Available:      s.Governance.Available,
+			Endpoint:       s.Governance.Endpoint,
+			HPAs:           slices.Clone(s.Governance.HPAs),
+			PDBs:           slices.Clone(s.Governance.PDBs),
+			ResourceQuotas: slices.Clone(s.Governance.ResourceQuotas),
+			CronJobs:       slices.Clone(s.Governance.CronJobs),
+		}
+	}
+	if s.SLIs != nil {
+		comps := make([]ComponentSLIDat, len(s.SLIs.Components))
+		for i, c := range s.SLIs.Components {
+			c.FailingChecks = slices.Clone(c.FailingChecks)
+			comps[i] = c
+		}
+		cp.SLIs = &SLIData{
+			Available:       s.SLIs.Available,
+			ProbesAvailable: s.SLIs.ProbesAvailable,
+			Components:      comps,
 		}
 	}
 	return &cp
