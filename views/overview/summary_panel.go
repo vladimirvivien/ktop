@@ -168,16 +168,6 @@ func (p *clusterSummaryPanel) DrawBody(data any) {
 
 	switch summary := data.(type) {
 	case model.ClusterSummary:
-		// Surface SLI, Kubelet probe, and KSM status directly on the Cluster Summary
-		// border title so they stay visible at all terminal heights and metrics modes.
-		if p.app == nil || !p.app.IsAPIDisconnected() {
-			if badges := formatSLIAndKSMBadges(summary, ui.IsMonochrome()); badges != "" {
-				p.root.SetTitle(fmt.Sprintf("%s │ %s ", strings.TrimRight(p.GetTitle(), " "), badges))
-			} else {
-				p.root.SetTitle(p.GetTitle())
-			}
-		}
-
 		var cpuRatio, memRatio ui.Ratio
 
 		// Evaluate CPU and Memory usage availability independently so available
@@ -424,6 +414,9 @@ func (p *clusterSummaryPanel) drawEnhancedStats(summary model.ClusterSummary) {
 			pressureStr,
 			stallText,
 		)
+		if badges := formatSLIAndKSMBadges(summary, true); badges != "" {
+			enhancedText += " │ " + badges
+		}
 		p.enhancedStats.SetText(enhancedText)
 		return
 	}
@@ -459,6 +452,9 @@ func (p *clusterSummaryPanel) drawEnhancedStats(summary model.ClusterSummary) {
 		lblTag, ui.TagFg(pressureCol), summary.NodePressureCount,
 		lblTag, stallText,
 	)
+	if badges := formatSLIAndKSMBadges(summary, false); badges != "" {
+		enhancedText += fmt.Sprintf("[%s] │ [-]%s", lblTag, badges)
+	}
 	p.enhancedStats.SetText(enhancedText)
 }
 
