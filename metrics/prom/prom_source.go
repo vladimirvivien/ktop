@@ -503,12 +503,42 @@ func (p *PromMetricsSource) calculatePSIMaxRate(metricName string, labelMatchers
 	return maxRate * 100, nil
 }
 
+// latestPerSeriesQuerier is an optional fast path implemented by prom.InMemoryStore
+// to fetch only the latest sample per matching series without allocating full
+// time-range slices.
+type latestPerSeriesQuerier interface {
+	QueryLatestPerSeries(metricName string, labelMatchers map[string]string, since time.Time) (map[string]prom.MetricSample, error)
+}
+
 // queryLatestSumFiltered queries latest values and sums them, applying a filter function
 // This is used for memory metrics where we need to sum across workload containers only
 func (p *PromMetricsSource) queryLatestSumFiltered(metricName string, labelMatchers map[string]string, filterFn func(seriesKey string) bool) (float64, error) {
 	// Query with a recent time range to get all matching series
 	now := time.Now()
 	start := now.Add(-5 * time.Minute) // Look back 5 minutes for latest data
+
+	if lq, ok := p.store.(latestPerSeriesQuerier); ok {
+		latestSeries, err := lq.QueryLatestPerSeries(metricName, labelMatchers, start)
+		if err != nil {
+			return 0, err
+		}
+		if len(latestSeries) == 0 {
+			return 0, fmt.Errorf("no matching series found")
+		}
+		var totalValue float64
+		found := false
+		for seriesKey, sample := range latestSeries {
+			if filterFn != nil && !filterFn(seriesKey) {
+				continue
+			}
+			totalValue += sample.Value
+			found = true
+		}
+		if !found {
+			return 0, fmt.Errorf("no matching series found after filtering")
+		}
+		return totalValue, nil
+	}
 
 	seriesSamples, err := p.store.QueryRangePerSeries(metricName, labelMatchers, start, now)
 	if err != nil {
@@ -857,26 +887,34 @@ func (p *PromMetricsSource) GetAllPodMetrics(ctx context.Context) ([]*metrics.Po
 	}
 
 	// 2. Single pass over memory working set series
-	if memSeries, err := store.QueryRangePerSeries("container_memory_working_set_bytes", nil, memStart, now); err == nil {
+	recordMem := func(seriesKey string, latestVal float64) {
+		ns, ok1 := seriesLabelValue(seriesKey, "namespace")
+		pod, ok2 := seriesLabelValue(seriesKey, "pod")
+		if !ok1 || !ok2 || ns == "" || pod == "" {
+			return
+		}
+		if isWorkloadContainerMemory(seriesKey) {
+			agg := getOrCreate(ns, pod)
+			agg.workloadMem += latestVal
+			agg.hasWorkloadMem = true
+		} else if isPodAggregateMemory(seriesKey) {
+			agg := getOrCreate(ns, pod)
+			agg.aggMem += latestVal
+			agg.hasAggMem = true
+		}
+	}
+	if lq, ok := store.(latestPerSeriesQuerier); ok {
+		if memSeries, err := lq.QueryLatestPerSeries("container_memory_working_set_bytes", nil, memStart); err == nil {
+			for seriesKey, sample := range memSeries {
+				recordMem(seriesKey, sample.Value)
+			}
+		}
+	} else if memSeries, err := store.QueryRangePerSeries("container_memory_working_set_bytes", nil, memStart, now); err == nil {
 		for seriesKey, samples := range memSeries {
 			if len(samples) == 0 {
 				continue
 			}
-			ns, ok1 := seriesLabelValue(seriesKey, "namespace")
-			pod, ok2 := seriesLabelValue(seriesKey, "pod")
-			if !ok1 || !ok2 || ns == "" || pod == "" {
-				continue
-			}
-			latestVal := samples[len(samples)-1].Value
-			if isWorkloadContainerMemory(seriesKey) {
-				agg := getOrCreate(ns, pod)
-				agg.workloadMem += latestVal
-				agg.hasWorkloadMem = true
-			} else if isPodAggregateMemory(seriesKey) {
-				agg := getOrCreate(ns, pod)
-				agg.aggMem += latestVal
-				agg.hasAggMem = true
-			}
+			recordMem(seriesKey, samples[len(samples)-1].Value)
 		}
 	}
 

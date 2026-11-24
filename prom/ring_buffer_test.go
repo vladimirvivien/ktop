@@ -340,6 +340,46 @@ func TestRingBufferWrapAround(t *testing.T) {
 	}
 }
 
+func TestRingBufferLazyGrowthAndWrap(t *testing.T) {
+	rb := NewRingBuffer[MetricSample](10000)
+	if rb.Cap() != 10000 {
+		t.Fatalf("expected Cap() = 10000, got %d", rb.Cap())
+	}
+	if rb.AllocatedCap() != 0 {
+		t.Fatalf("expected initial AllocatedCap() = 0, got %d", rb.AllocatedCap())
+	}
+
+	// Add 5 samples: should allocate only ringInitialCap (16), never 10000.
+	for i := 0; i < 5; i++ {
+		rb.Add(MetricSample{Timestamp: int64(i * 1000), Value: float64(i)})
+	}
+	if rb.AllocatedCap() != ringInitialCap {
+		t.Fatalf("expected AllocatedCap() = %d after 5 adds, got %d", ringInitialCap, rb.AllocatedCap())
+	}
+
+	// Verify growth through multiple doublings and wrap-around at a smaller cap.
+	small := NewRingBuffer[int](50)
+	for i := 1; i <= 75; i++ {
+		small.Add(i)
+	}
+	if small.Len() != 50 || small.AllocatedCap() != 50 || !small.IsFull() {
+		t.Fatalf("expected Len=50 AllocatedCap=50 Full=true, got Len=%d AllocatedCap=%d Full=%v",
+			small.Len(), small.AllocatedCap(), small.IsFull())
+	}
+	first, ok := small.First()
+	if !ok || first != 26 {
+		t.Errorf("expected First() = 26, got %d (ok=%v)", first, ok)
+	}
+	last, ok := small.Last()
+	if !ok || last != 75 {
+		t.Errorf("expected Last() = 75, got %d (ok=%v)", last, ok)
+	}
+	got := small.Slice()
+	if len(got) != 50 || got[0] != 26 || got[49] != 75 {
+		t.Errorf("unexpected wrapped Slice(): len=%d first=%d last=%d", len(got), got[0], got[len(got)-1])
+	}
+}
+
 // Helper function to compare slices
 func sliceEqual[T comparable](a, b []T) bool {
 	if len(a) != len(b) {

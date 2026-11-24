@@ -44,6 +44,7 @@ type DetailPanel struct {
 
 	// Sub-panels
 	infoHeaderPanel   *tview.Flex
+	infoHeaderText    *tview.TextView
 	sparklinePanel    *tview.Flex
 	systemDetailPanel *tview.Flex
 	podsPanel         *tview.Flex
@@ -114,12 +115,15 @@ func (p *DetailPanel) Layout(_ any) {
 		// Initialize sparkline row (starts in non-prometheus mode, self-sizing)
 		p.sparklineRow = ui.NewSparklineRow(false)
 
-		// Create info header panel
+		// Create info header panel with a reusable text view
 		p.infoHeaderPanel = tview.NewFlex().SetDirection(tview.FlexColumn)
 		p.infoHeaderPanel.SetBorder(true)
 		p.infoHeaderPanel.SetTitle(" Info ")
 		p.infoHeaderPanel.SetTitleAlign(tview.AlignLeft)
 		ui.SetFlexFocused(p.infoHeaderPanel, false)
+		p.infoHeaderText = tview.NewTextView()
+		p.infoHeaderText.SetDynamicColors(true)
+		p.infoHeaderPanel.AddItem(p.infoHeaderText, 0, 1, false)
 
 		// Create sparkline panel and add sparkline row to it
 		p.sparklinePanel = tview.NewFlex().SetDirection(tview.FlexColumn)
@@ -371,9 +375,11 @@ func (p *DetailPanel) resetSparklines() {
 
 // drawInfoHeader draws the condensed info header row
 func (p *DetailPanel) drawInfoHeader() {
-	p.infoHeaderPanel.Clear()
-
+	if p.infoHeaderText == nil {
+		return
+	}
 	if p.data == nil || p.data.NodeModel == nil {
+		p.infoHeaderText.SetText("")
 		return
 	}
 	node := p.data.NodeModel
@@ -409,12 +415,7 @@ func (p *DetailPanel) drawInfoHeader() {
 		ui.FormatPSIInfo(node.PSI, node.PSIKernelSupported),
 	}
 
-	// Create a text view with all items on one line
-	infoText := tview.NewTextView()
-	infoText.SetDynamicColors(true)
-	infoText.SetText("  " + strings.Join(items, "  │  "))
-
-	p.infoHeaderPanel.AddItem(infoText, 0, 1, false)
+	p.infoHeaderText.SetText("  " + strings.Join(items, "  │  "))
 }
 
 // drawSparklines draws the sparkline row

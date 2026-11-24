@@ -1,37 +1,51 @@
 package prom
 
-// RingBuffer provides a fixed-size, allocation-free circular buffer for storing samples.
-// Once full, new additions overwrite the oldest entries automatically.
-// This is more memory-efficient than bounded slices as it avoids reallocations
-// and GC pressure from slice trimming operations.
+const ringInitialCap = 16
+
+// RingBuffer provides a bounded circular buffer that grows lazily up to its
+// maximum capacity. Once full, new additions overwrite the oldest entries
+// without allocating.
 type RingBuffer[T any] struct {
-	data  []T
-	size  int
-	head  int // Next write position
-	count int // Current number of elements (0 to size)
+	data    []T
+	maxSize int
+	head    int // Next write position once full
+	count   int // Current number of elements (0 to maxSize)
 }
 
-// NewRingBuffer creates a new ring buffer with the specified capacity.
-// The buffer is pre-allocated to avoid allocations during normal operation.
+// NewRingBuffer creates a new ring buffer with the specified maximum capacity.
+// Backing storage is allocated lazily on Add to avoid wasting memory on sparse
+// or short-lived time series.
 func NewRingBuffer[T any](size int) *RingBuffer[T] {
 	if size <= 0 {
 		size = 1
 	}
 	return &RingBuffer[T]{
-		data: make([]T, size),
-		size: size,
+		maxSize: size,
 	}
 }
 
 // Add appends a value to the buffer.
-// If the buffer is full, the oldest value is overwritten.
-// This operation is O(1) and does not allocate.
+// If the buffer is full, the oldest value is overwritten with zero allocations.
 func (rb *RingBuffer[T]) Add(value T) {
-	rb.data[rb.head] = value
-	rb.head = (rb.head + 1) % rb.size
-	if rb.count < rb.size {
+	if rb.count < rb.maxSize {
+		if rb.count == len(rb.data) {
+			newCap := len(rb.data) * 2
+			if newCap == 0 {
+				newCap = min(rb.maxSize, ringInitialCap)
+			} else if newCap > rb.maxSize {
+				newCap = rb.maxSize
+			}
+			grown := make([]T, newCap)
+			copy(grown, rb.data)
+			rb.data = grown
+		}
+		rb.data[rb.count] = value
 		rb.count++
+		rb.head = rb.count % rb.maxSize
+		return
 	}
+	rb.data[rb.head] = value
+	rb.head = (rb.head + 1) % rb.maxSize
 }
 
 // Len returns the current number of elements in the buffer.
@@ -41,7 +55,12 @@ func (rb *RingBuffer[T]) Len() int {
 
 // Cap returns the maximum capacity of the buffer.
 func (rb *RingBuffer[T]) Cap() int {
-	return rb.size
+	return rb.maxSize
+}
+
+// AllocatedCap returns the currently allocated backing slice length.
+func (rb *RingBuffer[T]) AllocatedCap() int {
+	return len(rb.data)
 }
 
 // IsEmpty returns true if the buffer contains no elements.
@@ -51,7 +70,7 @@ func (rb *RingBuffer[T]) IsEmpty() bool {
 
 // IsFull returns true if the buffer is at capacity.
 func (rb *RingBuffer[T]) IsFull() bool {
-	return rb.count == rb.size
+	return rb.count == rb.maxSize
 }
 
 // Last returns the most recently added value.
@@ -61,8 +80,11 @@ func (rb *RingBuffer[T]) Last() (T, bool) {
 		var zero T
 		return zero, false
 	}
+	if rb.count < rb.maxSize {
+		return rb.data[rb.count-1], true
+	}
 	// head points to next write position, so last written is head-1
-	idx := (rb.head - 1 + rb.size) % rb.size
+	idx := (rb.head - 1 + rb.maxSize) % rb.maxSize
 	return rb.data[idx], true
 }
 
@@ -73,11 +95,9 @@ func (rb *RingBuffer[T]) First() (T, bool) {
 		var zero T
 		return zero, false
 	}
-	if rb.count < rb.size {
-		// Not full yet - oldest is at index 0
+	if rb.count < rb.maxSize {
 		return rb.data[0], true
 	}
-	// Full - oldest is at head (next to be overwritten)
 	return rb.data[rb.head], true
 }
 
@@ -90,12 +110,10 @@ func (rb *RingBuffer[T]) Get(index int) (T, bool) {
 	}
 
 	var actualIdx int
-	if rb.count < rb.size {
-		// Not full - data starts at 0
+	if rb.count < rb.maxSize {
 		actualIdx = index
 	} else {
-		// Full - oldest is at head
-		actualIdx = (rb.head + index) % rb.size
+		actualIdx = (rb.head + index) % rb.maxSize
 	}
 	return rb.data[actualIdx], true
 }
@@ -108,14 +126,11 @@ func (rb *RingBuffer[T]) Slice() []T {
 	}
 
 	result := make([]T, rb.count)
-	if rb.count < rb.size {
-		// Not full yet - data is contiguous from 0
+	if rb.count < rb.maxSize {
 		copy(result, rb.data[:rb.count])
 	} else {
-		// Full - data wraps around
-		// Oldest is at head, newest is at head-1
-		tail := rb.size - rb.head
-		copy(result, rb.data[rb.head:])        // [head, size) -> oldest portion
+		tail := rb.maxSize - rb.head
+		copy(result, rb.data[rb.head:])        // [head, maxSize) -> oldest portion
 		copy(result[tail:], rb.data[:rb.head]) // [0, head) -> newest portion
 	}
 	return result
@@ -151,8 +166,9 @@ func (rb *RingBuffer[T]) Range(fn func(index int, value T) bool) {
 }
 
 // Clear removes all elements from the buffer.
-// The underlying storage is retained for reuse.
+// The underlying storage is zeroed and retained for reuse.
 func (rb *RingBuffer[T]) Clear() {
+	clear(rb.data)
 	rb.head = 0
 	rb.count = 0
 }
