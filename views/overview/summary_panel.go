@@ -65,15 +65,22 @@ func (p *clusterSummaryPanel) Layout(data any) {
 	if p.app != nil {
 		terminalHeight = p.app.GetTerminalHeight()
 	}
+	p.layoutForHeight(terminalHeight)
+}
+
+func (p *clusterSummaryPanel) layoutForHeight(terminalHeight int) {
 	isSmallHeight := terminalHeight <= 45 // Match HeightCategorySmall threshold
 	p.lastTerminalHeight = terminalHeight
 
-	// Stats view (single line, with border for visual separation)
-	// Always create it even if hidden, for transitions to larger sizes
+	// Stats view (bordered on medium/large heights; compact 1-row borderless on <=45 rows so it never hides)
 	p.statsView = tview.NewTextView()
 	p.statsView.SetDynamicColors(true)
-	p.statsView.SetBorder(true)
-	p.statsView.SetBorderPadding(0, 0, 0, 0)
+	p.statsView.SetBorder(!isSmallHeight)
+	if isSmallHeight {
+		p.statsView.SetBorderPadding(0, 0, 1, 1)
+	} else {
+		p.statsView.SetBorderPadding(0, 0, 0, 0)
+	}
 
 	// Initialize sparkline row with prometheus mode
 	p.sparklineRow = ui.NewSparklineRow(p.prometheusMode)
@@ -83,11 +90,14 @@ func (p *clusterSummaryPanel) Layout(data any) {
 		AddItem(p.sparklineRow, 0, 1, false)
 
 	if p.prometheusMode {
-		// Enhanced stats row (always create for transitions)
 		p.enhancedStats = tview.NewTextView()
 		p.enhancedStats.SetDynamicColors(true)
-		p.enhancedStats.SetBorder(true)
-		p.enhancedStats.SetBorderPadding(0, 0, 0, 0)
+		p.enhancedStats.SetBorder(!isSmallHeight)
+		if isSmallHeight {
+			p.enhancedStats.SetBorderPadding(0, 0, 1, 1)
+		} else {
+			p.enhancedStats.SetBorderPadding(0, 0, 0, 0)
+		}
 	}
 
 	// Create or clear root and rebuild layout
@@ -97,19 +107,16 @@ func (p *clusterSummaryPanel) Layout(data any) {
 		p.root.Clear()
 	}
 
-	// Add items based on height category
+	statsRowHeight := 3
 	if isSmallHeight {
-		// Small: sparklines only (no stats rows)
-		p.root.AddItem(graphFlex, 0, 1, false)
-	} else if p.prometheusMode {
-		// Medium/Large Prometheus: stats + sparklines + enhanced stats
-		p.root.AddItem(p.statsView, 3, 0, false)
-		p.root.AddItem(graphFlex, 0, 1, false)
-		p.root.AddItem(p.enhancedStats, 3, 0, false)
-	} else {
-		// Medium/Large Metrics Server: stats + sparklines
-		p.root.AddItem(p.statsView, 3, 0, false)
-		p.root.AddItem(graphFlex, 0, 1, false)
+		statsRowHeight = 1
+	}
+
+	// Always display Cluster Summary stats + sparklines (+ enhanced stats in Prometheus mode)
+	p.root.AddItem(p.statsView, statsRowHeight, 0, false)
+	p.root.AddItem(graphFlex, 0, 1, false)
+	if p.prometheusMode {
+		p.root.AddItem(p.enhancedStats, statsRowHeight, 0, false)
 	}
 
 	p.root.SetBorder(true)

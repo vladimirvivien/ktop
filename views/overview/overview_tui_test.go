@@ -279,3 +279,51 @@ func TestPodPanelNamespaceFilterSparklinePreservation(t *testing.T) {
 		t.Fatalf("expected %d sparklines retained after clearing filter, got %d", len(allPods), len(pp.cpuSparklines))
 	}
 }
+
+func TestClusterSummary_VisibleBelow45Rows(t *testing.T) {
+	mp := &MainPanel{}
+	sumH, nodeH := mp.calculatePanelHeights(38, true)
+	if sumH != 9 || nodeH != 8 {
+		t.Fatalf("expected small-height Prometheus summaryHeight=9, nodeHeight=8, got summary=%d node=%d", sumH, nodeH)
+	}
+	sumNonProm, _ := mp.calculatePanelHeights(38, false)
+	if sumNonProm != 8 {
+		t.Fatalf("expected small-height non-Prometheus summaryHeight=8, got %d", sumNonProm)
+	}
+
+	ts, err := ui.NewTestScreen(150, 9)
+	if err != nil {
+		t.Fatalf("NewTestScreen failed: %v", err)
+	}
+	t.Cleanup(ts.Close)
+
+	p := NewClusterSummaryPanel(nil, " Cluster Summary ").(*clusterSummaryPanel)
+	p.prometheusMode = true
+	p.layoutForHeight(38)
+	p.DrawBody(model.ClusterSummary{
+		HealthScore:             100,
+		NodesCount:              1,
+		NodesReady:              1,
+		DeploymentsReady:        4,
+		DeploymentsTotal:        4,
+		PodsRunning:             24,
+		PodsAvailable:           30,
+		AllocatableNodeCpuTotal: resource.NewMilliQuantity(4000, resource.DecimalSI),
+		UsageNodeCpuTotal:       resource.NewMilliQuantity(2000, resource.DecimalSI),
+		AllocatableNodeMemTotal: resource.NewQuantity(8*1024*1024*1024, resource.BinarySI),
+		UsageNodeMemTotal:       resource.NewQuantity(2*1024*1024*1024, resource.BinarySI),
+		HasUsageCPU:             true,
+		HasUsageMem:             true,
+		SLIAvailable:            true,
+		ProbeFailingPods:        6,
+		KSMAvailable:            true,
+	})
+
+	ts.Draw(p.GetRootView())
+	text := ts.Text()
+	for _, want := range []string{"SLIs: OK", "Probes: 6 fail", "KSM: OK", "Health:", "Deploys:", "CPU", "Restarts:", "Stall:"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("expected %q visible in small-height Cluster Summary, got:\n%s", want, text)
+		}
+	}
+}

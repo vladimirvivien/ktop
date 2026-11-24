@@ -209,10 +209,15 @@ func (p *MainPanel) calculatePanelHeights(terminalHeight int, isPrometheus bool)
 		summaryHeight, nodeHeight = 5, 5
 		return
 	case ui.HeightCategorySmall:
-		// Small: stats hidden, sparklines only with 2-row content (matches detail pages)
-		// graphFlex=4 (2 content + 2 border) + outerBorder=2 = 6
-		summaryHeight, nodeHeight = 6, 8
-		return // Don't add Prometheus bonus at small heights
+		// Small (<=45): keep full Cluster Summary visible using compact 1-row stats
+		// (+3 rows vs sparklines-only, reducing the flex Pods table by 3 rows).
+		// Non-Prometheus: stats(1) + graphFlex(5) + outerBorder(2) = 8
+		// Prometheus:     stats(1) + graphFlex(5) + enhanced(1) + outerBorder(2) = 9
+		summaryHeight, nodeHeight = 8, 8
+		if isPrometheus {
+			summaryHeight = 9
+		}
+		return
 	case ui.HeightCategoryMedium:
 		summaryHeight, nodeHeight = 10, 12
 	case ui.HeightCategoryLarge:
