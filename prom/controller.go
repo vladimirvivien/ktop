@@ -246,8 +246,12 @@ func (cc *CollectorController) collectFromComponent(ctx context.Context, compone
 
 // runPeriodicCleanup manages periodic cleanup of old metrics
 func (cc *CollectorController) runPeriodicCleanup(ctx context.Context) {
-	// Run cleanup every 1/4 of retention time
+	// Run cleanup every 1/4 of retention time, bounded to [1m, 2m] so expired
+	// series are reclaimed promptly even with long retention windows.
 	cleanupInterval := cc.config.RetentionTime / 4
+	if cleanupInterval > 2*time.Minute {
+		cleanupInterval = 2 * time.Minute
+	}
 	if cleanupInterval < time.Minute {
 		cleanupInterval = time.Minute
 	}

@@ -86,10 +86,17 @@ func (c *Controller) GetPodModels(ctx context.Context) (models []model.PodModel,
 
 		model := model.NewPodModel(pod, podMetrics, emptyNodeMetrics)
 
-		// retrieve pod's node allocatable resources
+		// Read node allocatable directly from the informer cache without deep-copying
+		// the full Node object (which carries large Status.Images lists).
 		if alloc, ok := nodeAllocResMap[pod.Spec.NodeName]; !ok {
-			node, err := c.GetNode(ctx, pod.Spec.NodeName)
-			if err != nil {
+			var node *coreV1.Node
+			var nodeErr error
+			if c.nodeInformer != nil {
+				node, nodeErr = c.nodeInformer.Lister().Get(pod.Spec.NodeName)
+			} else {
+				node, nodeErr = c.GetNode(ctx, pod.Spec.NodeName)
+			}
+			if nodeErr != nil || node == nil {
 				alloc = coreV1.ResourceList{}
 			} else {
 				alloc = node.Status.Allocatable

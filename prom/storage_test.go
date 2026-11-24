@@ -575,3 +575,196 @@ func TestAddMetrics_DeduplicatesAndReanchorsUpstreamTimestamps(t *testing.T) {
 		t.Errorf("expected re-anchored delta 60000ms matching upstream elapsed time, got %dms", delta)
 	}
 }
+
+func TestCleanupPrunesExpiredSeriesAndLabelIndexes(t *testing.T) {
+	cfg := DefaultScrapeConfig()
+	cfg.RetentionTime = 1 * time.Second
+	store := NewInMemoryStore(cfg)
+
+	now := time.Now()
+	oldTs := now.Add(-5 * time.Second)
+
+	makePodMetric := func(podName string, ts time.Time, val float64) *ScrapedMetrics {
+		return &ScrapedMetrics{
+			Component: ComponentCAdvisor,
+			Families: map[string]*MetricFamily{
+				"container_memory_working_set_bytes": {
+					Name: "container_memory_working_set_bytes",
+					Type: dto.MetricType_GAUGE,
+					TimeSeries: []*TimeSeries{
+						createTestTimeSeries(
+							labels.Labels{
+								{Name: "__name__", Value: "container_memory_working_set_bytes"},
+								{Name: "namespace", Value: "default"},
+								{Name: "pod", Value: podName},
+								{Name: "container", Value: "app"},
+							},
+							MetricSample{Timestamp: ts.UnixMilli(), Value: val},
+						),
+					},
+				},
+			},
+		}
+	}
+
+	if err := store.AddMetrics(makePodMetric("ephemeral-job-1", oldTs, 1024)); err != nil {
+		t.Fatalf("AddMetrics old failed: %v", err)
+	}
+	if err := store.AddMetrics(makePodMetric("steady-web-1", now, 2048)); err != nil {
+		t.Fatalf("AddMetrics active failed: %v", err)
+	}
+
+	if err := store.Cleanup(); err != nil {
+		t.Fatalf("Cleanup failed: %v", err)
+	}
+
+	stats := store.GetStats()
+	if got := stats["total_series"].(int); got != 1 {
+		t.Fatalf("expected 1 surviving series after cleanup, got %d", got)
+	}
+
+	podValues := store.GetLabelValues("pod")
+	if len(podValues) != 1 || podValues[0] != "steady-web-1" {
+		t.Fatalf("expected label index for pod to contain only [steady-web-1], got %v", podValues)
+	}
+}
+
+func TestEffectiveSeriesCapacityBoundsActiveSeries(t *testing.T) {
+	cfg := &ScrapeConfig{
+		Interval:      5 * time.Second,
+		RetentionTime: 1 * time.Hour,
+		MaxSamples:    10000,
+	}
+	store := NewInMemoryStore(cfg)
+
+	wantCap := int(time.Hour/(5*time.Second)) + 128 // 848
+	if store.seriesMaxSamples != wantCap {
+		t.Fatalf("expected seriesMaxSamples=%d, got %d", wantCap, store.seriesMaxSamples)
+	}
+
+	lbls := labels.Labels{
+		{Name: "__name__", Value: "container_memory_working_set_bytes"},
+		{Name: "pod", Value: "web-0"},
+		{Name: "namespace", Value: "default"},
+	}
+
+	base := time.Now().Add(-2 * time.Hour).UnixMilli()
+	for i := 0; i < 2000; i++ {
+		sm := &ScrapedMetrics{
+			Component: ComponentCAdvisor,
+			Families: map[string]*MetricFamily{
+				"container_memory_working_set_bytes": {
+					Name: "container_memory_working_set_bytes",
+					Type: dto.MetricType_GAUGE,
+					TimeSeries: []*TimeSeries{
+						createTestTimeSeries(lbls, MetricSample{
+							Timestamp: base + int64(i)*1000,
+							Value:     float64(i),
+						}),
+					},
+				},
+			},
+		}
+		if err := store.AddMetrics(sm); err != nil {
+			t.Fatalf("AddMetrics failed at i=%d: %v", i, err)
+		}
+	}
+
+	ts := store.series["container_memory_working_set_bytes"][lbls.String()]
+	if ts == nil {
+		t.Fatal("expected series to exist")
+	}
+	if ts.Samples.Len() != wantCap {
+		t.Errorf("expected series length capped at %d, got %d", wantCap, ts.Samples.Len())
+	}
+	if ts.Samples.AllocatedCap() != wantCap {
+		t.Errorf("expected backing slice capped at %d, got %d", wantCap, ts.Samples.AllocatedCap())
+	}
+}
+
+func TestInMemoryStoreLazyAllocationForManySeries(t *testing.T) {
+	cfg := &ScrapeConfig{
+		Interval:      5 * time.Second,
+		RetentionTime: 1 * time.Hour,
+		MaxSamples:    10000,
+	}
+	store := NewInMemoryStore(cfg)
+
+	now := time.Now().UnixMilli()
+	series := make([]*TimeSeries, 0, 500)
+	for i := 0; i < 500; i++ {
+		lbls := labels.Labels{
+			{Name: "__name__", Value: "container_memory_working_set_bytes"},
+			{Name: "namespace", Value: "default"},
+			{Name: "pod", Value: "pod-" + string(rune('a'+i%26)) + "-" + time.Duration(i).String()},
+		}
+		series = append(series, createTestTimeSeries(lbls, MetricSample{Timestamp: now, Value: float64(i)}))
+	}
+
+	err := store.AddMetrics(&ScrapedMetrics{
+		Component: ComponentCAdvisor,
+		Families: map[string]*MetricFamily{
+			"container_memory_working_set_bytes": {
+				Name:       "container_memory_working_set_bytes",
+				Type:       dto.MetricType_GAUGE,
+				TimeSeries: series,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("AddMetrics failed: %v", err)
+	}
+
+	for key, ts := range store.series["container_memory_working_set_bytes"] {
+		if ts.Samples.AllocatedCap() > ringInitialCap {
+			t.Fatalf("series %s over-allocated backing slice: got %d, want <= %d", key, ts.Samples.AllocatedCap(), ringInitialCap)
+		}
+	}
+}
+
+func TestQueryLatestPerSeries(t *testing.T) {
+	store := NewInMemoryStore(DefaultScrapeConfig())
+	now := time.Now()
+
+	add := func(pod string, ts time.Time, val float64) {
+		sm := &ScrapedMetrics{
+			Component: ComponentCAdvisor,
+			Families: map[string]*MetricFamily{
+				"container_memory_working_set_bytes": {
+					Name: "container_memory_working_set_bytes",
+					Type: dto.MetricType_GAUGE,
+					TimeSeries: []*TimeSeries{
+						createTestTimeSeries(
+							labels.Labels{
+								{Name: "__name__", Value: "container_memory_working_set_bytes"},
+								{Name: "namespace", Value: "prod"},
+								{Name: "pod", Value: pod},
+							},
+							MetricSample{Timestamp: ts.UnixMilli(), Value: val},
+						),
+					},
+				},
+			},
+		}
+		if err := store.AddMetrics(sm); err != nil {
+			t.Fatalf("AddMetrics failed: %v", err)
+		}
+	}
+
+	add("web-1", now.Add(-10*time.Second), 100)
+	add("web-1", now.Add(-5*time.Second), 250)
+	add("stale-1", now.Add(-10*time.Minute), 999)
+
+	got, err := store.QueryLatestPerSeries("container_memory_working_set_bytes", map[string]string{"namespace": "prod"}, now.Add(-1*time.Minute))
+	if err != nil {
+		t.Fatalf("QueryLatestPerSeries failed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 fresh series, got %d", len(got))
+	}
+	for _, sample := range got {
+		if sample.Value != 250 {
+			t.Errorf("expected latest sample value 250, got %v", sample.Value)
+		}
+	}
+}

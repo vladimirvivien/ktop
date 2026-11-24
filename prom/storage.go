@@ -23,13 +23,10 @@ type InMemoryStore struct {
 	labelNames  map[string]bool
 	labelValues map[string]map[string]bool // labelName -> values
 
-	// String interning - keeps handles alive to retain canonical strings
-	stringHandles map[string]unique.Handle[string]
-	handlesMu     sync.RWMutex
-
 	// Configuration
-	maxSamples    int
-	retentionTime time.Duration
+	maxSamples       int
+	seriesMaxSamples int // Effective per-series cap bounded by retention/interval
+	retentionTime    time.Duration
 
 	// Statistics
 	totalSeries  int
@@ -37,38 +34,42 @@ type InMemoryStore struct {
 	lastCleanup  time.Time
 }
 
+// effectiveSeriesCapacity bounds per-series ring buffer capacity to what can
+// actually accumulate within retentionTime at scrapeInterval (plus headroom),
+// preventing active series from growing to huge maxSamples limits (e.g. 10000)
+// over long uptimes.
+func effectiveSeriesCapacity(maxSamples int, retentionTime, scrapeInterval time.Duration) int {
+	if maxSamples <= 0 {
+		maxSamples = 1
+	}
+	if scrapeInterval > 0 && retentionTime >= scrapeInterval {
+		byRetention := int(retentionTime/scrapeInterval) + 128
+		if byRetention < maxSamples {
+			return byRetention
+		}
+	}
+	return maxSamples
+}
+
 // NewInMemoryStore creates a new in-memory metrics store
 func NewInMemoryStore(config *ScrapeConfig) *InMemoryStore {
 	return &InMemoryStore{
-		series:        make(map[string]map[string]*TimeSeries),
-		metricNames:   make(map[string]bool),
-		labelNames:    make(map[string]bool),
-		labelValues:   make(map[string]map[string]bool),
-		stringHandles: make(map[string]unique.Handle[string]),
-		maxSamples:    config.MaxSamples,
-		retentionTime: config.RetentionTime,
-		lastCleanup:   time.Now(),
+		series:           make(map[string]map[string]*TimeSeries),
+		metricNames:      make(map[string]bool),
+		labelNames:       make(map[string]bool),
+		labelValues:      make(map[string]map[string]bool),
+		maxSamples:       config.MaxSamples,
+		seriesMaxSamples: effectiveSeriesCapacity(config.MaxSamples, config.RetentionTime, config.Interval),
+		retentionTime:    config.RetentionTime,
+		lastCleanup:      time.Now(),
 	}
 }
 
-// InternString returns the canonical version of a string.
-// Uses Go's unique package to deduplicate repeated strings.
+// InternString returns the canonical version of a string using Go's unique
+// package so repeated label strings share backing memory while still allowing
+// GC reclamation once expired series are removed.
 func (store *InMemoryStore) InternString(s string) string {
-	store.handlesMu.RLock()
-	if h, ok := store.stringHandles[s]; ok {
-		store.handlesMu.RUnlock()
-		return h.Value()
-	}
-	store.handlesMu.RUnlock()
-
-	store.handlesMu.Lock()
-	defer store.handlesMu.Unlock()
-	if h, ok := store.stringHandles[s]; ok {
-		return h.Value()
-	}
-	h := unique.Make(s)
-	store.stringHandles[s] = h
-	return h.Value()
+	return unique.Make(s).Value()
 }
 
 // internLabels creates a new labels.Labels with all strings interned.
@@ -122,10 +123,10 @@ func (store *InMemoryStore) AddMetrics(metrics *ScrapedMetrics) error {
 					store.labelValues[name][value] = true
 				}
 
-				// Create new series with ring buffer and interned labels
+				// Create new series with lazily-growing ring buffer and interned labels
 				existingSeries = &TimeSeries{
 					Labels:  store.internLabels(ts.Labels),
-					Samples: NewRingBuffer[MetricSample](store.maxSamples),
+					Samples: NewRingBuffer[MetricSample](store.seriesMaxSamples),
 				}
 				store.series[metricName][seriesKey] = existingSeries
 				store.totalSeries++
@@ -159,7 +160,11 @@ func (store *InMemoryStore) AddMetrics(metrics *ScrapedMetrics) error {
 	}
 
 	// Perform cleanup if needed
-	if time.Since(store.lastCleanup) > store.retentionTime/10 {
+	cleanupInterval := store.retentionTime / 10
+	if cleanupInterval > 2*time.Minute {
+		cleanupInterval = 2 * time.Minute
+	}
+	if time.Since(store.lastCleanup) > cleanupInterval {
 		store.cleanupExpiredSamples()
 	}
 
@@ -295,6 +300,34 @@ func (store *InMemoryStore) QueryRange(metricName string, labelMatchers map[stri
 	return allSamples, nil
 }
 
+// QueryLatestPerSeries returns the most recent sample for each series matching
+// labelMatchers whose latest sample timestamp is >= since.
+func (store *InMemoryStore) QueryLatestPerSeries(metricName string, labelMatchers map[string]string, since time.Time) (map[string]MetricSample, error) {
+	store.mutex.RLock()
+	defer store.mutex.RUnlock()
+
+	seriesMap, exists := store.series[metricName]
+	if !exists {
+		return nil, fmt.Errorf("metric %s not found", metricName)
+	}
+
+	result := make(map[string]MetricSample)
+	sinceMs := since.UnixMilli()
+
+	for seriesKey, ts := range seriesMap {
+		if !store.matchesLabels(ts.Labels, labelMatchers) {
+			continue
+		}
+		sample, ok := ts.Samples.Last()
+		if !ok || sample.Timestamp < sinceMs {
+			continue
+		}
+		result[seriesKey] = sample
+	}
+
+	return result, nil
+}
+
 // QueryRangePerSeries returns metric values over a time range, grouped by series key.
 // Each series key maps to that series' samples, preserving per-series ordering.
 // This is essential for accurate rate calculations on counter metrics.
@@ -316,23 +349,32 @@ func (store *InMemoryStore) QueryRangePerSeries(metricName string, labelMatchers
 			continue
 		}
 
-		var seriesSamples []*MetricSample
-		// Iterate over ring buffer samples (RingBuffer.Range yields samples in chronological order)
+		// Quick reject if the entire ring buffer falls outside [startMs, endMs].
+		newest, ok := ts.Samples.Last()
+		if !ok || newest.Timestamp < startMs {
+			continue
+		}
+		oldest, _ := ts.Samples.First()
+		if oldest.Timestamp > endMs {
+			continue
+		}
+
+		// Collect into a single contiguous backing slice per series so we do
+		// one heap allocation instead of one per MetricSample.
+		var vals []MetricSample
 		ts.Samples.Range(func(_ int, sample MetricSample) bool {
 			if sample.Timestamp >= startMs && sample.Timestamp <= endMs {
-				sampleCopy := &MetricSample{
-					Timestamp:         sample.Timestamp,
-					UpstreamTimestamp: sample.UpstreamTimestamp,
-					Value:             sample.Value,
-				}
-				seriesSamples = append(seriesSamples, sampleCopy)
+				vals = append(vals, sample)
 			}
-			return true // continue iteration
+			return true
 		})
 
-		// Only add if we have samples in this time range
-		if len(seriesSamples) > 0 {
-			result[seriesKey] = seriesSamples
+		if len(vals) > 0 {
+			ptrs := make([]*MetricSample, len(vals))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			result[seriesKey] = ptrs
 		}
 	}
 
@@ -384,11 +426,13 @@ func (store *InMemoryStore) Cleanup() error {
 // cleanupExpiredSamples removes stale time series (must be called with write lock).
 // With ring buffers, individual samples are automatically evicted by new additions.
 // This cleanup removes entire time series where even the newest sample is too old,
-// indicating the series is no longer being updated.
+// indicating the series is no longer being updated, and prunes stale label indexes.
 func (store *InMemoryStore) cleanupExpiredSamples() {
 	cutoffTime := time.Now().Add(-store.retentionTime).UnixMilli()
+	totalRemoved := 0
 
 	for metricName, seriesMap := range store.series {
+		removedFromMetric := 0
 		for seriesKey, ts := range seriesMap {
 			// Check if the series is stale (newest sample is too old)
 			newest, ok := ts.Samples.Last()
@@ -397,17 +441,53 @@ func (store *InMemoryStore) cleanupExpiredSamples() {
 				store.totalSamples -= int64(ts.Samples.Len())
 				delete(seriesMap, seriesKey)
 				store.totalSeries--
+				removedFromMetric++
+				totalRemoved++
 			}
 		}
 
-		// Remove empty metric
+		// Remove empty metric or compact heavily shrunk series map so Go frees old buckets.
 		if len(seriesMap) == 0 {
 			delete(store.series, metricName)
 			delete(store.metricNames, metricName)
+		} else if removedFromMetric > 256 && removedFromMetric > len(seriesMap) {
+			compacted := make(map[string]*TimeSeries, len(seriesMap))
+			for k, v := range seriesMap {
+				compacted[k] = v
+			}
+			store.series[metricName] = compacted
 		}
 	}
 
+	if totalRemoved > 0 {
+		store.rebuildLabelIndexesLocked()
+	}
+
 	store.lastCleanup = time.Now()
+}
+
+// rebuildLabelIndexesLocked reconstructs labelNames and labelValues from live
+// series so deleted pods, containers, and cgroup paths do not accumulate forever.
+func (store *InMemoryStore) rebuildLabelIndexesLocked() {
+	labelNames := make(map[string]bool)
+	labelValues := make(map[string]map[string]bool)
+
+	for _, seriesMap := range store.series {
+		for _, ts := range seriesMap {
+			for _, label := range ts.Labels {
+				labelNames[label.Name] = true
+				vals := labelValues[label.Name]
+				if vals == nil {
+					vals = make(map[string]bool)
+					labelValues[label.Name] = vals
+				}
+				vals[label.Value] = true
+			}
+		}
+	}
+
+	store.labelNames = labelNames
+	store.labelValues = labelValues
 }
 
 // matchesLabels checks if a time series labels match the given label matchers

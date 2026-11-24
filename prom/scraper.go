@@ -1,9 +1,12 @@
 package prom
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +17,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
+
+const maxConcurrentScrapes = 6
 
 // KubernetesScraper implements MetricsCollector for Kubernetes components
 type KubernetesScraper struct {
@@ -101,10 +106,13 @@ func (ks *KubernetesScraper) scrapeAllTargets(ctx context.Context, targets []*Sc
 
 	startTime := time.Now()
 	results := make(chan scrapeResult, len(targets))
+	sem := make(chan struct{}, maxConcurrentScrapes)
 
-	// Scrape all targets in parallel
+	// Scrape targets with bounded concurrency to cap peak heap usage on multi-node clusters.
 	for _, target := range targets {
 		go func(t *ScrapeTarget) {
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			metrics, err := ks.scrapeTarget(ctx, t)
 			results <- scrapeResult{target: t, metrics: metrics, err: err}
 		}(target)
@@ -332,7 +340,7 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 
 	startTime := time.Now()
 
-	var result rest.Result
+	var req *rest.Request
 	var endpoint string
 
 	// Build the appropriate RESTClient request based on target type
@@ -341,38 +349,35 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 	case ComponentAPIServer:
 		// API server metrics via direct path
 		endpoint = "/metrics"
-		result = ks.restClient.Get().AbsPath("/metrics").Do(reqCtx)
+		req = ks.restClient.Get().AbsPath("/metrics")
 
 	case ComponentKubelet, ComponentCAdvisor:
 		// Node-based components via node proxy
 		endpoint = fmt.Sprintf("nodes/%s/proxy/%s", target.NodeName, target.Path)
-		result = ks.restClient.Get().
+		req = ks.restClient.Get().
 			Resource("nodes").
 			Name(target.NodeName).
 			SubResource("proxy").
-			Suffix(target.Path).
-			Do(reqCtx)
+			Suffix(target.Path)
 
 	case ComponentEtcd, ComponentScheduler, ComponentControllerManager, ComponentKubeProxy:
 		// Pod-based components via pod proxy
 		podNameWithPort := fmt.Sprintf("%s:%d", target.PodName, target.Port)
 		endpoint = fmt.Sprintf("namespaces/%s/pods/%s/proxy/%s", target.Namespace, podNameWithPort, target.Path)
-		result = ks.restClient.Get().
+		req = ks.restClient.Get().
 			Namespace(target.Namespace).
 			Resource("pods").
 			Name(podNameWithPort).
 			SubResource("proxy").
-			Suffix(target.Path).
-			Do(reqCtx)
+			Suffix(target.Path)
 
 	default:
 		return nil, fmt.Errorf("unsupported component type: %s", target.Component)
 	}
 
+	body, err := req.Stream(reqCtx)
 	scrapeDuration := time.Since(startTime)
-
-	// Check for errors
-	if err := result.Error(); err != nil {
+	if err != nil {
 		return &ScrapedMetrics{
 			Component:      target.Component,
 			Endpoint:       endpoint,
@@ -381,21 +386,11 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 			Error:          fmt.Errorf("REST request failed: %w", err),
 		}, err
 	}
+	defer body.Close()
 
-	// Get raw response body
-	rawBody, err := result.Raw()
-	if err != nil {
-		return &ScrapedMetrics{
-			Component:      target.Component,
-			Endpoint:       endpoint,
-			ScrapedAt:      startTime,
-			ScrapeDuration: scrapeDuration,
-			Error:          fmt.Errorf("getting response body: %w", err),
-		}, err
-	}
-
-	// Parse metrics
-	families, err := ks.parseMetricsBody(rawBody)
+	// Stream-filter to allowlisted metrics before parsing so non-allowlisted
+	// families never allocate protobuf DTO trees on the heap.
+	families, err := parseAllowedMetrics(body, DefaultMetricAllowlist)
 	if err != nil {
 		return &ScrapedMetrics{
 			Component:      target.Component,
@@ -417,13 +412,16 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 		clockOffsetMs = scrapeTimestamp - maxUpstreamTs
 	}
 
-	metricFamilies := make(map[string]*MetricFamily)
+	filterCAdvisor := target.Component == ComponentCAdvisor
+	metricFamilies := make(map[string]*MetricFamily, len(families))
 	for name, family := range families {
 		if !DefaultMetricAllowlist[name] {
 			continue
 		}
-		metricFamily := ks.convertMetricFamilyWithTimestamp(name, family, scrapeTimestamp, clockOffsetMs)
-		metricFamilies[name] = metricFamily
+		metricFamily := ks.convertMetricFamilyFiltered(name, family, scrapeTimestamp, clockOffsetMs, filterCAdvisor)
+		if len(metricFamily.TimeSeries) > 0 {
+			metricFamilies[name] = metricFamily
+		}
 	}
 
 	return &ScrapedMetrics{
@@ -439,6 +437,141 @@ func (ks *KubernetesScraper) scrapeTarget(ctx context.Context, target *ScrapeTar
 func (ks *KubernetesScraper) parseMetricsBody(body []byte) (map[string]*dto.MetricFamily, error) {
 	var parser expfmt.TextParser
 	return parser.TextToMetricFamilies(bytes.NewReader(body))
+}
+
+// filterAllowedMetrics reads a Prometheus text exposition stream line-by-line
+// and retains only metadata (# HELP / # TYPE) and sample lines whose metric
+// name is present in allowlist.
+func filterAllowedMetrics(r io.Reader, allowlist map[string]bool) (*bytes.Buffer, error) {
+	br := bufio.NewReaderSize(r, 64*1024)
+	var out bytes.Buffer
+
+	for {
+		line, err := br.ReadBytes('\n')
+		if len(line) > 0 {
+			trimmed := bytes.TrimLeft(line, " \t")
+			if len(trimmed) > 0 {
+				var name string
+				if trimmed[0] == '#' {
+					name = extractHeaderMetricName(trimmed)
+				} else {
+					name = extractSampleMetricName(trimmed)
+				}
+				if name != "" && allowlist[name] {
+					out.Write(line)
+					if line[len(line)-1] != '\n' {
+						out.WriteByte('\n')
+					}
+				}
+			}
+		}
+		if err == io.EOF {
+			return &out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+}
+
+func extractHeaderMetricName(line []byte) string {
+	rest := bytes.TrimLeft(line[1:], " \t")
+	switch {
+	case bytes.HasPrefix(rest, []byte("HELP ")), bytes.HasPrefix(rest, []byte("HELP\t")):
+		rest = bytes.TrimLeft(rest[4:], " \t")
+	case bytes.HasPrefix(rest, []byte("TYPE ")), bytes.HasPrefix(rest, []byte("TYPE\t")):
+		rest = bytes.TrimLeft(rest[4:], " \t")
+	default:
+		return ""
+	}
+	end := bytes.IndexAny(rest, " \t\r\n")
+	if end < 0 {
+		return string(rest)
+	}
+	return string(rest[:end])
+}
+
+func extractSampleMetricName(line []byte) string {
+	end := bytes.IndexAny(line, "{ \t\r\n")
+	if end <= 0 {
+		return ""
+	}
+	return string(line[:end])
+}
+
+func parseAllowedMetrics(r io.Reader, allowlist map[string]bool) (map[string]*dto.MetricFamily, error) {
+	filtered, err := filterAllowedMetrics(r, allowlist)
+	if err != nil {
+		return nil, err
+	}
+	if filtered.Len() == 0 {
+		return map[string]*dto.MetricFamily{}, nil
+	}
+	var parser expfmt.TextParser
+	return parser.TextToMetricFamilies(filtered)
+}
+
+// shouldKeepCAdvisorSeries returns true if a cAdvisor series is queried by ktop.
+// Dropping unqueried systemd/slice cgroups, pause containers, and per-core pod
+// CPU series cuts stored series cardinality significantly without affecting any
+// node or pod metric calculation.
+func shouldKeepCAdvisorSeries(metricName string, metric *dto.Metric) bool {
+	if metricName == "container_count" || !strings.HasPrefix(metricName, "container_") {
+		return true
+	}
+
+	var id, pod, namespace, container, cpu string
+	for _, l := range metric.Label {
+		switch l.GetName() {
+		case "id":
+			id = l.GetValue()
+		case "pod":
+			pod = l.GetValue()
+		case "namespace":
+			namespace = l.GetValue()
+		case "container":
+			container = l.GetValue()
+		case "cpu":
+			cpu = l.GetValue()
+		}
+	}
+
+	isNodeRoot := id == "/"
+	isPod := pod != "" && namespace != ""
+	if !isNodeRoot && !isPod {
+		return false
+	}
+
+	switch metricName {
+	case "container_network_receive_bytes_total", "container_network_transmit_bytes_total":
+		return isNodeRoot
+	case "container_cpu_cfs_throttled_seconds_total",
+		"container_cpu_cfs_throttled_periods_total",
+		"container_cpu_cfs_periods_total":
+		return isPod && container != "" && container != "POD"
+	case "container_pressure_cpu_waiting_seconds_total",
+		"container_pressure_cpu_stalled_seconds_total",
+		"container_pressure_memory_waiting_seconds_total",
+		"container_pressure_memory_stalled_seconds_total",
+		"container_pressure_io_waiting_seconds_total",
+		"container_pressure_io_stalled_seconds_total":
+		return isNodeRoot || (isPod && container != "" && container != "POD")
+	case "container_cpu_usage_seconds_total":
+		if isNodeRoot {
+			return true
+		}
+		if container == "POD" {
+			return false
+		}
+		return cpu == "" || cpu == "total"
+	case "container_memory_working_set_bytes":
+		if isNodeRoot {
+			return true
+		}
+		return container != "POD"
+	default:
+		return isNodeRoot || isPod
+	}
 }
 
 // maxAllowedUpstreamTimestamp returns the maximum explicit sample timestamp
@@ -466,6 +599,10 @@ func (ks *KubernetesScraper) convertMetricFamily(name string, family *dto.Metric
 // convertMetricFamilyWithTimestamp converts Prometheus DTO to our internal format,
 // preserving upstream metric timestamps anchored by clockOffsetMs when present.
 func (ks *KubernetesScraper) convertMetricFamilyWithTimestamp(name string, family *dto.MetricFamily, scrapeTimestamp, clockOffsetMs int64) *MetricFamily {
+	return ks.convertMetricFamilyFiltered(name, family, scrapeTimestamp, clockOffsetMs, false)
+}
+
+func (ks *KubernetesScraper) convertMetricFamilyFiltered(name string, family *dto.MetricFamily, scrapeTimestamp, clockOffsetMs int64, filterCAdvisor bool) *MetricFamily {
 	metricFamily := &MetricFamily{
 		Name:        name,
 		Type:        family.GetType(),
@@ -475,6 +612,9 @@ func (ks *KubernetesScraper) convertMetricFamilyWithTimestamp(name string, famil
 	}
 
 	for _, metric := range family.Metric {
+		if filterCAdvisor && !shouldKeepCAdvisorSeries(name, metric) {
+			continue
+		}
 		// Build labels
 		lbls := make(labels.Labels, 0, len(metric.Label)+1)
 		lbls = append(lbls, labels.Label{Name: "__name__", Value: name})

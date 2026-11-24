@@ -2,6 +2,7 @@ package prom
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -539,5 +540,87 @@ func TestConvertMetricFamilyWithTimestamp_ClockSkewPreserved(t *testing.T) {
 	s1, _ := mf.TimeSeries[1].Samples.Last()
 	if s1.Timestamp-s0.Timestamp != 30000 {
 		t.Errorf("expected 30000ms difference preserved across clock offset, got %d", s1.Timestamp-s0.Timestamp)
+	}
+}
+
+func TestParseAllowedMetricsFiltersBeforeParse(t *testing.T) {
+	payload := `# HELP unused_metric_one Something huge we do not need
+# TYPE unused_metric_one counter
+unused_metric_one{a="1",b="2"} 100
+unused_metric_one{a="3",b="4"} 200
+# HELP container_memory_working_set_bytes Current working set in bytes.
+# TYPE container_memory_working_set_bytes gauge
+container_memory_working_set_bytes{id="/",container=""} 4096 1700000000000
+# HELP another_unused_metric Dropped before DTO parsing
+# TYPE another_unused_metric gauge
+another_unused_metric{x="y"} 42
+kubelet_running_pods 12`
+
+	families, err := parseAllowedMetrics(strings.NewReader(payload), DefaultMetricAllowlist)
+	if err != nil {
+		t.Fatalf("parseAllowedMetrics failed: %v", err)
+	}
+	if len(families) != 2 {
+		t.Fatalf("expected 2 allowlisted families, got %d: %v", len(families), families)
+	}
+	if _, ok := families["container_memory_working_set_bytes"]; !ok {
+		t.Error("expected container_memory_working_set_bytes to be retained")
+	}
+	if _, ok := families["kubelet_running_pods"]; !ok {
+		t.Error("expected kubelet_running_pods (without trailing newline) to be retained")
+	}
+	if _, ok := families["unused_metric_one"]; ok {
+		t.Error("expected unused_metric_one to be filtered out")
+	}
+	if _, ok := families["another_unused_metric"]; ok {
+		t.Error("expected another_unused_metric to be filtered out")
+	}
+}
+
+func TestShouldKeepCAdvisorSeries(t *testing.T) {
+	makeMetric := func(kv ...string) *dto.Metric {
+		var lbls []*dto.LabelPair
+		for i := 0; i+1 < len(kv); i += 2 {
+			k, v := kv[i], kv[i+1]
+			lbls = append(lbls, &dto.LabelPair{Name: &k, Value: &v})
+		}
+		return &dto.Metric{Label: lbls}
+	}
+
+	tests := []struct {
+		name   string
+		metric string
+		labels []string
+		keep   bool
+	}{
+		{"node root cpu total", "container_cpu_usage_seconds_total", []string{"id", "/", "cpu", "total"}, true},
+		{"node root cpu per-core fallback", "container_cpu_usage_seconds_total", []string{"id", "/", "cpu", "0"}, true},
+		{"node root memory", "container_memory_working_set_bytes", []string{"id", "/"}, true},
+		{"node root network", "container_network_receive_bytes_total", []string{"id", "/", "interface", "eth0"}, true},
+		{"node root psi", "container_pressure_cpu_waiting_seconds_total", []string{"id", "/"}, true},
+		{"systemd service cgroup dropped", "container_cpu_usage_seconds_total", []string{"id", "/system.slice/docker.service", "cpu", "total"}, false},
+		{"kubepods slice cgroup dropped", "container_memory_working_set_bytes", []string{"id", "/kubepods.slice"}, false},
+		{"pod workload cpu total kept", "container_cpu_usage_seconds_total", []string{"id", "/kubepods/p1/c1", "namespace", "default", "pod", "web-1", "container", "app", "cpu", "total"}, true},
+		{"pod workload cpu per-core dropped", "container_cpu_usage_seconds_total", []string{"id", "/kubepods/p1/c1", "namespace", "default", "pod", "web-1", "container", "app", "cpu", "3"}, false},
+		{"pod pause container cpu dropped", "container_cpu_usage_seconds_total", []string{"id", "/kubepods/p1/pause", "namespace", "default", "pod", "web-1", "container", "POD", "cpu", "total"}, false},
+		{"pod workload memory kept", "container_memory_working_set_bytes", []string{"id", "/kubepods/p1/c1", "namespace", "default", "pod", "web-1", "container", "app"}, true},
+		{"static pod aggregate memory kept", "container_memory_working_set_bytes", []string{"id", "/kubepods/p1", "namespace", "kube-system", "pod", "kube-apiserver", "container", ""}, true},
+		{"pod pause memory dropped", "container_memory_working_set_bytes", []string{"id", "/kubepods/p1/pause", "namespace", "default", "pod", "web-1", "container", "POD"}, false},
+		{"pod network dropped", "container_network_receive_bytes_total", []string{"id", "/kubepods/p1/pause", "namespace", "default", "pod", "web-1", "container", "POD"}, false},
+		{"pod workload psi kept", "container_pressure_memory_waiting_seconds_total", []string{"id", "/kubepods/p1/c1", "namespace", "default", "pod", "web-1", "container", "app"}, true},
+		{"pod aggregate psi dropped", "container_pressure_memory_waiting_seconds_total", []string{"id", "/kubepods/p1", "namespace", "default", "pod", "web-1", "container", ""}, false},
+		{"pod workload cfs kept", "container_cpu_cfs_throttled_periods_total", []string{"id", "/kubepods/p1/c1", "namespace", "default", "pod", "web-1", "container", "app"}, true},
+		{"node root cfs dropped", "container_cpu_cfs_throttled_periods_total", []string{"id", "/"}, false},
+		{"pod fs reads kept", "container_fs_reads_bytes_total", []string{"id", "/kubepods/p1/c1", "namespace", "default", "pod", "web-1", "container", "app"}, true},
+		{"container_count always kept", "container_count", []string{"node", "n1"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shouldKeepCAdvisorSeries(tt.metric, makeMetric(tt.labels...))
+			if got != tt.keep {
+				t.Errorf("shouldKeepCAdvisorSeries(%s, %v) = %v, want %v", tt.metric, tt.labels, got, tt.keep)
+			}
+		})
 	}
 }
