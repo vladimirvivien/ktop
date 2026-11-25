@@ -91,6 +91,60 @@ func (c WorkloadsContext) GetItems() []FooterItem {
 	}
 }
 
+// StorageContext provides footer items for the Storage top-level page.
+type StorageContext struct {
+	FocusedPanel string // "header", "pvcs", "pvs"
+	PageCount    int
+}
+
+// GetItems returns footer items based on the focused Storage panel.
+func (c StorageContext) GetItems() []FooterItem {
+	return sectionTableFooterItems(c.FocusedPanel, c.PageCount, "pvcs", "pvs")
+}
+
+// NetworkContext provides footer items for the Network top-level page.
+type NetworkContext struct {
+	FocusedPanel string // "header", "services", "ingresses"
+	PageCount    int
+}
+
+// GetItems returns footer items based on the focused Network panel.
+func (c NetworkContext) GetItems() []FooterItem {
+	return sectionTableFooterItems(c.FocusedPanel, c.PageCount, "services", "ingresses")
+}
+
+func sectionTableFooterItems(focusedPanel string, pageCount int, tablePanels ...string) []FooterItem {
+	if focusedPanel == "header" {
+		items := appendPageSwitchFooterItem([]FooterItem{{Key: "[Tab]", Action: "next"}}, pageCount)
+		return append(items,
+			FooterItem{Key: "[/]", Action: "filter"},
+			FooterItem{Key: "[?]", Action: "help"},
+			FooterItem{Key: "[ESC | Ctrl+C]", Action: "quit"},
+		)
+	}
+	for _, panel := range tablePanels {
+		if focusedPanel == panel {
+			items := []FooterItem{
+				{Key: "[↑/↓]", Action: "navigate"},
+				{Key: "[Enter]", Action: "yaml"},
+				{Key: "[Tab]", Action: "section"},
+			}
+			items = appendPageSwitchFooterItem(items, pageCount)
+			return append(items,
+				FooterItem{Key: "[/]", Action: "filter"},
+				FooterItem{Key: "[y]", Action: "copy"},
+				FooterItem{Key: "[?]", Action: "help"},
+				FooterItem{Key: "[ESC | Ctrl+C]", Action: "quit"},
+			)
+		}
+	}
+	items := appendPageSwitchFooterItem([]FooterItem{{Key: "[Tab]", Action: "section"}}, pageCount)
+	return append(items,
+		FooterItem{Key: "[?]", Action: "help"},
+		FooterItem{Key: "[ESC | Ctrl+C]", Action: "quit"},
+	)
+}
+
 // EventsContext provides footer items for the standalone Events page.
 type EventsContext struct {
 	FocusedPanel string // "header" or "events"

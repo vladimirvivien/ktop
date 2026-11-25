@@ -10,6 +10,8 @@ const (
 	PageWorkloads      PageType = "workloads"
 	PageWorkloadDetail PageType = "workload_detail"
 	PageEvents         PageType = "events"
+	PageStorage        PageType = "storage"
+	PageNetwork        PageType = "network"
 	PageNodeDetail     PageType = "node_detail"
 	PagePodDetail      PageType = "pod_detail"
 	PageContainerLogs  PageType = "container_logs"

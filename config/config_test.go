@@ -772,6 +772,10 @@ func TestAppConfig_DefaultPageAndNormalizePage(t *testing.T) {
 		{" WORKLOADS ", "workloads", false},
 		{"events", "events", false},
 		{" EVENTS ", "events", false},
+		{"storage", "storage", false},
+		{" STORAGE ", "storage", false},
+		{"network", "network", false},
+		{" NETWORK ", "network", false},
 		{"unknown", "", true},
 	}
 	for _, tc := range pageCases {

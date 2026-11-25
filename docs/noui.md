@@ -160,6 +160,33 @@ In `-o json` mode (the default), `ktop` buffers snapshots across the collection 
     },
     "items": []
   },
+  "storage": {
+    "summary": {
+      "pvcs_bound": 4,
+      "pvcs_pending": 0,
+      "pvcs_total": 4,
+      "pvs_bound": 4,
+      "pvs_total": 4,
+      "storage_classes": 2,
+      "high_fill_count": 0
+    },
+    "pvcs": [],
+    "pvs": [],
+    "storage_classes": []
+  },
+  "network": {
+    "summary": {
+      "services_total": 6,
+      "zero_endpoint_services": 0,
+      "ingresses_total": 1,
+      "drops_per_sec": 0,
+      "errors_per_sec": 0,
+      "has_metrics": true
+    },
+    "services": [],
+    "ingresses": [],
+    "node_network": []
+  },
   "samples": []
 }
 ```
@@ -171,12 +198,14 @@ In `-o json` mode (the default), `ktop` buffers snapshots across the collection 
 | `summary` | Always | Latest cluster-wide counts, resource totals, I/O rates, PSI stall averages, and `health_score` |
 | `health_score_stats` | Always | Window-level `min`, `max`, `avg`, and `latest` health score across all collected samples |
 | `nodes` | Always | Latest slice of node records (`name`, `status`, `pressures`, capacities, usage, and node-root `psi`) |
-| `pods` | Always | Latest slice of pod records (`namespace`, `name`, `status`, `restarts`, `psi`, `cpu_throttled_pct`, optional `resize_status`, `disruption_reason`, `resource_claims`, `failing_probes`, and per-container breakdown) |
+| `pods` | Always | Latest slice of pod records (`namespace`, `name`, `status`, `restarts`, `psi`, `cpu_throttled_pct`, optional `resize_status`, `disruption_reason`, `resource_claims`, `failing_probes`, `volume_usages`, `network_drops_per_sec`, `network_errors_per_sec`, and per-container breakdown) |
 | `workloads` | When available | Latest cluster workload rollups (`deployments`, `statefulsets`, `daemonsets`, `jobs`) with replica counts, status, and aggregated CPU/memory usage |
 | `events` | When available | Recent cluster or namespace-scoped Kubernetes Events with summary totals (`total`, `warning_count`, `normal_count`, `top_reason`) and bounded `items` list |
+| `storage` | When available | Cluster `pvcs` (with kubelet fill% and inode% stats when Prometheus is active), `pvs`, `storage_classes`, and storage summary counts |
+| `network` | When available | Cluster `services` (with EndpointSlice readiness counts and `has_endpoint_alert`), `ingresses`, per-node `node_network` drop/error rates, and network summary totals |
 | `governance` | When KSM available | Auto-discovered `kube-state-metrics` governance state (`hpas`, `pdbs`, `resource_quotas`, `cronjobs`); omitted when KSM is absent or `--ksm=off` |
 | `slis` | When SLIs/probes available | Built-in Kubernetes `/metrics/slis` component healthcheck status (`apiserver`, `kubelet`) and `/metrics/probes` availability |
-| `samples` | Windowed runs (`-d > 0`) | Ordered array of per-interval snapshot objects (`timestamp`, `cluster`, `summary`, `nodes`, `pods`, `workloads`, `events`, `governance`, `slis`); omitted in single-shot mode |
+| `samples` | Windowed runs (`-d > 0`) | Ordered array of per-interval snapshot objects (`timestamp`, `cluster`, `summary`, `nodes`, `pods`, `workloads`, `events`, `storage`, `network`, `governance`, `slis`); omitted in single-shot mode |
 
 ### Streaming Lines (`-o jsonl`)
 

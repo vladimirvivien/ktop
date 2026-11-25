@@ -256,6 +256,8 @@ var ValidPages = map[string]string{
 	"overview":  "overview",
 	"workloads": "workloads",
 	"events":    "events",
+	"storage":   "storage",
+	"network":   "network",
 }
 
 // ValidKSMModes lists valid kube-state-metrics enrichment mode values.
@@ -287,7 +289,7 @@ func NormalizeColorMode(mode string) (string, error) {
 
 // NormalizePage validates and canonicalizes a top-level TUI page identifier.
 func NormalizePage(page string) (string, error) {
-	return normalizeOption(page, "overview", "page", ValidPages, "overview, workloads, events")
+	return normalizeOption(page, "overview", "page", ValidPages, "overview, workloads, events, storage, network")
 }
 
 // NormalizeKSMMode validates and canonicalizes the kube-state-metrics enrichment mode.

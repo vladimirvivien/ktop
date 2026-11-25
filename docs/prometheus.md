@@ -110,7 +110,21 @@ These components provide comprehensive node and container-level metrics for moni
 | CPU usage | `container_cpu_usage_seconds_total` | Per-container CPU (rate) |
 | Memory | `container_memory_working_set_bytes` | Per-container memory |
 
-Metrics are filtered to exclude the `POD` pause container and aggregated per-pod when needed.
+### Volume & Network Health Metrics
+
+| Metric | Source | Description |
+|--------|--------|-------------|
+| Volume capacity | `kubelet_volume_stats_capacity_bytes` | PVC total capacity bytes (kubelet) |
+| Volume used | `kubelet_volume_stats_used_bytes` | PVC used bytes (kubelet) |
+| Volume available | `kubelet_volume_stats_available_bytes` | PVC available bytes (kubelet) |
+| Volume inodes | `kubelet_volume_stats_inodes` | PVC total inodes (kubelet) |
+| Volume inodes used | `kubelet_volume_stats_inodes_used` | PVC used inodes (kubelet) |
+| RX packet drops | `container_network_receive_packets_dropped_total` | Node and pod-sandbox RX packet drop rate (cAdvisor) |
+| TX packet drops | `container_network_transmit_packets_dropped_total` | Node and pod-sandbox TX packet drop rate (cAdvisor) |
+| RX errors | `container_network_receive_errors_total` | Node and pod-sandbox RX error rate (cAdvisor) |
+| TX errors | `container_network_transmit_errors_total` | Node and pod-sandbox TX error rate (cAdvisor) |
+
+Workload container metrics exclude the `POD` pause container; packet drop and network error series keep both node-root (`id="/"`) and pod-sandbox (`container="POD"`) series so per-pod and cluster drop/error rates are preserved.
 
 ## Configuration
 

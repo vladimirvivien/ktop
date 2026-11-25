@@ -130,7 +130,7 @@ func NewKtopCmd() *cobra.Command {
 	cmd.Flags().StringVar(&o.sortPods, "sort-pods", "", "Initial sort column for pods table, prefix with + for asc, - for desc (e.g. '-MEMORY', '+POD')")
 	cmd.Flags().StringVar(&o.theme, "theme", "auto", "UI color theme (auto, dark, light, ansi, monochrome)")
 	cmd.Flags().StringVar(&o.colorMode, "color-mode", "auto", "Terminal color depth override (auto, truecolor, 256, 16, none)")
-	cmd.Flags().StringVar(&o.page, "page", "overview", "Initial TUI page to display (overview, workloads, events)")
+	cmd.Flags().StringVar(&o.page, "page", "overview", "Initial TUI page to display (overview, workloads, events, storage, network)")
 
 	// Headless / non-interactive flags
 	cmd.Flags().BoolVar(&o.noui, "noui", false, "Disable interactive terminal UI and write structured output to stdout")

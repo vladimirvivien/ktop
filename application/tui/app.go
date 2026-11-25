@@ -11,7 +11,9 @@ import (
 	"github.com/vladimirvivien/ktop/metrics"
 	"github.com/vladimirvivien/ktop/ui"
 	"github.com/vladimirvivien/ktop/views/events"
+	"github.com/vladimirvivien/ktop/views/network"
 	"github.com/vladimirvivien/ktop/views/overview"
+	"github.com/vladimirvivien/ktop/views/storage"
 	"github.com/vladimirvivien/ktop/views/workloads"
 )
 
@@ -77,6 +79,24 @@ func NewRunner(ctx context.Context, k8sC *k8s.Client, metricsSource metrics.Metr
 		RootType:   application.PageEvents,
 		Panel:      eventsPage,
 		ChildNames: []string{"events"},
+	})
+	storagePage := storage.New(app, "Storage")
+	app.RegisterPage(application.PageDescriptor{
+		ID:         "storage",
+		Title:      "Storage",
+		Key:        '4',
+		RootType:   application.PageStorage,
+		Panel:      storagePage,
+		ChildNames: []string{"pvcs", "pvs"},
+	})
+	networkPage := network.New(app, "Network")
+	app.RegisterPage(application.PageDescriptor{
+		ID:         "network",
+		Title:      "Network",
+		Key:        '5',
+		RootType:   application.PageNetwork,
+		Panel:      networkPage,
+		ChildNames: []string{"services", "ingresses"},
 	})
 	if opts.InitialPage != "" {
 		if err := app.SetInitialPage(opts.InitialPage); err != nil {

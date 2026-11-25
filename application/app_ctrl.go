@@ -1340,6 +1340,16 @@ func (app *Application) updateFooterContext() {
 				WarningsOnly: warnOnly,
 				Paused:       paused,
 			}
+		case PageStorage:
+			ctx = ui.StorageContext{
+				FocusedPanel: app.getFocusedPanelName(),
+				PageCount:    pageCount,
+			}
+		case PageNetwork:
+			ctx = ui.NetworkContext{
+				FocusedPanel: app.getFocusedPanelName(),
+				PageCount:    pageCount,
+			}
 		default:
 			ctx = ui.PageContext{
 				FocusedPanel: app.getFocusedPanelName(),
