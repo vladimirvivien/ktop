@@ -2,14 +2,16 @@
 #
 # deploy-load.sh - Deploy diverse Kubernetes workloads with real CPU/memory load
 #
-# Deploys Deployments, StatefulSets, a DaemonSet, Jobs, and a CronJob using
-# stress-ng so you can test ktop's Overview, Workloads, Efficiency (EFF), and
-# Workload Detail views against live cluster metrics.
+# Deploys Deployments, StatefulSets, a DaemonSet, Jobs, a CronJob, and optional
+# Storage/Network fixtures (PVCs, static PV, disk/network traffic generators,
+# Services, Ingresses) so you can validate ktop's Overview, Workloads, Storage,
+# Network, and Pod Detail views against live cluster metrics.
 #
 # Usage:
-#   ./deploy-load.sh                          # Deploy diverse workloads with defaults
+#   ./deploy-load.sh                          # Deploy all workloads with defaults
 #   LOAD_PATTERN=spiky ./deploy-load.sh       # Vary CPU intensity
-#   LOAD_INCLUDE_FAILED=true ./deploy-load.sh # Also deploy failed/degraded examples
+#   LOAD_INCLUDE_FAILED=true ./deploy-load.sh # Also deploy failed/pending examples
+#   LOAD_STORAGE_CLASS=standard ./deploy-load.sh # Override PVC StorageClass
 #
 set -e
 
@@ -26,7 +28,11 @@ BASE_CPU_MILLICORES="${LOAD_CPU_MILLICORES:-100}"
 BASE_MEMORY_MB="${LOAD_MEMORY_MB:-64}"
 PATTERN="${LOAD_PATTERN:-mixed}"                        # steady, spiky, mixed
 STRESS_IMAGE="${LOAD_STRESS_IMAGE:-alexeiled/stress-ng:latest}"
-INCLUDE_FAILED="${LOAD_INCLUDE_FAILED:-false}"          # true to also create Failed/Degraded examples
+UTILITY_IMAGE="${LOAD_UTILITY_IMAGE:-busybox:1.36}"     # Image for disk/HTTP generators
+INCLUDE_STORAGE="${LOAD_INCLUDE_STORAGE:-true}"         # true to create PVCs, PV, and disk I/O pods
+INCLUDE_NETWORK="${LOAD_INCLUDE_NETWORK:-true}"         # true to create Services, Ingresses, and HTTP traffic
+STORAGE_CLASS="${LOAD_STORAGE_CLASS:-}"                 # Empty uses cluster default StorageClass
+INCLUDE_FAILED="${LOAD_INCLUDE_FAILED:-false}"          # true to also create Failed/Degraded/Pending examples
 
 # =============================================================================
 # Helper functions
@@ -77,8 +83,10 @@ echo "  Jobs:                 db-migration (short/complete), batch-cruncher (act
 echo "  CronJob:              periodic-audit (every 5m)"
 echo "  Base CPU / Mem:       ${BASE_CPU_MILLICORES}m / ${BASE_MEMORY_MB}Mi"
 echo "  Pattern:              ${PATTERN}"
+echo "  Storage fixtures:     ${INCLUDE_STORAGE} (StorageClass: ${STORAGE_CLASS:-<cluster-default>})"
+echo "  Network fixtures:     ${INCLUDE_NETWORK}"
 echo "  Include Failed/Deg:   ${INCLUDE_FAILED}"
-echo "  Image:                ${STRESS_IMAGE}"
+echo "  Images:               stress=${STRESS_IMAGE}, util=${UTILITY_IMAGE}"
 echo ""
 
 print_step "Creating namespace '${NAMESPACE}'..."
@@ -435,6 +443,399 @@ spec:
 EOF
 )
 
+if [ "${INCLUDE_STORAGE}" = "true" ]; then
+    SC_YAML=""
+    if [ -n "${STORAGE_CLASS}" ]; then
+        SC_YAML=$'\n'"  storageClassName: ${STORAGE_CLASS}"
+    fi
+
+    MANIFEST="${MANIFEST}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: app-data-pvc
+  namespace: ${NAMESPACE}
+  labels:
+    app: storage-writer
+    app.kubernetes.io/part-of: load-test
+spec:
+  accessModes:
+  - ReadWriteOnce${SC_YAML}
+  resources:
+    requests:
+      storage: 256Mi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: archive-logs-pvc
+  namespace: ${NAMESPACE}
+  labels:
+    app: storage-archiver
+    app.kubernetes.io/part-of: load-test
+spec:
+  accessModes:
+  - ReadWriteOnce${SC_YAML}
+  resources:
+    requests:
+      storage: 128Mi
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: ${NAMESPACE}-available-pv
+  labels:
+    app.kubernetes.io/part-of: load-test
+    load-test-namespace: ${NAMESPACE}
+spec:
+  capacity:
+    storage: 1Gi
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Retain
+  storageClassName: manual
+  hostPath:
+    path: /tmp/ktop-load-test-pv
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storage-writer
+  namespace: ${NAMESPACE}
+  labels:
+    app: storage-writer
+    app.kubernetes.io/part-of: load-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: storage-writer
+  template:
+    metadata:
+      labels:
+        app: storage-writer
+        workload-type: deployment
+    spec:
+      containers:
+      - name: writer
+        image: ${UTILITY_IMAGE}
+        command:
+        - sh
+        - -c
+        - |
+          mkdir -p /data/inodes
+          dd if=/dev/zero of=/data/seed.bin bs=1M count=32 2>/dev/null
+          i=1
+          while [ \$i -le 200 ]; do
+            : > "/data/inodes/f-\$i"
+            i=\$((i + 1))
+          done
+          sync
+          while true; do
+            dd if=/dev/zero of=/data/churn.bin bs=1M count=2 2>/dev/null
+            sync
+            dd if=/data/churn.bin of=/dev/null bs=1M 2>/dev/null
+            sleep 2
+          done
+        resources:
+          requests:
+            cpu: 25m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: app-data-pvc
+      terminationGracePeriodSeconds: 5
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: storage-archiver
+  namespace: ${NAMESPACE}
+  labels:
+    app: storage-archiver
+    app.kubernetes.io/part-of: load-test
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: storage-archiver
+  template:
+    metadata:
+      labels:
+        app: storage-archiver
+        workload-type: deployment
+    spec:
+      containers:
+      - name: archiver
+        image: ${UTILITY_IMAGE}
+        command:
+        - sh
+        - -c
+        - |
+          mkdir -p /archive/logs
+          dd if=/dev/zero of=/archive/base.bin bs=1M count=16 2>/dev/null
+          i=1
+          while [ \$i -le 500 ]; do
+            : > "/archive/logs/log-\$i"
+            i=\$((i + 1))
+          done
+          sync
+          while true; do
+            dd if=/dev/zero of=/archive/append.bin bs=512k count=2 2>/dev/null
+            sync
+            dd if=/archive/append.bin of=/dev/null bs=512k 2>/dev/null
+            sleep 4
+          done
+        resources:
+          requests:
+            cpu: 20m
+            memory: 32Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+        volumeMounts:
+        - name: archive
+          mountPath: /archive
+      volumes:
+      - name: archive
+        persistentVolumeClaim:
+          claimName: archive-logs-pvc
+      terminationGracePeriodSeconds: 5
+"
+fi
+
+if [ "${INCLUDE_NETWORK}" = "true" ]; then
+    MANIFEST="${MANIFEST}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: net-echo-server
+  namespace: ${NAMESPACE}
+  labels:
+    app: net-echo-server
+    app.kubernetes.io/part-of: load-test
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: net-echo-server
+  template:
+    metadata:
+      labels:
+        app: net-echo-server
+        workload-type: deployment
+    spec:
+      containers:
+      - name: echo
+        image: ${UTILITY_IMAGE}
+        command:
+        - sh
+        - -c
+        - |
+          mkdir -p /www
+          dd if=/dev/zero of=/www/payload.bin bs=1k count=256 2>/dev/null
+          exec httpd -f -p 8080 -h /www
+        ports:
+        - containerPort: 8080
+          name: http
+        readinessProbe:
+          tcpSocket:
+            port: 8080
+          initialDelaySeconds: 2
+          periodSeconds: 3
+        resources:
+          requests:
+            cpu: 20m
+            memory: 24Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+      terminationGracePeriodSeconds: 5
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: net-traffic-gen
+  namespace: ${NAMESPACE}
+  labels:
+    app: net-traffic-gen
+    app.kubernetes.io/part-of: load-test
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: net-traffic-gen
+  template:
+    metadata:
+      labels:
+        app: net-traffic-gen
+        workload-type: deployment
+    spec:
+      containers:
+      - name: client
+        image: ${UTILITY_IMAGE}
+        command:
+        - sh
+        - -c
+        - |
+          while true; do
+            wget -qO /dev/null http://net-echo-svc/payload.bin || true
+            sleep 1
+          done
+        resources:
+          requests:
+            cpu: 20m
+            memory: 24Mi
+          limits:
+            cpu: 100m
+            memory: 64Mi
+      terminationGracePeriodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: net-echo-svc
+  namespace: ${NAMESPACE}
+  labels:
+    app: net-echo-server
+    app.kubernetes.io/part-of: load-test
+spec:
+  type: ClusterIP
+  selector:
+    app: net-echo-server
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-frontend-svc
+  namespace: ${NAMESPACE}
+  labels:
+    app: web-frontend
+    app.kubernetes.io/part-of: load-test
+spec:
+  type: NodePort
+  selector:
+    app: web-frontend
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-public-svc
+  namespace: ${NAMESPACE}
+  labels:
+    app: net-echo-server
+    app.kubernetes.io/part-of: load-test
+spec:
+  type: LoadBalancer
+  selector:
+    app: net-echo-server
+  ports:
+  - name: https
+    port: 443
+    targetPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: external-db-svc
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: load-test
+spec:
+  type: ExternalName
+  externalName: db.example.internal
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orphan-backend-svc
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: load-test
+spec:
+  type: ClusterIP
+  selector:
+    app: nonexistent-backend
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: load-test-web-ingress
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: load-test
+spec:
+  ingressClassName: nginx
+  tls:
+  - hosts:
+    - web.load-test.local
+    secretName: web-load-test-tls
+  rules:
+  - host: web.load-test.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: net-echo-svc
+            port:
+              number: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: load-test-api-ingress
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: load-test
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: api.load-test.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: net-echo-svc
+            port:
+              number: 80
+  - host: status.load-test.local
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: net-echo-svc
+            port:
+              number: 80
+"
+fi
+
 if [ "${INCLUDE_FAILED}" = "true" ]; then
     MANIFEST="${MANIFEST}
 ---
@@ -494,10 +895,29 @@ spec:
             cpu: 25m
             memory: 16Mi
 "
+    if [ "${INCLUDE_STORAGE}" = "true" ]; then
+        MANIFEST="${MANIFEST}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pending-fast-pvc
+  namespace: ${NAMESPACE}
+  labels:
+    app.kubernetes.io/part-of: load-test
+spec:
+  accessModes:
+  - ReadWriteOnce
+  storageClassName: nonexistent-fast-tier
+  resources:
+    requests:
+      storage: 512Mi
+"
+    fi
 fi
 
 echo "$MANIFEST" | kubectl apply -f -
-print_success "Applied workload manifests to namespace '${NAMESPACE}'"
+print_success "Applied workload, storage, and network manifests to namespace '${NAMESPACE}'"
 
 print_step "Waiting up to 90s for initial workload pods to run..."
 TIMEOUT=90
@@ -514,10 +934,17 @@ while [ $ELAPSED -lt $TIMEOUT ]; do
     ELAPSED=$((ELAPSED + 5))
 done
 
-print_header "Workloads Ready"
+print_header "Workloads, Storage & Network Ready"
 kubectl get deployments,statefulsets,daemonsets,jobs,cronjobs -n "${NAMESPACE}"
 echo ""
+kubectl get pvc,svc,ingress -n "${NAMESPACE}"
+echo ""
+kubectl get pv -l "app.kubernetes.io/part-of=load-test,load-test-namespace=${NAMESPACE}" 2>/dev/null || true
+echo ""
 echo "Commands:"
-echo "  Watch Workloads: ktop -n ${NAMESPACE} --page=workloads"
 echo "  Watch Overview:  ktop -n ${NAMESPACE}"
+echo "  Watch Workloads: ktop -n ${NAMESPACE} --page=workloads"
+echo "  Watch Storage:   ktop -n ${NAMESPACE} --page=storage"
+echo "  Watch Network:   ktop -n ${NAMESPACE} --page=network"
+echo "  Headless JSON:   ktop --noui | jq '{storage: .storage.summary, network: .network.summary}'"
 echo "  Cleanup:         ./hack/load-test/cleanup-load.sh"
