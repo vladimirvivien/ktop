@@ -29,7 +29,7 @@ ktop --metrics-source=prometheus \
      --prometheus-retention=2h
 ```
 
-Default settings: 15s scrape interval, 1h retention, 10,000 max samples, kubelet+cadvisor components.
+Default settings: 5s scrape interval, 1h retention, 10,000 max samples, kubelet+cadvisor components.
 
 ## Architecture
 
@@ -119,7 +119,7 @@ Metrics are filtered to exclude the `POD` pause container and aggregated per-pod
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--metrics-source` | `prometheus` | Source: `prometheus`, `metrics-server`, or `none` |
-| `--prometheus-scrape-interval` | `15s` | How often to scrape (min: 5s) |
+| `--prometheus-scrape-interval` | `5s` | How often to scrape (min: 5s) |
 | `--prometheus-retention` | `1h` | How long to keep metrics (min: 5m) |
 | `--prometheus-max-samples` | `10000` | Max samples per time series |
 | `--prometheus-components` | `kubelet,cadvisor` | Components to scrape |
@@ -179,13 +179,37 @@ kubectl auth can-i get --raw /metrics
    curl http://localhost:8001/api/v1/nodes/<node-name>/proxy/metrics
    ```
 
-### High memory usage
+### Tuning Memory Usage
 
-**Solutions**:
-1. Reduce retention: `--prometheus-retention=30m`
-2. Reduce samples: `--prometheus-max-samples=5000`
-3. Scrape fewer components: `--prometheus-components=kubelet`
-4. Increase interval: `--prometheus-scrape-interval=60s`
+In-memory storage scales with active nodes, active containers, and the retention window (detail sparklines query the trailing 5 minutes). On large clusters, high-churn environments (frequent rollouts, Jobs, or CronJobs), or memory-constrained jump hosts, tune the collector with CLI flags or `~/.ktop/config.yaml`:
+
+```bash
+# Recommended low-memory profile for large or high-churn clusters
+ktop --prometheus-scrape-interval=15s \
+     --prometheus-retention=10m \
+     --prometheus-max-samples=300
+```
+
+You can persist these defaults in `~/.ktop/config.yaml` (CLI flags always take precedence):
+
+```yaml
+metrics:
+  source: prometheus
+  scrape_interval: 15s
+  retention: 10m
+  max_samples: 300
+  ksm_mode: "off"
+```
+
+Additional levers for reducing memory footprint:
+
+1. **Shorten retention (`--prometheus-retention=10m`, min `5m`)**: Evicts time series from deleted pods and completed jobs sooner instead of keeping them for an hour.
+2. **Increase scrape interval (`--prometheus-scrape-interval=15s` or `30s`)**: Reduces API-server `nodes/proxy` traffic and scrape-time allocation pressure on multi-node clusters. cAdvisor updates on a 10–15s housekeeping cycle, so `15s` preserves responsiveness.
+3. **Cap per-series samples (`--prometheus-max-samples=300`, min `100`)**: Bounds the maximum samples retained per time series.
+4. **Disable optional enrichment (`--ksm=off`)**: Skips `kube-state-metrics` discovery and scraping when governance badges are not needed.
+5. **Scope to a namespace (`-n <namespace>`)**: Limits Kubernetes informer caches to a single namespace when cluster-wide pod visibility is unnecessary.
+6. **Use Metrics Server on small VMs (`--metrics-source=metrics-server`)**: Avoids kubelet/cAdvisor scraping when only CPU and memory usage are needed.
+7. **Set `GOMEMLIMIT` in constrained environments**: Running with `GOMEMLIMIT=256MiB ktop ...` instructs the Go garbage collector to collect more aggressively and return unused heap memory to the OS sooner.
 
 ## Limitations
 

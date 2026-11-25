@@ -349,47 +349,10 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, _ []string) error {
 		}
 	}
 
-	// Load configuration with defaults
-	cfg := config.DefaultConfig()
-
-	// Override with CLI flags
-	cfg.Source.Type = o.metricsSource
-
-	if c.Flags().Changed("prometheus-scrape-interval") {
-		interval, err := time.ParseDuration(o.prometheusScrapeInterval)
-		if err != nil {
-			slog.Error("invalid prometheus-scrape-interval", "value", o.prometheusScrapeInterval, "error", err)
-			return WrapExitError(ExitInvalidFlags, fmt.Errorf("invalid prometheus-scrape-interval: %w", err))
-		}
-		cfg.Prometheus.ScrapeInterval = interval
-	}
-
-	if c.Flags().Changed("prometheus-retention") {
-		retention, err := time.ParseDuration(o.prometheusRetention)
-		if err != nil {
-			slog.Error("invalid prometheus-retention", "value", o.prometheusRetention, "error", err)
-			return WrapExitError(ExitInvalidFlags, fmt.Errorf("invalid prometheus-retention: %w", err))
-		}
-		cfg.Prometheus.RetentionTime = retention
-	}
-
-	if c.Flags().Changed("prometheus-max-samples") {
-		cfg.Prometheus.MaxSamples = o.prometheusMaxSamples
-	}
-
-	if c.Flags().Changed("prometheus-components") {
-		components, err := config.ParseComponents(o.prometheusComponents)
-		if err != nil {
-			slog.Error("invalid prometheus-components", "value", o.prometheusComponents, "error", err)
-			return WrapExitError(ExitInvalidFlags, fmt.Errorf("invalid prometheus-components: %w", err))
-		}
-		cfg.Prometheus.Components = components
-	}
-
-	// Validate configuration
-	if err := cfg.Validate(); err != nil {
-		slog.Error("invalid configuration", "error", err)
-		return WrapExitError(ExitInvalidFlags, fmt.Errorf("invalid configuration: %w", err))
+	// Load and resolve configuration (defaults < ~/.ktop/config.yaml < CLI flags)
+	cfg, err := resolveConfig(c, o, appConfig)
+	if err != nil {
+		return WrapExitError(ExitInvalidFlags, err)
 	}
 
 	normalizedTheme, err := config.NormalizeTheme(o.theme)
@@ -589,6 +552,49 @@ func (o *ktopCmdOptions) runKtop(c *cobra.Command, _ []string) error {
 	}
 
 	return nil
+}
+
+func resolveConfig(c *cobra.Command, o *ktopCmdOptions, appConfig *config.AppConfig) (*config.Config, error) {
+	cfg := config.DefaultConfig()
+	cfg.Source.Type = o.metricsSource
+
+	if c.Flags().Changed("prometheus-scrape-interval") || (appConfig != nil && appConfig.Metrics.ScrapeInterval != "") {
+		interval, err := time.ParseDuration(o.prometheusScrapeInterval)
+		if err != nil {
+			slog.Error("invalid prometheus-scrape-interval", "value", o.prometheusScrapeInterval, "error", err)
+			return nil, fmt.Errorf("invalid prometheus-scrape-interval: %w", err)
+		}
+		cfg.Prometheus.ScrapeInterval = interval
+	}
+
+	if c.Flags().Changed("prometheus-retention") || (appConfig != nil && appConfig.Metrics.Retention != "") {
+		retention, err := time.ParseDuration(o.prometheusRetention)
+		if err != nil {
+			slog.Error("invalid prometheus-retention", "value", o.prometheusRetention, "error", err)
+			return nil, fmt.Errorf("invalid prometheus-retention: %w", err)
+		}
+		cfg.Prometheus.RetentionTime = retention
+	}
+
+	if c.Flags().Changed("prometheus-max-samples") || (appConfig != nil && appConfig.Metrics.MaxSamples > 0) {
+		cfg.Prometheus.MaxSamples = o.prometheusMaxSamples
+	}
+
+	if c.Flags().Changed("prometheus-components") || (appConfig != nil && len(appConfig.Metrics.Components) > 0) {
+		components, err := config.ParseComponents(o.prometheusComponents)
+		if err != nil {
+			slog.Error("invalid prometheus-components", "value", o.prometheusComponents, "error", err)
+			return nil, fmt.Errorf("invalid prometheus-components: %w", err)
+		}
+		cfg.Prometheus.Components = components
+	}
+
+	if err := cfg.Validate(); err != nil {
+		slog.Error("invalid configuration", "error", err)
+		return nil, fmt.Errorf("invalid configuration: %w", err)
+	}
+
+	return cfg, nil
 }
 
 func parseWarmupTimeout(flags *genericclioptions.ConfigFlags) (time.Duration, error) {

@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vladimirvivien/ktop/collector"
 	"github.com/vladimirvivien/ktop/config"
 	"github.com/vladimirvivien/ktop/internal/userdir"
+	"github.com/vladimirvivien/ktop/prom"
 )
 
 func TestNewKtopCmd_Flags(t *testing.T) {
@@ -193,4 +195,107 @@ func TestExitCodeMapping(t *testing.T) {
 	if got := ExitCode(wrapped); got != ExitMetricsUnavailable {
 		t.Errorf("ExitCode(nested WrapExitError) = %d, want %d", got, ExitMetricsUnavailable)
 	}
+}
+
+func TestResolveConfig_AppliesAppConfigAndCLIOverrides(t *testing.T) {
+	t.Run("applies prometheus settings from config file", func(t *testing.T) {
+		c := NewKtopCmd()
+		if err := c.ParseFlags([]string{}); err != nil {
+			t.Fatalf("ParseFlags: %v", err)
+		}
+		appCfg := &config.AppConfig{
+			Metrics: config.MetricsConfig{
+				Source:         "prometheus",
+				ScrapeInterval: "15s",
+				Retention:      "10m",
+				MaxSamples:     300,
+				Components:     []string{"kubelet"},
+			},
+		}
+		opts := &ktopCmdOptions{
+			metricsSource:            appCfg.Metrics.Source,
+			prometheusScrapeInterval: appCfg.Metrics.ScrapeInterval,
+			prometheusRetention:      appCfg.Metrics.Retention,
+			prometheusMaxSamples:     appCfg.Metrics.MaxSamples,
+			prometheusComponents:     appCfg.Metrics.Components,
+		}
+
+		cfg, err := resolveConfig(c, opts, appCfg)
+		if err != nil {
+			t.Fatalf("resolveConfig failed: %v", err)
+		}
+		if cfg.Prometheus.ScrapeInterval != 15*time.Second {
+			t.Errorf("ScrapeInterval = %v, want 15s", cfg.Prometheus.ScrapeInterval)
+		}
+		if cfg.Prometheus.RetentionTime != 10*time.Minute {
+			t.Errorf("RetentionTime = %v, want 10m", cfg.Prometheus.RetentionTime)
+		}
+		if cfg.Prometheus.MaxSamples != 300 {
+			t.Errorf("MaxSamples = %d, want 300", cfg.Prometheus.MaxSamples)
+		}
+		if len(cfg.Prometheus.Components) != 1 || cfg.Prometheus.Components[0] != prom.ComponentKubelet {
+			t.Errorf("Components = %v, want [kubelet]", cfg.Prometheus.Components)
+		}
+	})
+
+	t.Run("cli flags override config file settings", func(t *testing.T) {
+		c := NewKtopCmd()
+		if err := c.ParseFlags([]string{
+			"--prometheus-scrape-interval=30s",
+			"--prometheus-retention=20m",
+			"--prometheus-max-samples=500",
+		}); err != nil {
+			t.Fatalf("ParseFlags: %v", err)
+		}
+		appCfg := &config.AppConfig{
+			Metrics: config.MetricsConfig{
+				Source:         "prometheus",
+				ScrapeInterval: "15s",
+				Retention:      "10m",
+				MaxSamples:     300,
+				Components:     []string{"kubelet", "cadvisor"},
+			},
+		}
+		opts := &ktopCmdOptions{
+			metricsSource:            "prometheus",
+			prometheusScrapeInterval: "30s",
+			prometheusRetention:      "20m",
+			prometheusMaxSamples:     500,
+			prometheusComponents:     appCfg.Metrics.Components,
+		}
+
+		cfg, err := resolveConfig(c, opts, appCfg)
+		if err != nil {
+			t.Fatalf("resolveConfig failed: %v", err)
+		}
+		if cfg.Prometheus.ScrapeInterval != 30*time.Second {
+			t.Errorf("ScrapeInterval = %v, want 30s", cfg.Prometheus.ScrapeInterval)
+		}
+		if cfg.Prometheus.RetentionTime != 20*time.Minute {
+			t.Errorf("RetentionTime = %v, want 20m", cfg.Prometheus.RetentionTime)
+		}
+		if cfg.Prometheus.MaxSamples != 500 {
+			t.Errorf("MaxSamples = %d, want 500", cfg.Prometheus.MaxSamples)
+		}
+	})
+
+	t.Run("invalid prometheus settings in config file fail fast", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		t.Setenv(userdir.EnvVar, tmpDir)
+		cfgPath := filepath.Join(tmpDir, config.ConfigFileName)
+		content := "metrics:\n  source: prometheus\n  max_samples: 50\n"
+		if err := os.WriteFile(cfgPath, []byte(content), 0o600); err != nil {
+			t.Fatalf("write config file: %v", err)
+		}
+
+		c := NewKtopCmd()
+		c.SetArgs([]string{})
+		err := c.Execute()
+		if err == nil || !strings.Contains(err.Error(), "prometheus-max-samples must be >= 100") {
+			t.Fatalf("expected invalid max_samples error from config file, got: %v", err)
+		}
+		if got := ExitCode(err); got != ExitInvalidFlags {
+			t.Fatalf("ExitCode(%v) = %d, want %d", err, got, ExitInvalidFlags)
+		}
+	})
 }
