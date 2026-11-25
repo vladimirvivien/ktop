@@ -1183,6 +1183,185 @@ func TestPromSource_NodeCPU_SingleSampleHistoryAndPerCoreFallback(t *testing.T) 
 		t.Fatalf("GetNodeHistory cgroupsv1 failed: %v", err)
 	}
 	if len(histV1.DataPoints) != 1 || math.Abs(histV1.DataPoints[0].Value-250.0) > 0.1 {
-		t.Errorf("cgroupsv1 GetNodeHistory DataPoints = %+v, want [250.0m]", histV1.DataPoints)
+		t.Errorf("cgroups v1 GetNodeHistory DataPoints = %+v, want [250.0m]", histV1.DataPoints)
+	}
+}
+
+func TestPromSource_VolumeStatsAndNetworkErrorRates(t *testing.T) {
+	store := prom.NewInMemoryStore(prom.DefaultScrapeConfig())
+	now := time.Now()
+	t0 := now.Add(-40 * time.Second).UnixMilli()
+	t1 := now.UnixMilli()
+
+	sm := &prom.ScrapedMetrics{
+		Component: prom.ComponentKubelet,
+		Families: map[string]*prom.MetricFamily{
+			"kubelet_volume_stats_capacity_bytes": {
+				Name: "kubelet_volume_stats_capacity_bytes",
+				Type: dto.MetricType_GAUGE,
+				TimeSeries: []*prom.TimeSeries{
+					makePromSeries(
+						labels.Labels{
+							{Name: "__name__", Value: "kubelet_volume_stats_capacity_bytes"},
+							{Name: "namespace", Value: "prod"},
+							{Name: "persistentvolumeclaim", Value: "db-data"},
+						},
+						prom.MetricSample{Timestamp: t1, Value: 1000},
+					),
+				},
+			},
+			"kubelet_volume_stats_used_bytes": {
+				Name: "kubelet_volume_stats_used_bytes",
+				Type: dto.MetricType_GAUGE,
+				TimeSeries: []*prom.TimeSeries{
+					makePromSeries(
+						labels.Labels{
+							{Name: "__name__", Value: "kubelet_volume_stats_used_bytes"},
+							{Name: "namespace", Value: "prod"},
+							{Name: "persistentvolumeclaim", Value: "db-data"},
+						},
+						prom.MetricSample{Timestamp: t1, Value: 850},
+					),
+				},
+			},
+			"kubelet_volume_stats_available_bytes": {
+				Name: "kubelet_volume_stats_available_bytes",
+				Type: dto.MetricType_GAUGE,
+				TimeSeries: []*prom.TimeSeries{
+					makePromSeries(
+						labels.Labels{
+							{Name: "__name__", Value: "kubelet_volume_stats_available_bytes"},
+							{Name: "namespace", Value: "prod"},
+							{Name: "persistentvolumeclaim", Value: "db-data"},
+						},
+						prom.MetricSample{Timestamp: t1, Value: 150},
+					),
+				},
+			},
+			"kubelet_volume_stats_inodes": {
+				Name: "kubelet_volume_stats_inodes",
+				Type: dto.MetricType_GAUGE,
+				TimeSeries: []*prom.TimeSeries{
+					makePromSeries(
+						labels.Labels{
+							{Name: "__name__", Value: "kubelet_volume_stats_inodes"},
+							{Name: "namespace", Value: "prod"},
+							{Name: "persistentvolumeclaim", Value: "db-data"},
+						},
+						prom.MetricSample{Timestamp: t1, Value: 10000},
+					),
+				},
+			},
+			"kubelet_volume_stats_inodes_used": {
+				Name: "kubelet_volume_stats_inodes_used",
+				Type: dto.MetricType_GAUGE,
+				TimeSeries: []*prom.TimeSeries{
+					makePromSeries(
+						labels.Labels{
+							{Name: "__name__", Value: "kubelet_volume_stats_inodes_used"},
+							{Name: "namespace", Value: "prod"},
+							{Name: "persistentvolumeclaim", Value: "db-data"},
+						},
+						prom.MetricSample{Timestamp: t1, Value: 2500},
+					),
+				},
+			},
+		},
+	}
+	if err := store.AddMetrics(sm); err != nil {
+		t.Fatalf("AddMetrics volume stats failed: %v", err)
+	}
+
+	netSM := &prom.ScrapedMetrics{
+		Component: prom.ComponentCAdvisor,
+		Families: map[string]*prom.MetricFamily{
+			"container_network_receive_packets_dropped_total": {
+				Name: "container_network_receive_packets_dropped_total",
+				Type: dto.MetricType_COUNTER,
+				TimeSeries: []*prom.TimeSeries{
+					makePromSeries(
+						labels.Labels{
+							{Name: "__name__", Value: "container_network_receive_packets_dropped_total"},
+							{Name: "id", Value: "/"},
+							{Name: "interface", Value: "eth0"},
+							{Name: "node", Value: "node-1"},
+						},
+						prom.MetricSample{Timestamp: t0, UpstreamTimestamp: 1000, Value: 10},
+						prom.MetricSample{Timestamp: t1, UpstreamTimestamp: 41000, Value: 50},
+					),
+					makePromSeries(
+						labels.Labels{
+							{Name: "__name__", Value: "container_network_receive_packets_dropped_total"},
+							{Name: "id", Value: "/kubepods/p1/pause"},
+							{Name: "namespace", Value: "prod"},
+							{Name: "pod", Value: "api-0"},
+							{Name: "container", Value: "POD"},
+						},
+						prom.MetricSample{Timestamp: t0, UpstreamTimestamp: 1000, Value: 2},
+						prom.MetricSample{Timestamp: t1, UpstreamTimestamp: 41000, Value: 22},
+					),
+				},
+			},
+			"container_network_transmit_errors_total": {
+				Name: "container_network_transmit_errors_total",
+				Type: dto.MetricType_COUNTER,
+				TimeSeries: []*prom.TimeSeries{
+					makePromSeries(
+						labels.Labels{
+							{Name: "__name__", Value: "container_network_transmit_errors_total"},
+							{Name: "id", Value: "/"},
+							{Name: "interface", Value: "eth0"},
+							{Name: "node", Value: "node-1"},
+						},
+						prom.MetricSample{Timestamp: t0, UpstreamTimestamp: 1000, Value: 4},
+						prom.MetricSample{Timestamp: t1, UpstreamTimestamp: 41000, Value: 24},
+					),
+				},
+			},
+		},
+	}
+	if err := store.AddMetrics(netSM); err != nil {
+		t.Fatalf("AddMetrics net errors failed: %v", err)
+	}
+
+	src, err := NewPromMetricsSource(&rest.Config{}, DefaultPromConfig())
+	if err != nil {
+		t.Fatalf("NewPromMetricsSource: %v", err)
+	}
+	src.store = store
+	src.setHealthyForTesting(true)
+
+	volStats, err := src.GetAllVolumeStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetAllVolumeStats: %v", err)
+	}
+	vs, ok := volStats["prod/db-data"]
+	if !ok {
+		t.Fatalf("expected prod/db-data stats, got %+v", volStats)
+	}
+	if vs.CapacityBytes != 1000 || vs.UsedBytes != 850 || math.Abs(vs.UsedPct-85.0) > 0.01 {
+		t.Errorf("unexpected byte stats: %+v", vs)
+	}
+	if !vs.HasInodes || vs.InodesTotal != 10000 || vs.InodesUsed != 2500 || math.Abs(vs.InodesUsedPct-25.0) > 0.01 {
+		t.Errorf("unexpected inode stats: %+v", vs)
+	}
+
+	clusterRates, perNode, err := src.GetClusterNetworkErrorRates(context.Background())
+	if err != nil {
+		t.Fatalf("GetClusterNetworkErrorRates: %v", err)
+	}
+	if math.Abs(clusterRates.RxDroppedPerSec-1.0) > 0.01 || math.Abs(clusterRates.TxErrorsPerSec-0.5) > 0.01 {
+		t.Errorf("unexpected cluster net error rates: %+v", clusterRates)
+	}
+	if nr := perNode["node-1"]; math.Abs(nr.RxDroppedPerSec-1.0) > 0.01 || math.Abs(nr.TxErrorsPerSec-0.5) > 0.01 {
+		t.Errorf("unexpected node-1 net error rates: %+v", nr)
+	}
+
+	podRates, err := src.GetPodNetworkErrorRates(context.Background(), "prod", "api-0")
+	if err != nil {
+		t.Fatalf("GetPodNetworkErrorRates: %v", err)
+	}
+	if math.Abs(podRates.RxDroppedPerSec-0.5) > 0.01 {
+		t.Errorf("unexpected pod rx drop rate: %+v", podRates)
 	}
 }

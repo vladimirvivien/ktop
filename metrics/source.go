@@ -273,3 +273,39 @@ type HistoryQuery struct {
 	// MaxPoints limits the number of data points returned (0 = no limit)
 	MaxPoints int
 }
+
+// VolumeStats holds capacity, usage, and inode counts for a mounted PVC.
+type VolumeStats struct {
+	Namespace      string
+	PVCName        string
+	CapacityBytes  int64
+	UsedBytes      int64
+	AvailableBytes int64
+	UsedPct        float64
+	InodesTotal    int64
+	InodesUsed     int64
+	InodesUsedPct  float64
+	HasBytes       bool
+	HasInodes      bool
+}
+
+// NetworkErrorRates holds per-second packet drop and error rates.
+type NetworkErrorRates struct {
+	RxDroppedPerSec float64
+	TxDroppedPerSec float64
+	RxErrorsPerSec  float64
+	TxErrorsPerSec  float64
+}
+
+// VolumeStatsProvider is an optional extension interface implemented by metrics
+// sources that collect kubelet PersistentVolumeClaim capacity and inode stats.
+type VolumeStatsProvider interface {
+	GetAllVolumeStats(ctx context.Context) (map[string]VolumeStats, error)
+}
+
+// NetworkErrorsProvider is an optional extension interface implemented by metrics
+// sources that collect cAdvisor packet drop and network error counters.
+type NetworkErrorsProvider interface {
+	GetClusterNetworkErrorRates(ctx context.Context) (NetworkErrorRates, map[string]NetworkErrorRates, error)
+	GetPodNetworkErrorRates(ctx context.Context, namespace, podName string) (NetworkErrorRates, error)
+}

@@ -50,6 +50,19 @@ var DefaultMetricAllowlist = map[string]bool{
 	"container_pressure_memory_stalled_seconds_total": true,
 	"container_pressure_io_waiting_seconds_total":     true,
 	"container_pressure_io_stalled_seconds_total":     true,
+
+	// Kubelet volume statistics (matched to PVCs by namespace + persistentvolumeclaim).
+	"kubelet_volume_stats_capacity_bytes":  true,
+	"kubelet_volume_stats_used_bytes":      true,
+	"kubelet_volume_stats_available_bytes": true,
+	"kubelet_volume_stats_inodes":          true,
+	"kubelet_volume_stats_inodes_used":     true,
+
+	// cAdvisor network drop and error counters (node root and pod sandboxes).
+	"container_network_receive_packets_dropped_total":  true,
+	"container_network_transmit_packets_dropped_total": true,
+	"container_network_receive_errors_total":           true,
+	"container_network_transmit_errors_total":          true,
 }
 
 // MetricSample represents a single metric data point

@@ -612,6 +612,11 @@ func TestShouldKeepCAdvisorSeries(t *testing.T) {
 		{"pod workload cfs kept", "container_cpu_cfs_throttled_periods_total", []string{"id", "/kubepods/p1/c1", "namespace", "default", "pod", "web-1", "container", "app"}, true},
 		{"node root cfs dropped", "container_cpu_cfs_throttled_periods_total", []string{"id", "/"}, false},
 		{"pod fs reads kept", "container_fs_reads_bytes_total", []string{"id", "/kubepods/p1/c1", "namespace", "default", "pod", "web-1", "container", "app"}, true},
+		{"node root net drops kept", "container_network_receive_packets_dropped_total", []string{"id", "/", "interface", "eth0"}, true},
+		{"pod sandbox net drops kept", "container_network_transmit_packets_dropped_total", []string{"id", "/kubepods/p1/pause", "namespace", "default", "pod", "web-1", "container", "POD"}, true},
+		{"pod net errors kept", "container_network_receive_errors_total", []string{"id", "/kubepods/p1", "namespace", "default", "pod", "web-1", "container", ""}, true},
+		{"systemd cgroup net errors dropped", "container_network_transmit_errors_total", []string{"id", "/system.slice/kubelet.service"}, false},
+		{"kubelet volume stats kept", "kubelet_volume_stats_used_bytes", []string{"namespace", "default", "persistentvolumeclaim", "data"}, true},
 		{"container_count always kept", "container_count", []string{"node", "n1"}, true},
 	}
 

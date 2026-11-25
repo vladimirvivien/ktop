@@ -39,6 +39,22 @@ type PodDetailData struct {
 	// kube-state-metrics enrichments for this pod (when KSM is available)
 	DisruptionReason string
 	ResourceClaims   []string
+
+	// Mounted PVC volume stats and network error rates (Prometheus only, when available)
+	VolumeUsages         []PodVolumeUsage
+	NetworkRxDroppedRate float64
+	NetworkTxDroppedRate float64
+	NetworkRxErrorRate   float64
+	NetworkTxErrorRate   float64
+}
+
+// PodVolumeUsage captures live fill metrics for a PVC mounted by the pod.
+type PodVolumeUsage struct {
+	PVCName       string
+	UsedBytes     int64
+	CapacityBytes int64
+	FillPct       float64
+	HasUsage      bool
 }
 
 // PodProbeInfo captures cumulative kubelet probe results for one container probe.

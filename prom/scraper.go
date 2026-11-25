@@ -545,6 +545,11 @@ func shouldKeepCAdvisorSeries(metricName string, metric *dto.Metric) bool {
 	switch metricName {
 	case "container_network_receive_bytes_total", "container_network_transmit_bytes_total":
 		return isNodeRoot
+	case "container_network_receive_packets_dropped_total",
+		"container_network_transmit_packets_dropped_total",
+		"container_network_receive_errors_total",
+		"container_network_transmit_errors_total":
+		return isNodeRoot || isPod
 	case "container_cpu_cfs_throttled_seconds_total",
 		"container_cpu_cfs_throttled_periods_total",
 		"container_cpu_cfs_periods_total":

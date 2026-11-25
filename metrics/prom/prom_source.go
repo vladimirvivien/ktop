@@ -1081,6 +1081,211 @@ func (p *PromMetricsSource) GetAllPodMetrics(ctx context.Context) ([]*metrics.Po
 	return allPodMetrics, nil
 }
 
+// GetAllVolumeStats returns capacity, used, available, and inode statistics per
+// "namespace/pvcName" from kubelet_volume_stats_* metrics.
+func (p *PromMetricsSource) GetAllVolumeStats(ctx context.Context) (map[string]metrics.VolumeStats, error) {
+	if ctx != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+	p.mu.RLock()
+	if !p.isHealthyLocked() {
+		p.mu.RUnlock()
+		return nil, fmt.Errorf("prometheus source is not healthy")
+	}
+	if p.store == nil {
+		p.mu.RUnlock()
+		return nil, fmt.Errorf("metrics store not initialized")
+	}
+	store := p.store
+	p.mu.RUnlock()
+
+	now := time.Now()
+	since := now.Add(-5 * time.Minute)
+	out := make(map[string]metrics.VolumeStats)
+
+	getOrCreate := func(ns, pvc string) *metrics.VolumeStats {
+		key := ns + "/" + pvc
+		st, ok := out[key]
+		if !ok {
+			st = metrics.VolumeStats{Namespace: ns, PVCName: pvc}
+		}
+		return &st
+	}
+	commit := func(st *metrics.VolumeStats) {
+		out[st.Namespace+"/"+st.PVCName] = *st
+	}
+
+	visitLatest := func(metricName string, assign func(st *metrics.VolumeStats, val float64)) {
+		if lq, ok := store.(latestPerSeriesQuerier); ok {
+			series, err := lq.QueryLatestPerSeries(metricName, nil, since)
+			if err != nil {
+				return
+			}
+			for seriesKey, sample := range series {
+				ns, ok1 := seriesLabelValue(seriesKey, "namespace")
+				pvc, ok2 := seriesLabelValue(seriesKey, "persistentvolumeclaim")
+				if !ok1 || !ok2 || ns == "" || pvc == "" {
+					continue
+				}
+				st := getOrCreate(ns, pvc)
+				assign(st, sample.Value)
+				commit(st)
+			}
+			return
+		}
+		seriesMap, err := store.QueryRangePerSeries(metricName, nil, since, now)
+		if err != nil {
+			return
+		}
+		for seriesKey, samples := range seriesMap {
+			if len(samples) == 0 {
+				continue
+			}
+			ns, ok1 := seriesLabelValue(seriesKey, "namespace")
+			pvc, ok2 := seriesLabelValue(seriesKey, "persistentvolumeclaim")
+			if !ok1 || !ok2 || ns == "" || pvc == "" {
+				continue
+			}
+			st := getOrCreate(ns, pvc)
+			assign(st, samples[len(samples)-1].Value)
+			commit(st)
+		}
+	}
+
+	visitLatest("kubelet_volume_stats_capacity_bytes", func(st *metrics.VolumeStats, val float64) {
+		st.CapacityBytes = int64(val)
+		st.HasBytes = true
+	})
+	visitLatest("kubelet_volume_stats_used_bytes", func(st *metrics.VolumeStats, val float64) {
+		st.UsedBytes = int64(val)
+		st.HasBytes = true
+	})
+	visitLatest("kubelet_volume_stats_available_bytes", func(st *metrics.VolumeStats, val float64) {
+		st.AvailableBytes = int64(val)
+		st.HasBytes = true
+	})
+	visitLatest("kubelet_volume_stats_inodes", func(st *metrics.VolumeStats, val float64) {
+		st.InodesTotal = int64(val)
+		st.HasInodes = true
+	})
+	visitLatest("kubelet_volume_stats_inodes_used", func(st *metrics.VolumeStats, val float64) {
+		st.InodesUsed = int64(val)
+		st.HasInodes = true
+	})
+
+	for k, st := range out {
+		if st.CapacityBytes > 0 {
+			st.UsedPct = clampPct((float64(st.UsedBytes) / float64(st.CapacityBytes)) * 100)
+		}
+		if st.InodesTotal > 0 {
+			st.InodesUsedPct = clampPct((float64(st.InodesUsed) / float64(st.InodesTotal)) * 100)
+		}
+		out[k] = st
+	}
+
+	return out, nil
+}
+
+// GetClusterNetworkErrorRates returns cluster-total and per-node packet drop
+// and error rates across node root cgroups (id="/").
+func (p *PromMetricsSource) GetClusterNetworkErrorRates(ctx context.Context) (metrics.NetworkErrorRates, map[string]metrics.NetworkErrorRates, error) {
+	if ctx != nil && ctx.Err() != nil {
+		return metrics.NetworkErrorRates{}, nil, ctx.Err()
+	}
+	p.mu.RLock()
+	if !p.isHealthyLocked() {
+		p.mu.RUnlock()
+		return metrics.NetworkErrorRates{}, nil, fmt.Errorf("prometheus source is not healthy")
+	}
+	if p.store == nil {
+		p.mu.RUnlock()
+		return metrics.NetworkErrorRates{}, nil, fmt.Errorf("metrics store not initialized")
+	}
+	store := p.store
+	p.mu.RUnlock()
+
+	const rateWindow = 40 * time.Second
+	matchers := map[string]string{"id": "/"}
+	var total metrics.NetworkErrorRates
+	perNode := make(map[string]metrics.NetworkErrorRates)
+
+	collectMetric := func(metricName string, assign func(r *metrics.NetworkErrorRates, rate float64)) {
+		seriesMap, err := querySeriesForRate(store, metricName, matchers, rateWindow, nil)
+		if err != nil {
+			return
+		}
+		for seriesKey, samples := range seriesMap {
+			if len(samples) < 2 {
+				continue
+			}
+			deltaVal, deltaSec := counterDelta(samples)
+			if deltaSec <= 0 {
+				continue
+			}
+			rate := deltaVal / deltaSec
+			assign(&total, rate)
+			if nodeName, ok := seriesLabelValue(seriesKey, "node"); ok && nodeName != "" {
+				nr := perNode[nodeName]
+				assign(&nr, rate)
+				perNode[nodeName] = nr
+			}
+		}
+	}
+
+	collectMetric("container_network_receive_packets_dropped_total", func(r *metrics.NetworkErrorRates, v float64) {
+		r.RxDroppedPerSec += v
+	})
+	collectMetric("container_network_transmit_packets_dropped_total", func(r *metrics.NetworkErrorRates, v float64) {
+		r.TxDroppedPerSec += v
+	})
+	collectMetric("container_network_receive_errors_total", func(r *metrics.NetworkErrorRates, v float64) {
+		r.RxErrorsPerSec += v
+	})
+	collectMetric("container_network_transmit_errors_total", func(r *metrics.NetworkErrorRates, v float64) {
+		r.TxErrorsPerSec += v
+	})
+
+	return total, perNode, nil
+}
+
+// GetPodNetworkErrorRates returns packet drop and error rates for a specific pod.
+func (p *PromMetricsSource) GetPodNetworkErrorRates(ctx context.Context, namespace, podName string) (metrics.NetworkErrorRates, error) {
+	if ctx != nil && ctx.Err() != nil {
+		return metrics.NetworkErrorRates{}, ctx.Err()
+	}
+	p.mu.RLock()
+	if !p.isHealthyLocked() {
+		p.mu.RUnlock()
+		return metrics.NetworkErrorRates{}, fmt.Errorf("prometheus source is not healthy")
+	}
+	if p.store == nil {
+		p.mu.RUnlock()
+		return metrics.NetworkErrorRates{}, fmt.Errorf("metrics store not initialized")
+	}
+	p.mu.RUnlock()
+
+	const rateWindow = 40 * time.Second
+	matchers := map[string]string{
+		"namespace": namespace,
+		"pod":       podName,
+	}
+
+	var out metrics.NetworkErrorRates
+	if rate, err := p.calculateCPURate("container_network_receive_packets_dropped_total", matchers, rateWindow); err == nil {
+		out.RxDroppedPerSec = rate
+	}
+	if rate, err := p.calculateCPURate("container_network_transmit_packets_dropped_total", matchers, rateWindow); err == nil {
+		out.TxDroppedPerSec = rate
+	}
+	if rate, err := p.calculateCPURate("container_network_receive_errors_total", matchers, rateWindow); err == nil {
+		out.RxErrorsPerSec = rate
+	}
+	if rate, err := p.calculateCPURate("container_network_transmit_errors_total", matchers, rateWindow); err == nil {
+		out.TxErrorsPerSec = rate
+	}
+	return out, nil
+}
+
 // GetAvailableMetrics returns the list of metrics available from Prometheus
 func (p *PromMetricsSource) GetAvailableMetrics() []string {
 	p.mu.RLock()

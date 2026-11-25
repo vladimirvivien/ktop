@@ -13,11 +13,15 @@ import (
 	"github.com/vladimirvivien/ktop/metrics/ksm"
 	"github.com/vladimirvivien/ktop/metrics/sli"
 	"github.com/vladimirvivien/ktop/views/model"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	appsV1Informers "k8s.io/client-go/informers/apps/v1"
 	batchV1Informers "k8s.io/client-go/informers/batch/v1"
 	coreV1Informers "k8s.io/client-go/informers/core/v1"
+	discoveryV1Informers "k8s.io/client-go/informers/discovery/v1"
+	networkingV1Informers "k8s.io/client-go/informers/networking/v1"
+	storageV1Informers "k8s.io/client-go/informers/storage/v1"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -26,6 +30,8 @@ type RefreshPodsFunc func(ctx context.Context, items []model.PodModel) error
 type RefreshSummaryFunc func(ctx context.Context, items model.ClusterSummary) error
 type RefreshWorkloadsFunc func(ctx context.Context, snap model.WorkloadsSnapshot) error
 type RefreshEventsFunc func(ctx context.Context, snap model.EventsSnapshot) error
+type RefreshStorageFunc func(ctx context.Context, snap model.StorageSnapshot) error
+type RefreshNetworkFunc func(ctx context.Context, snap model.NetworkSnapshot) error
 
 type Controller struct {
 	client        *Client
@@ -33,12 +39,16 @@ type Controller struct {
 	ksmCollector  *ksm.Collector
 	sliCollector  *sli.Collector
 
-	namespaceInformer coreV1Informers.NamespaceInformer
-	nodeInformer      coreV1Informers.NodeInformer
-	podInformer       coreV1Informers.PodInformer
-	pvInformer        coreV1Informers.PersistentVolumeInformer
-	pvcInformer       coreV1Informers.PersistentVolumeClaimInformer
-	eventInformer     coreV1Informers.EventInformer
+	namespaceInformer     coreV1Informers.NamespaceInformer
+	nodeInformer          coreV1Informers.NodeInformer
+	podInformer           coreV1Informers.PodInformer
+	pvInformer            coreV1Informers.PersistentVolumeInformer
+	pvcInformer           coreV1Informers.PersistentVolumeClaimInformer
+	eventInformer         coreV1Informers.EventInformer
+	serviceInformer       coreV1Informers.ServiceInformer
+	storageClassInformer  storageV1Informers.StorageClassInformer
+	endpointSliceInformer discoveryV1Informers.EndpointSliceInformer
+	ingressInformer       networkingV1Informers.IngressInformer
 
 	jobInformer     batchV1Informers.JobInformer
 	cronJobInformer batchV1Informers.CronJobInformer
@@ -55,6 +65,10 @@ type Controller struct {
 	workloadsNotifyCh    chan struct{}
 	eventsRefreshFunc    RefreshEventsFunc
 	eventsNotifyCh       chan struct{}
+	storageRefreshFunc   RefreshStorageFunc
+	storageNotifyCh      chan struct{}
+	networkRefreshFunc   RefreshNetworkFunc
+	networkNotifyCh      chan struct{}
 
 	// API health tracking
 	healthTracker *health.APIHealthTracker
@@ -64,6 +78,8 @@ type Controller struct {
 	startCtx         context.Context
 	workloadsStarted bool
 	eventsStarted    bool
+	storageStarted   bool
+	networkStarted   bool
 }
 
 func newController(client *Client) *Controller {
@@ -71,6 +87,8 @@ func newController(client *Client) *Controller {
 		client:            client,
 		workloadsNotifyCh: make(chan struct{}, 1),
 		eventsNotifyCh:    make(chan struct{}, 1),
+		storageNotifyCh:   make(chan struct{}, 1),
+		networkNotifyCh:   make(chan struct{}, 1),
 	}
 	return ctrl
 }
@@ -117,6 +135,40 @@ func (c *Controller) SetEventsRefreshFunc(fn RefreshEventsFunc) *Controller {
 
 	if shouldStart {
 		c.setupEventsHandler(ctx, fn)
+	}
+	return c
+}
+
+// SetStorageRefreshFunc registers the callback invoked when storage informers or metrics refresh.
+func (c *Controller) SetStorageRefreshFunc(fn RefreshStorageFunc) *Controller {
+	c.startMu.Lock()
+	c.storageRefreshFunc = fn
+	shouldStart := c.started && !c.storageStarted && fn != nil && c.startCtx != nil
+	if shouldStart {
+		c.storageStarted = true
+	}
+	ctx := c.startCtx
+	c.startMu.Unlock()
+
+	if shouldStart {
+		c.setupStorageHandler(ctx, fn)
+	}
+	return c
+}
+
+// SetNetworkRefreshFunc registers the callback invoked when network informers or metrics refresh.
+func (c *Controller) SetNetworkRefreshFunc(fn RefreshNetworkFunc) *Controller {
+	c.startMu.Lock()
+	c.networkRefreshFunc = fn
+	shouldStart := c.started && !c.networkStarted && fn != nil && c.startCtx != nil
+	if shouldStart {
+		c.networkStarted = true
+	}
+	ctx := c.startCtx
+	c.startMu.Unlock()
+
+	if shouldStart {
+		c.setupNetworkHandler(ctx, fn)
 	}
 	return c
 }
@@ -187,7 +239,25 @@ func (c *Controller) GetClient() *Client {
 	return c.client
 }
 
-func (c *Controller) initInformers(resync time.Duration) (informers.SharedInformerFactory, []cache.InformerSynced, []cache.InformerSynced) {
+func canListResource(ctx context.Context, resource string, listFn func(context.Context) error) bool {
+	if listFn == nil {
+		return true
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 1500*time.Millisecond)
+	defer cancel()
+	err := listFn(probeCtx)
+	if err == nil {
+		return true
+	}
+	if apierrors.IsForbidden(err) || apierrors.IsNotFound(err) {
+		slog.Debug("optional informer disabled due to cluster capability or RBAC", "resource", resource, "error", err)
+		return false
+	}
+	slog.Debug("optional informer probe failed; registering informer", "resource", resource, "error", err)
+	return true
+}
+
+func (c *Controller) initInformers(ctx context.Context, resync time.Duration) (informers.SharedInformerFactory, []cache.InformerSynced, []cache.InformerSynced) {
 	var factory informers.SharedInformerFactory
 	if c.client.namespace == AllNamespaces {
 		factory = informers.NewSharedInformerFactory(c.client.kubeClient, resync)
@@ -226,23 +296,76 @@ func (c *Controller) initInformers(resync time.Duration) (informers.SharedInform
 	c.cronJobInformer = batchInformers.CronJobs()
 	cronJobHasSynced := c.cronJobInformer.Informer().HasSynced
 
+	var allowSC, allowSvc, allowEPS, allowIng bool
+	if c.client != nil && c.client.kubeClient != nil {
+		var wg sync.WaitGroup
+		wg.Add(4)
+		go func() {
+			defer wg.Done()
+			allowSC = canListResource(ctx, "storageclasses", func(pctx context.Context) error {
+				_, err := c.client.kubeClient.StorageV1().StorageClasses().List(pctx, metav1.ListOptions{Limit: 1})
+				return err
+			})
+		}()
+		go func() {
+			defer wg.Done()
+			allowSvc = canListResource(ctx, "services", func(pctx context.Context) error {
+				_, err := c.client.kubeClient.CoreV1().Services(c.client.namespace).List(pctx, metav1.ListOptions{Limit: 1})
+				return err
+			})
+		}()
+		go func() {
+			defer wg.Done()
+			allowEPS = canListResource(ctx, "endpointslices", func(pctx context.Context) error {
+				_, err := c.client.kubeClient.DiscoveryV1().EndpointSlices(c.client.namespace).List(pctx, metav1.ListOptions{Limit: 1})
+				return err
+			})
+		}()
+		go func() {
+			defer wg.Done()
+			allowIng = canListResource(ctx, "ingresses", func(pctx context.Context) error {
+				_, err := c.client.kubeClient.NetworkingV1().Ingresses(c.client.namespace).List(pctx, metav1.ListOptions{Limit: 1})
+				return err
+			})
+		}()
+		wg.Wait()
+	}
+
+	var optionalSynced []cache.InformerSynced
+	if allowSC {
+		c.storageClassInformer = factory.Storage().V1().StorageClasses()
+		optionalSynced = append(optionalSynced, c.storageClassInformer.Informer().HasSynced)
+	}
+	if allowSvc {
+		c.serviceInformer = coreInformers.Services()
+		optionalSynced = append(optionalSynced, c.serviceInformer.Informer().HasSynced)
+	}
+	if allowEPS {
+		c.endpointSliceInformer = factory.Discovery().V1().EndpointSlices()
+		optionalSynced = append(optionalSynced, c.endpointSliceInformer.Informer().HasSynced)
+	}
+	if allowIng {
+		c.ingressInformer = factory.Networking().V1().Ingresses()
+		optionalSynced = append(optionalSynced, c.ingressInformer.Informer().HasSynced)
+	}
+
 	if c.client.namespace == AllNamespaces {
 		coreSynced := []cache.InformerSynced{namespaceHasSynced, nodeHasSynced, podHasSynced}
-		extraSynced := []cache.InformerSynced{
+		extraSynced := append([]cache.InformerSynced{
 			pvHasSynced, pvcHasSynced, eventHasSynced,
 			deploymentHasSynced, daemonsetHasSynced, replicasetHasSynced,
 			statefulsetHasSynced, jobHasSynced, cronJobHasSynced,
-		}
+		}, optionalSynced...)
 		return factory, coreSynced, extraSynced
 	}
 
 	coreSynced := []cache.InformerSynced{podHasSynced}
-	extraSynced := []cache.InformerSynced{
+	extraSynced := append([]cache.InformerSynced{
 		namespaceHasSynced, nodeHasSynced,
 		pvHasSynced, pvcHasSynced, eventHasSynced,
 		deploymentHasSynced, daemonsetHasSynced, replicasetHasSynced,
 		statefulsetHasSynced, jobHasSynced, cronJobHasSynced,
-	}
+	}, optionalSynced...)
 	return factory, coreSynced, extraSynced
 }
 
@@ -260,7 +383,7 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	c.startCtx = ctx
 	c.startMu.Unlock()
 
-	factory, coreSynced, extraSynced := c.initInformers(resync)
+	factory, coreSynced, extraSynced := c.initInformers(ctx, resync)
 	factory.Start(ctx.Done())
 
 	// Wait for core resources to sync with a short timeout to prevent hanging
@@ -295,6 +418,8 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 			}
 		}
 		c.notifyEventsChanged()
+		c.notifyStorageChanged()
+		c.notifyNetworkChanged()
 	}()
 
 	c.setupSummaryHandler(ctx, c.summaryRefreshFunc)
@@ -312,12 +437,28 @@ func (c *Controller) Start(ctx context.Context, resync time.Duration) error {
 	if startEV {
 		c.eventsStarted = true
 	}
+	stFn := c.storageRefreshFunc
+	startST := !c.storageStarted && stFn != nil
+	if startST {
+		c.storageStarted = true
+	}
+	nwFn := c.networkRefreshFunc
+	startNW := !c.networkStarted && nwFn != nil
+	if startNW {
+		c.networkStarted = true
+	}
 	c.startMu.Unlock()
 	if startWL {
 		c.setupWorkloadsHandler(ctx, wlFn)
 	}
 	if startEV {
 		c.setupEventsHandler(ctx, evFn)
+	}
+	if startST {
+		c.setupStorageHandler(ctx, stFn)
+	}
+	if startNW {
+		c.setupNetworkHandler(ctx, nwFn)
 	}
 
 	// Wire up reconnect callback to trigger immediate health check when user presses Retry
@@ -351,7 +492,7 @@ func (c *Controller) StartInformers(ctx context.Context, resync, syncTimeout tim
 		syncTimeout = 15 * time.Second
 	}
 
-	factory, coreSynced, extraSynced := c.initInformers(resync)
+	factory, coreSynced, extraSynced := c.initInformers(ctx, resync)
 	factory.Start(ctx.Done())
 
 	coreCtx, coreCancel := context.WithTimeout(ctx, syncTimeout)
