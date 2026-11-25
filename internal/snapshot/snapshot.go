@@ -16,6 +16,8 @@ type Snapshot struct {
 	Pods       []PodData       `json:"pods"`
 	Workloads  *WorkloadsData  `json:"workloads,omitempty"`
 	Events     *EventsData     `json:"events,omitempty"`
+	Storage    *StorageData    `json:"storage,omitempty"`
+	Network    *NetworkData    `json:"network,omitempty"`
 	Governance *GovernanceData `json:"governance,omitempty"`
 	SLIs       *SLIData        `json:"slis,omitempty"`
 }
@@ -327,32 +329,35 @@ type NodeData struct {
 
 // PodData captures a single pod's metadata, status, and resource metrics.
 type PodData struct {
-	Namespace              string          `json:"namespace"`
-	Name                   string          `json:"name"`
-	Status                 string          `json:"status"`
-	Node                   string          `json:"node,omitempty"`
-	IP                     string          `json:"ip,omitempty"`
-	TimeSince              string          `json:"time_since"`
-	CreationTime           time.Time       `json:"creation_time"`
-	RequestedCPUMillis     int64           `json:"requested_cpu_millis"`
-	RequestedMemoryBytes   int64           `json:"requested_memory_bytes"`
-	UsageCPUMillis         int64           `json:"usage_cpu_millis"`
-	UsageMemoryBytes       int64           `json:"usage_memory_bytes"`
-	NodeAllocCPUMillis     int64           `json:"node_allocatable_cpu_millis"`
-	NodeAllocMemoryBytes   int64           `json:"node_allocatable_memory_bytes"`
-	ReadyContainers        int             `json:"ready_containers"`
-	TotalContainers        int             `json:"total_containers"`
-	Restarts               int             `json:"restarts"`
-	Volumes                int             `json:"volumes"`
-	VolMounts              int             `json:"vol_mounts"`
-	PSI                    PSIData         `json:"psi"`
-	NodePSIKernelSupported bool            `json:"node_psi_kernel_supported"`
-	CPUThrottledPct        float64         `json:"cpu_throttled_pct"`
-	ResizeStatus           string          `json:"resize_status,omitempty"`
-	DisruptionReason       string          `json:"disruption_reason,omitempty"`
-	ResourceClaims         []string        `json:"resource_claims,omitempty"`
-	FailingProbes          []PodProbeData  `json:"failing_probes,omitempty"`
-	Containers             []ContainerData `json:"containers,omitempty"`
+	Namespace              string               `json:"namespace"`
+	Name                   string               `json:"name"`
+	Status                 string               `json:"status"`
+	Node                   string               `json:"node,omitempty"`
+	IP                     string               `json:"ip,omitempty"`
+	TimeSince              string               `json:"time_since"`
+	CreationTime           time.Time            `json:"creation_time"`
+	RequestedCPUMillis     int64                `json:"requested_cpu_millis"`
+	RequestedMemoryBytes   int64                `json:"requested_memory_bytes"`
+	UsageCPUMillis         int64                `json:"usage_cpu_millis"`
+	UsageMemoryBytes       int64                `json:"usage_memory_bytes"`
+	NodeAllocCPUMillis     int64                `json:"node_allocatable_cpu_millis"`
+	NodeAllocMemoryBytes   int64                `json:"node_allocatable_memory_bytes"`
+	ReadyContainers        int                  `json:"ready_containers"`
+	TotalContainers        int                  `json:"total_containers"`
+	Restarts               int                  `json:"restarts"`
+	Volumes                int                  `json:"volumes"`
+	VolMounts              int                  `json:"vol_mounts"`
+	PSI                    PSIData              `json:"psi"`
+	NodePSIKernelSupported bool                 `json:"node_psi_kernel_supported"`
+	CPUThrottledPct        float64              `json:"cpu_throttled_pct"`
+	ResizeStatus           string               `json:"resize_status,omitempty"`
+	DisruptionReason       string               `json:"disruption_reason,omitempty"`
+	ResourceClaims         []string             `json:"resource_claims,omitempty"`
+	FailingProbes          []PodProbeData       `json:"failing_probes,omitempty"`
+	VolumeUsages           []PodVolumeUsageData `json:"volume_usages,omitempty"`
+	NetworkDropsPerSec     float64              `json:"network_drops_per_sec,omitempty"`
+	NetworkErrorsPerSec    float64              `json:"network_errors_per_sec,omitempty"`
+	Containers             []ContainerData      `json:"containers,omitempty"`
 }
 
 // ContainerData captures per-container metrics within a pod.
@@ -384,6 +389,7 @@ func (s *Snapshot) Clone() *Snapshot {
 		p.Containers = slices.Clone(p.Containers)
 		p.ResourceClaims = slices.Clone(p.ResourceClaims)
 		p.FailingProbes = slices.Clone(p.FailingProbes)
+		p.VolumeUsages = slices.Clone(p.VolumeUsages)
 		cp.Pods[i] = p
 	}
 	if s.Workloads != nil {
@@ -423,6 +429,37 @@ func (s *Snapshot) Clone() *Snapshot {
 			Available:       s.SLIs.Available,
 			ProbesAvailable: s.SLIs.ProbesAvailable,
 			Components:      comps,
+		}
+	}
+	if s.Storage != nil {
+		pvcs := make([]PVCData, len(s.Storage.PVCs))
+		for i, p := range s.Storage.PVCs {
+			p.AccessModes = slices.Clone(p.AccessModes)
+			pvcs[i] = p
+		}
+		pvs := make([]PVData, len(s.Storage.PVs))
+		for i, pv := range s.Storage.PVs {
+			pv.AccessModes = slices.Clone(pv.AccessModes)
+			pvs[i] = pv
+		}
+		cp.Storage = &StorageData{
+			Summary:        s.Storage.Summary,
+			PVCs:           pvcs,
+			PVs:            pvs,
+			StorageClasses: slices.Clone(s.Storage.StorageClasses),
+		}
+	}
+	if s.Network != nil {
+		ings := make([]IngressData, len(s.Network.Ingresses))
+		for i, ing := range s.Network.Ingresses {
+			ing.Hosts = slices.Clone(ing.Hosts)
+			ings[i] = ing
+		}
+		cp.Network = &NetworkData{
+			Summary:     s.Network.Summary,
+			Services:    slices.Clone(s.Network.Services),
+			Ingresses:   ings,
+			NodeNetwork: slices.Clone(s.Network.NodeNetwork),
 		}
 	}
 	return &cp
@@ -466,4 +503,141 @@ func (s *Snapshot) PodsOnNode(nodeName string) []PodData {
 		}
 	}
 	return out
+}
+
+// PodVolumeUsageData captures fill telemetry for a PVC mounted by a pod.
+type PodVolumeUsageData struct {
+	PVCName       string  `json:"pvc_name"`
+	UsedBytes     int64   `json:"used_bytes"`
+	CapacityBytes int64   `json:"capacity_bytes"`
+	FillPct       float64 `json:"fill_pct"`
+	HasUsage      bool    `json:"has_usage,omitempty"`
+}
+
+// StorageData captures cluster storage resources and kubelet volume telemetry.
+type StorageData struct {
+	Summary        StorageSummaryData `json:"summary"`
+	PVCs           []PVCData          `json:"pvcs,omitempty"`
+	PVs            []PVData           `json:"pvs,omitempty"`
+	StorageClasses []StorageClassData `json:"storage_classes,omitempty"`
+}
+
+// StorageSummaryData aggregates cluster-wide PVC, PV, StorageClass, and disk I/O totals.
+type StorageSummaryData struct {
+	PVCsBound              int     `json:"pvcs_bound"`
+	PVCsPending            int     `json:"pvcs_pending"`
+	PVCsTotal              int     `json:"pvcs_total"`
+	PVsBound               int     `json:"pvs_bound"`
+	PVsAvailable           int     `json:"pvs_available"`
+	PVsReleased            int     `json:"pvs_released"`
+	PVsTotal               int     `json:"pvs_total"`
+	StorageClasses         int     `json:"storage_classes"`
+	HighFillCount          int     `json:"high_fill_count"`
+	TotalCapacityBytes     int64   `json:"total_capacity_bytes"`
+	TotalUsedBytes         int64   `json:"total_used_bytes"`
+	DiskReadRateBytesPerS  float64 `json:"disk_read_rate_bytes_per_sec"`
+	DiskWriteRateBytesPerS float64 `json:"disk_write_rate_bytes_per_sec"`
+}
+
+// PVCData captures a normalized PersistentVolumeClaim with optional kubelet volume usage stats.
+type PVCData struct {
+	Namespace      string    `json:"namespace"`
+	Name           string    `json:"name"`
+	Status         string    `json:"status"`
+	StorageClass   string    `json:"storage_class,omitempty"`
+	VolumeName     string    `json:"volume_name,omitempty"`
+	AccessModes    []string  `json:"access_modes,omitempty"`
+	CapacityBytes  int64     `json:"capacity_bytes"`
+	UsedBytes      int64     `json:"used_bytes,omitempty"`
+	AvailableBytes int64     `json:"available_bytes,omitempty"`
+	FillPct        float64   `json:"fill_pct,omitempty"`
+	InodesTotal    int64     `json:"inodes_total,omitempty"`
+	InodesUsed     int64     `json:"inodes_used,omitempty"`
+	InodesUsedPct  float64   `json:"inodes_used_pct,omitempty"`
+	HasUsage       bool      `json:"has_usage,omitempty"`
+	HasInodes      bool      `json:"has_inodes,omitempty"`
+	CreationTime   time.Time `json:"creation_time"`
+	Age            string    `json:"age"`
+}
+
+// PVData captures a normalized PersistentVolume.
+type PVData struct {
+	Name          string    `json:"name"`
+	Status        string    `json:"status"`
+	CapacityBytes int64     `json:"capacity_bytes"`
+	AccessModes   []string  `json:"access_modes,omitempty"`
+	ReclaimPolicy string    `json:"reclaim_policy,omitempty"`
+	StorageClass  string    `json:"storage_class,omitempty"`
+	ClaimRef      string    `json:"claim_ref,omitempty"`
+	CreationTime  time.Time `json:"creation_time"`
+	Age           string    `json:"age"`
+}
+
+// StorageClassData captures a normalized StorageClass.
+type StorageClassData struct {
+	Name          string `json:"name"`
+	Provisioner   string `json:"provisioner"`
+	ReclaimPolicy string `json:"reclaim_policy,omitempty"`
+	BindingMode   string `json:"binding_mode,omitempty"`
+	IsDefault     bool   `json:"is_default,omitempty"`
+}
+
+// NetworkData captures cluster Services, Ingresses, EndpointSlice health, and node network error rates.
+type NetworkData struct {
+	Summary     NetworkSummaryData `json:"summary"`
+	Services    []ServiceData      `json:"services,omitempty"`
+	Ingresses   []IngressData      `json:"ingresses,omitempty"`
+	NodeNetwork []NodeNetworkData  `json:"node_network,omitempty"`
+}
+
+// NetworkSummaryData aggregates Service, Ingress, EndpointSlice alert, and cluster network rate totals.
+type NetworkSummaryData struct {
+	ServicesTotal          int     `json:"services_total"`
+	ZeroEndpointServices   int     `json:"zero_endpoint_services"`
+	IngressesTotal         int     `json:"ingresses_total"`
+	ClusterRxRateBytesPerS float64 `json:"cluster_rx_rate_bytes_per_sec"`
+	ClusterTxRateBytesPerS float64 `json:"cluster_tx_rate_bytes_per_sec"`
+	DropsPerSec            float64 `json:"drops_per_sec"`
+	ErrorsPerSec           float64 `json:"errors_per_sec"`
+	HasMetrics             bool    `json:"has_metrics,omitempty"`
+}
+
+// ServiceData captures a normalized Kubernetes Service joined with EndpointSlice readiness.
+type ServiceData struct {
+	Namespace        string    `json:"namespace"`
+	Name             string    `json:"name"`
+	Type             string    `json:"type"`
+	ClusterIP        string    `json:"cluster_ip,omitempty"`
+	ExternalIP       string    `json:"external_ip,omitempty"`
+	Ports            string    `json:"ports,omitempty"`
+	ReadyEndpoints   int       `json:"ready_endpoints"`
+	TotalEndpoints   int       `json:"total_endpoints"`
+	HasEndpoints     bool      `json:"has_endpoints,omitempty"`
+	Selectorless     bool      `json:"selectorless,omitempty"`
+	HasEndpointAlert bool      `json:"has_endpoint_alert,omitempty"`
+	CreationTime     time.Time `json:"creation_time"`
+	Age              string    `json:"age"`
+}
+
+// IngressData captures a normalized Ingress resource.
+type IngressData struct {
+	Namespace    string    `json:"namespace"`
+	Name         string    `json:"name"`
+	ClassName    string    `json:"class_name,omitempty"`
+	Hosts        []string  `json:"hosts,omitempty"`
+	Address      string    `json:"address,omitempty"`
+	Ports        string    `json:"ports,omitempty"`
+	CreationTime time.Time `json:"creation_time"`
+	Age          string    `json:"age"`
+}
+
+// NodeNetworkData captures per-node network throughput, packet drops, and interface error rates.
+type NodeNetworkData struct {
+	NodeName        string  `json:"node_name"`
+	RxRateBytesPerS float64 `json:"rx_rate_bytes_per_sec"`
+	TxRateBytesPerS float64 `json:"tx_rate_bytes_per_sec"`
+	RxDroppedPerSec float64 `json:"rx_dropped_per_sec"`
+	TxDroppedPerSec float64 `json:"tx_dropped_per_sec"`
+	RxErrorsPerSec  float64 `json:"rx_errors_per_sec"`
+	TxErrorsPerSec  float64 `json:"tx_errors_per_sec"`
 }

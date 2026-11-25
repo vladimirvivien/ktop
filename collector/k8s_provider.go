@@ -111,12 +111,76 @@ func (p *K8sSnapshotProvider) Capture(ctx context.Context) (*snapshot.Snapshot, 
 	if err == nil {
 		eventsPtr = &eventsSnap
 	}
+	storageSnap, err := ctrl.GetStorageSnapshot(ctx)
+	var storagePtr *model.StorageSnapshot
+	if err == nil {
+		storagePtr = &storageSnap
+	}
+	networkSnap, err := ctrl.GetNetworkSnapshot(ctx)
+	var networkPtr *model.NetworkSnapshot
+	if err == nil {
+		networkPtr = &networkSnap
+	}
 
 	var podMetrics []*metrics.PodMetrics
 	if p.metricsSource != nil {
 		pm, err := p.metricsSource.GetAllPodMetrics(ctx)
 		if err == nil {
 			podMetrics = pm
+		}
+	}
+
+	var podVolUsages map[string][]snapshot.PodVolumeUsageData
+	if vsp, ok := p.metricsSource.(metrics.VolumeStatsProvider); ok {
+		if volStats, err := vsp.GetAllVolumeStats(ctx); err == nil && len(volStats) > 0 {
+			if rawPods, err := ctrl.GetPodList(ctx); err == nil {
+				podVolUsages = make(map[string][]snapshot.PodVolumeUsageData)
+				for _, rp := range rawPods {
+					if rp == nil || len(rp.Spec.Volumes) == 0 {
+						continue
+					}
+					seen := make(map[string]struct{})
+					var usages []snapshot.PodVolumeUsageData
+					for _, vol := range rp.Spec.Volumes {
+						if vol.PersistentVolumeClaim == nil {
+							continue
+						}
+						claim := vol.PersistentVolumeClaim.ClaimName
+						if claim == "" {
+							continue
+						}
+						if _, dup := seen[claim]; dup {
+							continue
+						}
+						seen[claim] = struct{}{}
+						st, found := volStats[rp.Namespace+"/"+claim]
+						usages = append(usages, snapshot.PodVolumeUsageData{
+							PVCName:       claim,
+							UsedBytes:     st.UsedBytes,
+							CapacityBytes: st.CapacityBytes,
+							FillPct:       st.UsedPct,
+							HasUsage:      found && st.HasBytes,
+						})
+					}
+					if len(usages) > 0 {
+						podVolUsages[rp.Namespace+"/"+rp.Name] = usages
+					}
+				}
+			}
+		}
+	}
+
+	var podNetErrs map[string]metrics.NetworkErrorRates
+	if nep, ok := p.metricsSource.(metrics.NetworkErrorsProvider); ok {
+		podNetErrs = make(map[string]metrics.NetworkErrorRates)
+		for _, pm := range pods {
+			rates, err := nep.GetPodNetworkErrorRates(ctx, pm.Namespace, pm.Name)
+			if err != nil {
+				continue
+			}
+			if rates.RxDroppedPerSec > 0 || rates.TxDroppedPerSec > 0 || rates.RxErrorsPerSec > 0 || rates.TxErrorsPerSec > 0 {
+				podNetErrs[pm.Namespace+"/"+pm.Name] = rates
+			}
 		}
 	}
 
@@ -135,13 +199,17 @@ func (p *K8sSnapshotProvider) Capture(ctx context.Context) (*snapshot.Snapshot, 
 			Ready:             true,
 			PSIBeta:           !p.k8sC.PSIVersionOK(),
 		},
-		Summary:    summary,
-		Nodes:      nodes,
-		Pods:       pods,
-		PodMetrics: podMetrics,
-		Workloads:  workloadsPtr,
-		Events:     eventsPtr,
-		KSM:        ctrl.GetKSMSnapshot(),
-		SLI:        ctrl.GetSLISnapshot(),
+		Summary:          summary,
+		Nodes:            nodes,
+		Pods:             pods,
+		PodMetrics:       podMetrics,
+		Workloads:        workloadsPtr,
+		Events:           eventsPtr,
+		Storage:          storagePtr,
+		Network:          networkPtr,
+		PodVolumeUsages:  podVolUsages,
+		PodNetworkErrors: podNetErrs,
+		KSM:              ctrl.GetKSMSnapshot(),
+		SLI:              ctrl.GetSLISnapshot(),
 	})
 }

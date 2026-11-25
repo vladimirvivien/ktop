@@ -54,6 +54,8 @@ type Aggregate struct {
 	Pods             []snapshot.PodData       `json:"pods"`
 	Workloads        *snapshot.WorkloadsData  `json:"workloads,omitempty"`
 	Events           *snapshot.EventsData     `json:"events,omitempty"`
+	Storage          *snapshot.StorageData    `json:"storage,omitempty"`
+	Network          *snapshot.NetworkData    `json:"network,omitempty"`
 	Governance       *snapshot.GovernanceData `json:"governance,omitempty"`
 	SLIs             *snapshot.SLIData        `json:"slis,omitempty"`
 	Samples          []*snapshot.Snapshot     `json:"samples,omitempty"`
@@ -205,6 +207,8 @@ func (c *Collector) buildAggregate(start, end time.Time, intervalSec float64, sa
 		Pods:             latest.Pods,
 		Workloads:        latest.Workloads,
 		Events:           latest.Events,
+		Storage:          latest.Storage,
+		Network:          latest.Network,
 		Governance:       latest.Governance,
 		SLIs:             latest.SLIs,
 	}

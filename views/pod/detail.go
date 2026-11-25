@@ -608,7 +608,7 @@ func (p *DetailPanel) drawPodDetailSection() {
 	okColor := pal.StatusOK
 	warnColor := pal.StatusWarning
 	errColor := pal.StatusError
-	var mutedOpen, closeTag string
+	var mutedOpen, warnOpen, errOpen, closeTag string
 	sectionOpen := "[::b]"
 	nodeHint := "[n]"
 	if mono {
@@ -620,6 +620,8 @@ func (p *DetailPanel) drawPodDetailSection() {
 		nodeHint = "[::b][n][::-]"
 	} else {
 		mutedOpen = "[" + ui.TagFg(pal.StatusMuted) + "]"
+		warnOpen = "[" + ui.TagFg(pal.StatusWarning) + "]"
+		errOpen = "[" + ui.TagFg(pal.StatusError) + "]"
 		sectionOpen = "[" + ui.TagFg(pal.Accent) + "::b]"
 		closeTag = "[-]"
 		nodeHint = fmt.Sprintf("[%s][n][-]", ui.TagFg(pal.DataPrimary))
@@ -889,6 +891,37 @@ func (p *DetailPanel) drawPodDetailSection() {
 		}
 		if len(p.data.ResourceClaims) > 0 {
 			resourcesBuilder.WriteString(fmt.Sprintf("%sClaims:%s   %s\n", mutedOpen, closeTag, strings.Join(p.data.ResourceClaims, ", ")))
+		}
+		if len(p.data.VolumeUsages) > 0 {
+			pvcParts := make([]string, 0, len(p.data.VolumeUsages))
+			for _, vu := range p.data.VolumeUsages {
+				var part string
+				if vu.HasUsage {
+					text := fmt.Sprintf("%s %.0f%% (%s/%s)", vu.PVCName, vu.FillPct, ui.FormatBytes(vu.UsedBytes), ui.FormatBytes(vu.CapacityBytes))
+					switch {
+					case vu.FillPct >= 95:
+						part = errOpen + text + closeTag
+					case vu.FillPct >= 85:
+						part = warnOpen + text + closeTag
+					default:
+						part = text
+					}
+				} else {
+					part = fmt.Sprintf("%s (n/a)", vu.PVCName)
+				}
+				pvcParts = append(pvcParts, part)
+			}
+			resourcesBuilder.WriteString(fmt.Sprintf("%sPVCs:%s     %s\n", mutedOpen, closeTag, strings.Join(pvcParts, ", ")))
+		}
+		totalDrops := p.data.NetworkRxDroppedRate + p.data.NetworkTxDroppedRate
+		totalErrs := p.data.NetworkRxErrorRate + p.data.NetworkTxErrorRate
+		if totalDrops > 0 || totalErrs > 0 {
+			tagOpen := warnOpen
+			if totalErrs > 0 {
+				tagOpen = errOpen
+			}
+			netErrText := fmt.Sprintf("drops %.1f/s, errs %.1f/s", totalDrops, totalErrs)
+			resourcesBuilder.WriteString(fmt.Sprintf("%sNetErr:%s   %s%s%s\n", mutedOpen, closeTag, tagOpen, netErrText, closeTag))
 		}
 	} else {
 		resourcesBuilder.WriteString(mutedOpen + "n/a" + closeTag)

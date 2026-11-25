@@ -1122,6 +1122,44 @@ func (p *MainPanel) buildPodDetailData(ctx context.Context, podKey string, podMo
 				detailData.ContainerMetrics[cm.Name] = usage
 			}
 		}
+
+		if detailData.Pod != nil {
+			if vsp, ok := p.metricsSource.(metrics.VolumeStatsProvider); ok {
+				if statsMap, err := vsp.GetAllVolumeStats(ctx); err == nil {
+					seen := make(map[string]struct{})
+					for _, vol := range detailData.Pod.Spec.Volumes {
+						if vol.PersistentVolumeClaim == nil {
+							continue
+						}
+						claim := vol.PersistentVolumeClaim.ClaimName
+						if claim == "" {
+							continue
+						}
+						if _, dup := seen[claim]; dup {
+							continue
+						}
+						seen[claim] = struct{}{}
+						st, found := statsMap[namespace+"/"+claim]
+						detailData.VolumeUsages = append(detailData.VolumeUsages, model.PodVolumeUsage{
+							PVCName:       claim,
+							UsedBytes:     st.UsedBytes,
+							CapacityBytes: st.CapacityBytes,
+							FillPct:       st.UsedPct,
+							HasUsage:      found && st.HasBytes,
+						})
+					}
+				}
+			}
+		}
+
+		if nep, ok := p.metricsSource.(metrics.NetworkErrorsProvider); ok {
+			if rates, err := nep.GetPodNetworkErrorRates(ctx, namespace, podName); err == nil {
+				detailData.NetworkRxDroppedRate = rates.RxDroppedPerSec
+				detailData.NetworkTxDroppedRate = rates.TxDroppedPerSec
+				detailData.NetworkRxErrorRate = rates.RxErrorsPerSec
+				detailData.NetworkTxErrorRate = rates.TxErrorsPerSec
+			}
+		}
 	}
 
 	return detailData

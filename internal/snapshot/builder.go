@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/vladimirvivien/ktop/metrics"
@@ -15,15 +16,19 @@ import (
 
 // BuildInput supplies in-memory cached state and metrics to SnapshotBuilder.
 type BuildInput struct {
-	Cluster    ClusterInfo
-	Summary    model.ClusterSummary
-	Nodes      []model.NodeModel
-	Pods       []model.PodModel
-	PodMetrics []*metrics.PodMetrics
-	Workloads  *model.WorkloadsSnapshot
-	Events     *model.EventsSnapshot
-	KSM        *ksm.Snapshot
-	SLI        *sli.Snapshot
+	Cluster          ClusterInfo
+	Summary          model.ClusterSummary
+	Nodes            []model.NodeModel
+	Pods             []model.PodModel
+	PodMetrics       []*metrics.PodMetrics
+	Workloads        *model.WorkloadsSnapshot
+	Events           *model.EventsSnapshot
+	Storage          *model.StorageSnapshot
+	Network          *model.NetworkSnapshot
+	PodVolumeUsages  map[string][]PodVolumeUsageData
+	PodNetworkErrors map[string]metrics.NetworkErrorRates
+	KSM              *ksm.Snapshot
+	SLI              *sli.Snapshot
 }
 
 // Builder constructs immutable Snapshots via lock-free in-memory joins.
@@ -122,6 +127,13 @@ func (b *Builder) Build(ctx context.Context, in BuildInput) (*Snapshot, error) {
 				}
 			}
 		}
+		if vols := in.PodVolumeUsages[podKey]; len(vols) > 0 {
+			pd.VolumeUsages = slices.Clone(vols)
+		}
+		if rates, ok := in.PodNetworkErrors[podKey]; ok {
+			pd.NetworkDropsPerSec = rates.RxDroppedPerSec + rates.TxDroppedPerSec
+			pd.NetworkErrorsPerSec = rates.RxErrorsPerSec + rates.TxErrorsPerSec
+		}
 		pods = append(pods, pd)
 	}
 
@@ -139,6 +151,8 @@ func (b *Builder) Build(ctx context.Context, in BuildInput) (*Snapshot, error) {
 		Pods:       pods,
 		Workloads:  workloadsDataFromModel(in.Workloads),
 		Events:     eventsDataFromModel(in.Events),
+		Storage:    storageDataFromModel(in.Storage),
+		Network:    networkDataFromModel(in.Network),
 		Governance: governanceDataFromKSM(in.KSM),
 		SLIs:       sliDataFromSnapshot(in.SLI),
 	}, nil
@@ -850,4 +864,136 @@ func ContainerUsageFromSnapshot(snap *Snapshot, namespace, podName, containerNam
 		}
 	}
 	return "", "", false
+}
+
+func storageDataFromModel(st *model.StorageSnapshot) *StorageData {
+	if st == nil {
+		return nil
+	}
+	out := &StorageData{
+		Summary: StorageSummaryData{
+			PVCsBound:              st.Summary.PVCsBound,
+			PVCsPending:            st.Summary.PVCsPending,
+			PVCsTotal:              st.Summary.PVCsTotal,
+			PVsBound:               st.Summary.PVsBound,
+			PVsAvailable:           st.Summary.PVsAvailable,
+			PVsReleased:            st.Summary.PVsReleased,
+			PVsTotal:               st.Summary.PVsTotal,
+			StorageClasses:         st.Summary.StorageClasses,
+			HighFillCount:          st.Summary.HighFillCount,
+			TotalCapacityBytes:     st.Summary.TotalCapacity,
+			TotalUsedBytes:         st.Summary.TotalUsed,
+			DiskReadRateBytesPerS:  st.Summary.DiskReadRateBps,
+			DiskWriteRateBytesPerS: st.Summary.DiskWriteRateBps,
+		},
+		PVCs:           make([]PVCData, 0, len(st.PVCs)),
+		PVs:            make([]PVData, 0, len(st.PVs)),
+		StorageClasses: make([]StorageClassData, 0, len(st.StorageClasses)),
+	}
+	for _, pvc := range st.PVCs {
+		out.PVCs = append(out.PVCs, PVCData{
+			Namespace:      pvc.Namespace,
+			Name:           pvc.Name,
+			Status:         pvc.Status,
+			StorageClass:   pvc.StorageClass,
+			VolumeName:     pvc.VolumeName,
+			AccessModes:    slices.Clone(pvc.AccessModes),
+			CapacityBytes:  pvc.CapacityBytes,
+			UsedBytes:      pvc.UsedBytes,
+			AvailableBytes: pvc.AvailableBytes,
+			FillPct:        pvc.FillPct,
+			InodesTotal:    pvc.InodesTotal,
+			InodesUsed:     pvc.InodesUsed,
+			InodesUsedPct:  pvc.InodesUsedPct,
+			HasUsage:       pvc.HasUsage,
+			HasInodes:      pvc.HasInodes,
+			CreationTime:   pvc.CreationTime.Time,
+			Age:            pvc.Age,
+		})
+	}
+	for _, pv := range st.PVs {
+		out.PVs = append(out.PVs, PVData{
+			Name:          pv.Name,
+			Status:        pv.Status,
+			CapacityBytes: pv.CapacityBytes,
+			AccessModes:   slices.Clone(pv.AccessModes),
+			ReclaimPolicy: pv.ReclaimPolicy,
+			StorageClass:  pv.StorageClass,
+			ClaimRef:      pv.ClaimRef,
+			CreationTime:  pv.CreationTime.Time,
+			Age:           pv.Age,
+		})
+	}
+	for _, sc := range st.StorageClasses {
+		out.StorageClasses = append(out.StorageClasses, StorageClassData{
+			Name:          sc.Name,
+			Provisioner:   sc.Provisioner,
+			ReclaimPolicy: sc.ReclaimPol,
+			BindingMode:   sc.BindingMode,
+			IsDefault:     sc.IsDefault,
+		})
+	}
+	return out
+}
+
+func networkDataFromModel(netSnap *model.NetworkSnapshot) *NetworkData {
+	if netSnap == nil {
+		return nil
+	}
+	out := &NetworkData{
+		Summary: NetworkSummaryData{
+			ServicesTotal:          netSnap.Summary.ServicesTotal,
+			ZeroEndpointServices:   netSnap.Summary.ZeroEndpointServices,
+			IngressesTotal:         netSnap.Summary.IngressesTotal,
+			ClusterRxRateBytesPerS: netSnap.Summary.ClusterRxRateBps,
+			ClusterTxRateBytesPerS: netSnap.Summary.ClusterTxRateBps,
+			DropsPerSec:            netSnap.Summary.DropsPerSec,
+			ErrorsPerSec:           netSnap.Summary.ErrorsPerSec,
+			HasMetrics:             netSnap.Summary.HasMetrics,
+		},
+		Services:    make([]ServiceData, 0, len(netSnap.Services)),
+		Ingresses:   make([]IngressData, 0, len(netSnap.Ingresses)),
+		NodeNetwork: make([]NodeNetworkData, 0, len(netSnap.NodeNetwork)),
+	}
+	for _, svc := range netSnap.Services {
+		out.Services = append(out.Services, ServiceData{
+			Namespace:        svc.Namespace,
+			Name:             svc.Name,
+			Type:             svc.Type,
+			ClusterIP:        svc.ClusterIP,
+			ExternalIP:       svc.ExternalIP,
+			Ports:            svc.Ports,
+			ReadyEndpoints:   svc.ReadyEndpoints,
+			TotalEndpoints:   svc.TotalEndpoints,
+			HasEndpoints:     svc.HasEndpoints,
+			Selectorless:     svc.Selectorless,
+			HasEndpointAlert: svc.HasEndpointAlert(),
+			CreationTime:     svc.CreationTime.Time,
+			Age:              svc.Age,
+		})
+	}
+	for _, ing := range netSnap.Ingresses {
+		out.Ingresses = append(out.Ingresses, IngressData{
+			Namespace:    ing.Namespace,
+			Name:         ing.Name,
+			ClassName:    ing.ClassName,
+			Hosts:        slices.Clone(ing.Hosts),
+			Address:      ing.Address,
+			Ports:        ing.Ports,
+			CreationTime: ing.CreationTime.Time,
+			Age:          ing.Age,
+		})
+	}
+	for _, n := range netSnap.NodeNetwork {
+		out.NodeNetwork = append(out.NodeNetwork, NodeNetworkData{
+			NodeName:        n.NodeName,
+			RxRateBytesPerS: n.RxRateBps,
+			TxRateBytesPerS: n.TxRateBps,
+			RxDroppedPerSec: n.RxDroppedSec,
+			TxDroppedPerSec: n.TxDroppedSec,
+			RxErrorsPerSec:  n.RxErrorsSec,
+			TxErrorsPerSec:  n.TxErrorsSec,
+		})
+	}
+	return out
 }
