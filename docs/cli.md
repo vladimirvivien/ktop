@@ -28,7 +28,7 @@ ktop uses your kubeconfig file (from `$KUBECONFIG` or `~/.kube/config`) to conne
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--metrics-source` | `prometheus` | Source: `prometheus`, `metrics-server`, or `none` |
-| `--prometheus-scrape-interval` | `15s` | How often to scrape (min: 5s) |
+| `--prometheus-scrape-interval` | `5s` | How often to scrape (min: 5s) |
 | `--prometheus-retention` | `1h` | How long to keep metrics (min: 5m) |
 | `--prometheus-max-samples` | `10000` | Max samples per time series |
 | `--prometheus-components` | `kubelet,cadvisor` | Components to scrape |
@@ -177,14 +177,14 @@ ktop --metrics-source=prometheus --prometheus-retention=6h
 # Faster scraping
 ktop --metrics-source=prometheus --prometheus-scrape-interval=10s
 
-# Scrape only kubelet (lower memory usage)
-ktop --metrics-source=prometheus --prometheus-components=kubelet
-
-# Minimal memory footprint
+# Low-memory profile for large or high-churn clusters
 ktop --metrics-source=prometheus \
-     --prometheus-components=kubelet \
-     --prometheus-retention=30m \
-     --prometheus-max-samples=5000
+     --prometheus-scrape-interval=15s \
+     --prometheus-retention=10m \
+     --prometheus-max-samples=300
+
+# Lowest memory footprint (CPU/memory only via Metrics Server)
+ktop --metrics-source=metrics-server
 ```
 
 ### Authentication
